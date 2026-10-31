@@ -38,6 +38,8 @@ async function main() {
 
   startLoop(
     (dt) => {
+      // gamepad-only players: any button press also unlocks / resumes audio
+      if (G.input.anyPressed && (!G.audio.ctx || G.audio.ctx.state !== 'running')) { const first = !G.audio.ctx; G.audio.unlock(); if (first) G.music.resume(); }
       for (let i = 0; i < SPEED; i++) {
         G.time += dt;
         G.scenes.update(dt);
