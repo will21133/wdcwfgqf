@@ -14,6 +14,8 @@ async function loadFonts() {
   document.fonts.add(f8);
 }
 
+const SPEED = Math.max(1, Math.min(8, Number(new URLSearchParams(location.search).get('speed') ?? 1)));
+
 async function main() {
   const screen = document.getElementById('screen') as HTMLCanvasElement;
   await loadFonts();
@@ -34,9 +36,11 @@ async function main() {
 
   startLoop(
     (dt) => {
-      G.time += dt;
-      G.scenes.update(dt);
-      G.input.endTick();
+      for (let i = 0; i < SPEED; i++) {
+        G.time += dt;
+        G.scenes.update(dt);
+        G.input.endTick();
+      }
     },
     () => {
       G.frame++;

@@ -218,6 +218,7 @@ export class Player extends Actor implements Wielder {
 
   private updateAim(mv: { x: number; y: number }) {
     const inp = G.input;
+    if (inp.bot) { if (inp.bot.aimX || inp.bot.aimY) this.aim = Math.atan2(inp.bot.aimY, inp.bot.aimX); return; }
     if (inp.mouseAim) {
       const v = this.world.cam.view();
       const fx = Math.floor(v.x), fy = Math.floor(v.y);

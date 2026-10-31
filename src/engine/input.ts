@@ -56,6 +56,8 @@ export class Input {
   padAimX = 0; padAimY = 0;
   padConnected = false;
 
+  /** QA autopilot override */
+  bot: { move: { x: number; y: number }; aimX: number; aimY: number; held: Set<Action>; pressed: Set<Action> } | null = null;
   /** last key code pressed (for rebinding UI) */
   lastPressedCode: string | null = null;
   /** any key / button pressed this tick */
@@ -143,12 +145,14 @@ export class Input {
   }
 
   down(a: Action): boolean {
+    if (this.bot) return this.bot.held.has(a);
     for (const b of this.bindings[a]) if (this.held.has(b)) return true;
     for (const i of PAD[a]) if (this.padHeld.has(i)) return true;
     return false;
   }
 
   pressed(a: Action): boolean {
+    if (this.bot) return this.bot.pressed.has(a);
     for (const b of this.bindings[a]) if (this.pressedLatch.has(b)) return true;
     for (const i of PAD[a]) if (this.padPressed.has(i)) return true;
     return false;
@@ -161,12 +165,14 @@ export class Input {
 
   /** consume a single press so two systems don't both react */
   consume(a: Action) {
+    if (this.bot) this.bot.pressed.delete(a);
     for (const b of this.bindings[a]) this.pressedLatch.delete(b);
     for (const i of PAD[a]) this.padPressed.delete(i);
   }
 
   /** movement vector, length <= 1 */
   move(): { x: number; y: number } {
+    if (this.bot) return this.bot.move;
     let x = 0, y = 0;
     if (this.down('left')) x -= 1;
     if (this.down('right')) x += 1;

@@ -17,6 +17,7 @@ import { RNG } from '../../engine/rng';
 import { damp, clamp, ease } from '../../engine/math';
 import { Dummy } from '../entities/enemies/gearworks';
 import { setupTutorial } from '../rooms/tutorial';
+import { botStep } from '../qa/bot';
 import { BIOMES } from '../../art/biomes';
 import { Overlay, ChoiceOverlay, Toast } from '../ui/overlay';
 import { PauseMenu } from '../ui/pause';
@@ -40,6 +41,7 @@ import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
+const BOT = G.debug.has('bot');
 const ALL_PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
 
 export class GameScene implements Scene, RoomHost {
@@ -317,6 +319,7 @@ export class GameScene implements Scene, RoomHost {
   }
 
   update(dt: number) {
+    if (BOT) botStep(this, dt);
     this.t += dt;
     const w = this.world;
     const p = w.player!;
@@ -347,6 +350,7 @@ export class GameScene implements Scene, RoomHost {
         this.waveDelay -= dt;
         if (this.waveDelay <= 0) { this.waveIdx++; this.waveDelay = 0.8; this.spawnWave(); }
       } else if (alive === 0 && this.waveIdx >= this.waves.length - 1) this.onClear();
+      this.unstick(dt);
     }
     const combat = !this.cleared && w.aliveEnemies.length > 0;
     G.music.layer('combat', combat ? 1 : 0, combat ? 0.8 : 3);
@@ -363,6 +367,23 @@ export class GameScene implements Scene, RoomHost {
         this.bankStats();
         if (this.onDeath) this.onDeath(this.run);
         else G.scenes.go(() => new GameScene(new Run(), { kind: 'combat', reward: 'memory', patron: 'oren' }), 'clock', 0.6);
+      }
+    }
+  }
+
+  /** failsafe: an enemy nobody has touched for 40s gets pulled back to reachable ground */
+  private stuckT = new Map<number, number>();
+  private unstick(dt: number) {
+    const w = this.world, p = w.player!;
+    for (const e of w.aliveEnemies) {
+      if (e.isBoss) continue;
+      const t = (this.stuckT.get(e.id) ?? 0) + dt;
+      this.stuckT.set(e.id, e.hp < e.maxHp && e.flash > 0 ? 0 : t);
+      if (t > 40) {
+        const spots = w.map.spawnable.filter((s) => Math.hypot(s.tx * TS + 8 - p.x, s.ty * TS + 8 - p.y) < 160);
+        const s = spots.length ? this.rng.pick(spots) : w.map.spawnable[0];
+        if (s) { e.x = s.tx * TS + 8; e.y = s.ty * TS + 8; (e as any).spawnT = 0.6; }
+        this.stuckT.set(e.id, 0);
       }
     }
   }
