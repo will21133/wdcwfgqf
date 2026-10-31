@@ -7,6 +7,7 @@ import { G, sfx } from '../G';
 import { Recorder, Recording } from '../systems/rewind';
 import { Weapon, Wielder, Pose } from '../weapons/weapon';
 import { Rapier } from '../weapons/rapier';
+import { makeWeapon } from '../weapons';
 import { Scarf } from './scarf';
 import { Afterimage } from './fxents';
 import { Echo } from './echo';
@@ -91,6 +92,7 @@ export class Player extends Actor implements Wielder {
 
   added() {
     this.world.player = this;
+    this.weapon = makeWeapon(this.run.weapon);
     this.hp = this.run.hp;
     this.maxHp = this.mods.maxHp;
     this.dashCharges = this.mods.dashCharges;

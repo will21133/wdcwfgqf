@@ -34,6 +34,7 @@ import { ICONS, patronSigil } from '../../art/sprites/icons';
 import { rumble } from '../../engine/rumble';
 import { makeBoss } from '../world/bosses';
 import { markSeen } from '../save';
+import { WEAPON_INFO } from '../ui/metaPanels';
 import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
 
@@ -171,7 +172,7 @@ export class GameScene implements Scene, RoomHost {
     this.openChoice(calibrationChoices(this.run, this.rng, (id) => {
       CAL_BY_ID[id]?.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, id) });
       this.syncPlayer();
-    }), { title: UI.calibration, sub: L('秒针细剑', 'Second-Hand Rapier'), icon: ICONS.whetstone, color: 'K9' });
+    }), { title: UI.calibration, sub: WEAPON_INFO.find((x) => x.id === this.run.weapon)?.name, icon: ICONS.whetstone, color: 'K9' });
   }
 
   grantPart(p: PartDef) {

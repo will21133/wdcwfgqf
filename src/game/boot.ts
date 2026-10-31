@@ -76,6 +76,7 @@ export async function boot() {
   run.roomIndex = Number(G.debug.get('roomIndex') ?? 0);
   if (G.debug.get('god')) { run.bonuses.push({ apply: (m) => { m.maxHp = 9999; } }); run.recompute(); run.hp = 9999; }
   if (G.debug.get('brass')) run.brass = Number(G.debug.get('brass'));
+  if (G.debug.get('weapon')) run.weapon = G.debug.get('weapon')!;
   const gs = new GameScene(run, { kind, reward: 'memory', patron: (G.debug.get('patron') as any) ?? 'oren' }, seed);
   Flow.wire(gs);
   G.scenes.set(gs);
