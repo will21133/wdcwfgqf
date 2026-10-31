@@ -1,0 +1,2 @@
+[{"t":0,"move":[10,10]},{"t":11000,"press":"ArrowDown"},{"t":11300,"press":"ArrowDown"},{"t":11600,"press":"Enter"},
+{"t":12200,"press":"ArrowUp"},{"t":12500,"press":"ArrowUp"},{"t":12800,"shot":"settings"},{"t":13000,"press":"Enter"},{"t":13800,"shot":"controls"}]

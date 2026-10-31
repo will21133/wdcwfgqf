@@ -20,7 +20,7 @@ import { setupTutorial } from '../rooms/tutorial';
 import { botStep } from '../qa/bot';
 import { BIOMES } from '../../art/biomes';
 import { Overlay, ChoiceOverlay, Toast } from '../ui/overlay';
-import { PauseMenu } from '../ui/pause';
+import { PauseMenu, RunInfoPanel } from '../ui/pause';
 import {
   RoomOption, nextOptions, rewardLook, memoryChoices, hourglassChoices, calibrationChoices, rollPart, partLook, Choice,
   ROOMS_PER_FLOOR, FLOORS, rewardKindLook,
@@ -332,6 +332,7 @@ export class GameScene implements Scene, RoomHost {
       if (this.overlays.some((o) => o.blocks)) { this.hud.update(dt, w); return; }
     }
     if (G.input.pressed('pause') && p.hp > 0) { this.overlays.push(new PauseMenu(this)); return; }
+    if (G.input.pressed('info') && p.hp > 0) { this.overlays.push(new RunInfoPanel(this.run)); return; }
     w.update(dt);
     if (!w.frozen && !this.cleared) w.bus.emit('tick', { dt });
     if (this.boss) {

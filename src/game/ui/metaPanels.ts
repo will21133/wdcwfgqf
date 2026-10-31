@@ -9,7 +9,8 @@ import { profile, saveProfile, NODES, NodeDef, nodeLevel } from '../save';
 import { drawHint } from './prompts';
 import { col } from '../../art/palette';
 import { gearFrames, BRASS_GEAR, IRON_GEAR } from '../../art/gear';
-import type { Sprite } from '../../engine/gfx/sprite';
+import { Sprite, Sprite as SpriteCls } from '../../engine/gfx/sprite';
+import { makeCanvas } from '../../engine/gfx/canvas';
 import { ROSTERS } from '../world/director';
 import { MEMORY_LIST, PATRONS } from '../progression/memories';
 import { PARTS, PARTS_BY_ID } from '../progression/parts';
@@ -181,6 +182,37 @@ export class WeaponOverlay implements Overlay {
 }
 
 // ───────────────────────── Ledger (codex) ─────────────────────────
+/** render an enemy's real sprite into a small icon by instantiating it against a stub world */
+const enemyIconCache = new Map<string, Sprite | null>();
+function enemyIcon(def: { id: string; make: (x: number, y: number) => unknown }): Sprite | null {
+  if (enemyIconCache.has(def.id)) return enemyIconCache.get(def.id)!;
+  let out: Sprite | null = null;
+  try {
+    const S = 64;
+    const [cv, ctx] = makeCanvas(S, S);
+    const noop = () => {};
+    const fake = { w: ctx, u: ctx, g: ctx, ui2: ctx, lightAt: noop, glowAt: noop, visible: () => true, params: {} } as any;
+    const e = def.make(S / 2, S - 6) as any;
+    e.world = { time: 0, player: null, map: { solidAt: () => false, pitAt: () => false, los: () => true }, particles: { spawn: noop }, fx: {}, enemies: [], entities: [], bus: { on: noop, off: noop, emit: noop } };
+    e.spawnT = 0; e.age = 0.5; e.flash = 0;
+    e.render(fake);
+    // trim to content
+    const id = ctx.getImageData(0, 0, S, S).data;
+    let x0 = S, y0 = S, x1 = -1, y1 = -1;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (id[(y * S + x) * 4 + 3] > 0) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+    if (x1 >= 0) {
+      const w = x1 - x0 + 1, h = y1 - y0 + 1;
+      const k = Math.max(1, Math.ceil(Math.max(w, h) / 30));
+      const [c2, c2x] = makeCanvas(Math.ceil(w / k), Math.ceil(h / k));
+      c2x.imageSmoothingEnabled = false;
+      c2x.drawImage(cv, x0, y0, w, h, 0, 0, Math.ceil(w / k), Math.ceil(h / k));
+      out = new SpriteCls(c2, Math.ceil(w / k) / 2, Math.ceil(h / k) / 2);
+    }
+  } catch { out = null; }
+  enemyIconCache.set(def.id, out);
+  return out;
+}
+
 interface Entry { id: string; icon: Sprite | null; name: string; desc: string; seen: boolean; color: string }
 
 export class LedgerOverlay implements Overlay {
@@ -190,7 +222,7 @@ export class LedgerOverlay implements Overlay {
   tabs: { name: L10n; entries: () => Entry[] }[] = [
     {
       name: L('敌人', 'Enemies'), entries: () => ROSTERS.flat().map((d) => ({
-        id: d.id, icon: null, name: d.name ? tr(d.name) : d.id, desc: d.desc ? tr(d.desc) : '', seen: profile.seen.enemies.includes(d.id), color: d.elite ? 'O3' : 'K9',
+        id: d.id, icon: profile.seen.enemies.includes(d.id) ? enemyIcon(d) : null, name: d.name ? tr(d.name) : d.id, desc: d.desc ? tr(d.desc) : '', seen: profile.seen.enemies.includes(d.id), color: d.elite ? 'O3' : 'K9',
       })),
     },
     {

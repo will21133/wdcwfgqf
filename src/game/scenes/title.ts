@@ -222,8 +222,8 @@ export class TitleScene implements Scene {
 
   render(r: Renderer) {
     r.params.lighting = false;
-    r.params.bloom = 0.6;
-    r.params.bloomThreshold = 0.7;
+    r.params.bloom = 0.35;
+    r.params.bloomThreshold = 0.84;
     r.params.vignette = 0.5;
     r.params.saturation = 1;
     r.params.tint = [1, 1, 1];
@@ -260,7 +260,7 @@ export class TitleScene implements Scene {
     hand(sa, 48, 1, 'R3', 10);
     w.fillStyle = col('R3'); w.beginPath(); w.arc(cx - Math.cos(sa) * 10 + 0.5, cy - Math.sin(sa) * 10 + 0.5, 2.5, 0, TAU); w.fill();
     w.fillStyle = col('B4'); w.fillRect(cx - 2, cy - 2, 5, 5);
-    r.glowAt(cx, cy, 70, 'S4', 0.25);
+    r.glowAt(cx, cy, 70, 'S4', 0.12);
     w.drawImage(CITY!, 0, Math.round(rise * 0.4));
     // frozen rain: still, glinting
     for (const d of this.drops) {

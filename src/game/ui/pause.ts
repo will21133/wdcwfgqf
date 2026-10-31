@@ -16,10 +16,11 @@ import { partLook } from '../progression/rewards';
 import type { Run } from '../run';
 import type { Sprite } from '../../engine/gfx/sprite';
 import { rumble } from '../../engine/rumble';
+import { ControlsPanel } from './controls';
 
 interface PauseHost { run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void; inHub?: boolean }
 
-export function settingsItems(onBack: () => void): MenuItem[] {
+export function settingsItems(onBack: () => void, openControls?: () => void): MenuItem[] {
   const set = <K extends keyof typeof settings>(k: K) => (v: (typeof settings)[K]) => { settings[k] = v; saveSettings(); };
   return [
     { label: () => tr(L('主音量', 'Master volume')), kind: 'slider', get: () => settings.master, set: set('master') },
@@ -32,6 +33,7 @@ export function settingsItems(onBack: () => void): MenuItem[] {
     { label: () => tr(L('整数倍像素缩放', 'Pixel-perfect scaling')), kind: 'toggle', get: () => settings.pixelPerfect, set: set('pixelPerfect'), hint: () => tr(L('关闭时画面铺满窗口（锐利双线性）。', 'When off, the image fills the window (sharp bilinear).')) },
     { label: () => tr(L('闪光效果', 'Flash effects')), kind: 'toggle', get: () => settings.flashes, set: set('flashes'), hint: () => tr(L('关闭全屏闪白（光敏友好）。', 'Disable full-screen flashes (photosensitivity).')) },
     { label: () => tr(L('瞄准辅助（手柄）', 'Aim assist (gamepad)')), kind: 'toggle', get: () => settings.aimAssist, set: set('aimAssist') },
+    { label: () => tr(L('按键设置', 'Controls')), act: () => openControls?.() },
     { label: () => tr(L('全屏', 'Fullscreen')), act: () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); } },
     { label: () => tr(L('返回', 'Back')), act: onBack },
   ];
@@ -41,8 +43,10 @@ export class SettingsPanel implements Overlay {
   blocks = true;
   done = false;
   list: MenuList;
-  constructor() { this.list = new MenuList(settingsItems(() => (this.done = true))); }
+  sub: Overlay | null = null;
+  constructor() { this.list = new MenuList(settingsItems(() => (this.done = true), () => (this.sub = new ControlsPanel()))); }
   update(dt: number) {
+    if (this.sub) { if (!this.sub.update(dt)) this.sub = null; return true; }
     if (G.input.pressed('cancel') || G.input.pressed('pause')) { G.input.consume('pause'); sfx('uiBack'); return false; }
     this.list.update(dt);
     return !this.done;
@@ -50,10 +54,11 @@ export class SettingsPanel implements Overlay {
   render(r: Renderer) {
     const ctx = r.ui2;
     ctx.globalAlpha = 0.6; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
-    panel(ctx, 150, 34, 340, 292);
-    G.font.draw(ctx, tr(UI.settings), 320, 44, { align: 'center', color: 'B5' });
-    rect(ctx, 166, 62, 308, 1, 'B1');
-    this.list.render(ctx, 172, 72, 296);
+    panel(ctx, 150, 20, 340, 320);
+    G.font.draw(ctx, tr(UI.settings), 320, 30, { align: 'center', color: 'B5' });
+    rect(ctx, 166, 48, 308, 1, 'B1');
+    this.list.render(ctx, 172, 58, 296);
+    this.sub?.render(r);
   }
 }
 

@@ -76,6 +76,14 @@ export async function boot() {
     return;
   }
   if (scene === 'title') { Flow.title(); return; }
+  if (scene === 'controls') {
+    const { TitleScene } = await import('./scenes/title');
+    const { ControlsPanel } = await import('./ui/controls');
+    const t = new TitleScene({ start() {}, credits() {}, ledger() {} });
+    t.overlays.push(new ControlsPanel());
+    G.scenes.set(t);
+    return;
+  }
   if (scene === 'hub') { Flow.hub('start'); return; }
   if (scene === 'intro') { Flow.intro(); return; }
   const direct = ['seed', 'room', 'floor', 'spawn', 'offer', 'god'].some((k) => G.debug.has(k));

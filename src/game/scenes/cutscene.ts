@@ -19,7 +19,7 @@ const clockFace = (ctx: CanvasRenderingContext2D, cx: number, cy: number, r: num
   for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
     const d = Math.hypot(x, y);
     if (d > r) continue;
-    ctx.fillStyle = col(d > r - 3 ? (y < 0 ? 'B5' : 'B3') : d > r * 0.8 ? 'S4' : 'K10');
+    ctx.fillStyle = col(d > r - 3 ? (y < 0 ? 'B5' : 'B3') : d > r * 0.8 ? 'S3' : d > r * 0.45 ? 'S4' : 'K9');
     ctx.fillRect(cx + x, cy + y, 1, 1);
   }
   for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU; ctx.fillStyle = col('K1'); ctx.fillRect(Math.round(cx + Math.cos(a) * (r - 7)) - 1, Math.round(cy + Math.sin(a) * (r - 7)) - 1, 2, 2); }
@@ -112,7 +112,7 @@ export class CutsceneScene implements Scene {
     }
   }
   render(r: Renderer) {
-    r.params.lighting = false; r.params.bloom = 0.5; r.params.vignette = 0.6; r.params.saturation = 1; r.params.tint = [1, 1, 1]; r.params.lift = [0, 0, 0];
+    r.params.lighting = false; r.params.bloom = 0.28; r.params.bloomThreshold = 0.86; r.params.vignette = 0.6; r.params.saturation = 1; r.params.tint = [1, 1, 1]; r.params.lift = [0, 0, 0];
     r.params.rewind = 0; r.params.ca = 0; r.params.fade = 0;
     r.begin(0, 0, col('K0'));
     const s = this.slides[this.i];
