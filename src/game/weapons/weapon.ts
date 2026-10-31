@@ -1,6 +1,16 @@
 import type { World } from '../world/world';
 import type { Renderer } from '../../engine/gfx/renderer';
 import { frand } from '../../engine/rng';
+import { loOf, ownerPlayer } from '../players';
+import type { Loadout } from '../run';
+import type { Player } from '../entities/player';
+
+/** the loadout behind a wielder (a player, or the hand an echo belongs to); slot I as a fallback */
+export function wielderLo(w: Wielder): Loadout {
+  return loOf(w) ?? w.world.run!.lo(w.world.player?.slot ?? 0);
+}
+/** the hand behind a wielder, for bus events */
+export function wielderPlayer(w: Wielder): Player | undefined { return ownerPlayer(w) ?? undefined; }
 
 /** Anything that can swing a weapon: the player or one of its echoes. */
 export interface Wielder {
@@ -143,7 +153,7 @@ export abstract class Weapon {
 
   /** damage helper */
   protected roll(w: Wielder, base: number, special = false): { amount: number; crit: boolean } {
-    const m = w.world.run!.mods;
+    const m = wielderLo(w).mods;
     let a = base * m.dmg * (special ? m.specialDmg : 1) * w.dmgScale;
     if (w.lastSecond) a *= 2;
     const crit = frand() < m.critChance;

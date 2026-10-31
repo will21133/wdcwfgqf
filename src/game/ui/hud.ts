@@ -21,12 +21,13 @@ export class HUD {
     const p = w.player;
     const run = w.run!;
     if (!p) return;
+    const lo = run.lo(p.slot);
     if (this.hpShown < 0) { this.hpShown = p.hp; this.hpTrail = p.hp; }
     this.hpShown = damp(this.hpShown, p.hp, 25, dt);
     if (p.hp >= this.hpTrail) this.hpTrail = p.hp;
     else this.hpTrail = Math.max(p.hp, this.hpTrail - dt * 30);
-    if (run.charges > this.lastCharges) this.chargeFlash[run.charges - 1] = 0.5;
-    this.lastCharges = run.charges;
+    if (lo.charges > this.lastCharges) this.chargeFlash[lo.charges - 1] = 0.5;
+    this.lastCharges = lo.charges;
     for (let i = 0; i < this.chargeFlash.length; i++) if (this.chargeFlash[i] > 0) this.chargeFlash[i] -= dt;
     this.brassShown = damp(this.brassShown, run.brass, 12, dt);
   }
@@ -36,7 +37,9 @@ export class HUD {
     const p = w.player;
     const run = w.run!;
     if (!p) return;
-    const m = run.mods;
+    // F2c replaces this with one pod per hand (GDD2 §12.2); until then it shows the first standing hand
+    const lo = run.lo(p.slot);
+    const m = lo.mods;
     ctx.globalAlpha = this.alpha;
     // ── HP ──
     const x = 10, y = 10;
@@ -63,9 +66,9 @@ export class HUD {
     const hy = y + 14;
     for (let i = 0; i < m.rewindCharges; i++) {
       const hx = bx + i * 12;
-      const full = i < run.charges;
-      const filling = i === run.charges;
-      hourglass(ctx, hx, hy, filling ? run.sandFrac : 0, full, G.time, !full && !filling);
+      const full = i < lo.charges;
+      const filling = i === lo.charges;
+      hourglass(ctx, hx, hy, filling ? lo.sandFrac : 0, full, G.time, !full && !filling);
       if (full) {
         r.ui2.globalCompositeOperation = 'lighter';
         ctx.fillStyle = col('C1');
@@ -106,7 +109,7 @@ export class HUD {
       const y0 = 360 - 26;
       slots.forEach((sl, i) => {
         const x = 10 + i * 22;
-        const om = run.memories.find((m) => MEMORIES[m.id]?.slot === sl);
+        const om = lo.memories.find((m) => MEMORIES[m.id]?.slot === sl);
         rect(ctx, x - 1, y0 - 1, 20, 20, 'K0');
         rect(ctx, x, y0, 18, 18, om ? 'K2' : 'K1');
         if (om) {
@@ -119,12 +122,12 @@ export class HUD {
           g.forEach((row, j) => { for (let k = 0; k < row.length; k++) if (row[k] !== '.') ctx.fillRect(x + 5 + k, y0 + 5 + j, 1, 1); });
         }
       });
-      const extra = run.memories.filter((m) => !slots.includes(MEMORIES[m.id]?.slot)).length;
+      const extra = lo.memories.filter((m) => !slots.includes(MEMORIES[m.id]?.slot)).length;
       if (extra) G.digits.draw(ctx, '+' + extra, 10 + 5 * 22, y0 + 9 - 4.5 * Text.k, { fill: 'K8' });
-      if (run.parts.length) {
+      if (lo.parts.length) {
         const px = 10 + 5 * 22 + (extra ? 4 + Math.ceil(G.digits.measure('+' + extra)) : 2);
         ctx.drawImage(partIcon('gear').img, px, y0 + 1);
-        G.digits.draw(ctx, String(run.parts.length), px + 17, y0 + 9 - 4.5 * Text.k, { fill: 'B5' });
+        G.digits.draw(ctx, String(lo.parts.length), px + 17, y0 + 9 - 4.5 * Text.k, { fill: 'B5' });
       }
     }
 

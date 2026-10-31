@@ -24,17 +24,20 @@ import { frand } from '../../engine/rng';
 import { Text } from '../ui/text';
 import { drawPanel } from '../ui/widgets';
 import { rect } from '../ui/draw';
+import type { Player } from '../entities/player';
+import type { Loadout } from '../run';
 
+/** the room's host; `who` is the hand a reward belongs to (default: the first one standing) */
 export interface RoomHost {
   world: World;
   run: Run;
   rng: RNG;
   openOverlay(o: Overlay): void;
-  openChoice(choices: Choice[], header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string }, after?: () => void): void;
-  offerMemory(patron: Patron, boost?: number): void;
-  offerHourglass(): void;
-  offerCalibration(): void;
-  grantPart(p: PartDef): void;
+  openChoice(choices: Choice[], header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string }, after?: () => void, regen?: () => Choice[], who?: Player | null): void;
+  offerMemory(patron: Patron, boost?: number, who?: Player | null): void;
+  offerHourglass(who?: Player | null): void;
+  offerCalibration(who?: Player | null): void;
+  grantPart(p: PartDef, who?: Player | null): void;
   toast(icon: Sprite | null, title: string, desc: string, color?: string): void;
   unlockDoors(): void;
   center(): { x: number; y: number };
@@ -45,11 +48,11 @@ let MANMAN: Sprite[] | null = null;
 
 class Manman extends Entity {
   t = 0; say: string; sayT = 4;
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, line: L10n) {
     super();
     MANMAN ??= buildManman();
     this.x = x; this.y = y;
-    this.say = tr(SHOP_LINES[Math.floor(Math.random() * SHOP_LINES.length)]);
+    this.say = tr(line);
   }
   update(dt: number) { this.t += dt; this.sayT -= dt; }
   renderGround(r: Renderer) { r.w.fillStyle = 'rgba(11,10,20,0.45)'; r.w.beginPath(); r.w.ellipse(Math.round(this.x), Math.round(this.y), 13, 4, 0, 0, Math.PI * 2); r.w.fill(); }
@@ -93,27 +96,34 @@ const SHOP_LINES: L10n[] = [
 class ShopItem extends Interactable {
   sold = false;
   t = frand(0, 5);
-  constructor(x: number, y: number, private icon: Sprite, private color: string, public name: L10n, private desc: L10n, public price: number, private onBuy: () => void, private host: RoomHost) {
+  /** base: the floor's price before anyone's Shop discount */
+  constructor(x: number, y: number, private icon: Sprite, private color: string, public name: L10n, private desc: L10n, public base: number, private onBuy: (who: Player | null) => void, private host: RoomHost) {
     super();
     this.x = x; this.y = y;
     this.range = 18;
   }
+  /** the price for a hand (its own Shop multiplier); the shared purse pays */
+  priceFor(lo: Loadout | null) { return Math.round(this.base * (lo?.mods.shopMul ?? 1)); }
+  /** what the nearest hand would pay */
+  get price() { const p = this.nearBy ?? this.world.player; return this.priceFor(p ? this.host.run.lo(p.slot) : null); }
   prompt() { return this.sold ? tr(UI.soldOut) : `${tr(this.name)}  ${this.price}`; }
   interact() {
     if (this.sold) return;
     const run = this.host.run;
-    if (run.brass < this.price) {
+    const who = this.user;
+    const price = this.priceFor(who ? run.lo(who.slot) : null);
+    if (!run.spendBrass(price)) {
       sfx('denied');
       this.world.fx.banner(this.x, this.y - 40, tr(UI.notEnough), 'R4', 0.8);
       return;
     }
-    run.brass -= this.price;
     this.sold = true;
     this.enabled = false;
     sfx('coin');
     sfx('pickupBig', { vol: 0.5 });
     this.world.fx.burst(this.x, this.y - 16, 16, ['W', this.color], 120, 0.4);
-    this.onBuy();
+    // what you buy is yours (GDD2 §5.8)
+    this.onBuy(who);
   }
   update(dt: number) { this.t += dt; super.update(dt); }
   render(r: Renderer) {
@@ -148,25 +158,26 @@ class ShopItem extends Interactable {
 export function setupShop(h: RoomHost) {
   const w = h.world, run = h.run, rng = h.rng;
   const c = h.center();
-  w.add(new Manman(c.x, c.y - 52));
-  const priceMul = run.mods.shopMul * (1 + run.floor * 0.12);
-  const P = (n: number) => Math.round(n * priceMul);
-  const items: { icon: Sprite; color: string; name: L10n; desc: L10n; price: number; buy: () => void }[] = [];
-  // two parts (one may be shop-only)
-  for (let i = 0; i < 2; i++) {
+  w.add(new Manman(c.x, c.y - 52, w.rng.pick(SHOP_LINES)));
+  const priceMul = 1 + run.floor * 0.12;
+  const P = (n: number) => n * priceMul;
+  const items: { icon: Sprite; color: string; name: L10n; desc: L10n; price: number; buy: (who: Player | null) => void }[] = [];
+  // two parts (one may be shop-only); one more for every extra hand (GDD2 §5.8)
+  const parts = 2 + Math.max(0, w.playerCount - 1);
+  for (let i = 0; i < parts; i++) {
     const p = rollPart(run, rng, { shop: true, allowCursed: false });
-    if (!p) continue;
+    if (!p || items.some((it) => it.name === p.name)) continue;
     const look = partLook(p);
-    items.push({ icon: look.icon, color: look.color, name: p.name, desc: p.desc, price: P([70, 110, 160][p.rarity]), buy: () => h.grantPart(p) });
+    items.push({ icon: look.icon, color: look.color, name: p.name, desc: p.desc, price: P([70, 110, 160][p.rarity]), buy: (who) => h.grantPart(p, who) });
   }
   // a memory
   const pat = pickPatron(run, rng);
-  items.push({ icon: patronSigil(pat), color: PATRONS[pat].color, name: L(`${PATRONS[pat].name.zh}的回忆`, `${PATRONS[pat].name.en}'s Memory`), desc: L('选择一段回忆。', 'Choose a Memory.'), price: P(130), buy: () => h.offerMemory(pat) });
-  // oil (heal)
-  items.push({ icon: ICONS.oil, color: 'G3', name: L('一壶机油', 'Can of Oil'), desc: L('恢复 {y:35%} 生命。', 'Heal {y:35%} HP.'), price: P(45), buy: () => { const p = w.player!; const amt = Math.round(p.maxHp * 0.35); p.hp = Math.min(p.maxHp, p.hp + amt); w.fx.number(p.x, p.y - 26, amt, 'G4', true); sfx('heal'); } });
+  items.push({ icon: patronSigil(pat), color: PATRONS[pat].color, name: L(`${PATRONS[pat].name.zh}的回忆`, `${PATRONS[pat].name.en}'s Memory`), desc: L('选择一段回忆。', 'Choose a Memory.'), price: P(130), buy: (who) => h.offerMemory(pat, 0, who) });
+  // oil (heal) — the whole team
+  items.push({ icon: ICONS.oil, color: 'G3', name: L('一壶机油', 'Can of Oil'), desc: L('恢复 {y:35%} 生命。', 'Heal {y:35%} HP.'), price: P(45), buy: () => { for (const p of w.alive()) { const amt = Math.round(p.maxHp * 0.35); p.hp = Math.min(p.maxHp, p.hp + amt); w.fx.number(p.x, p.y - 26, amt, 'G4', true); } sfx('heal'); } });
   // hourglass or calibration
-  if (rng.chance(0.5)) items.push({ icon: ICONS.hourglass, color: 'C3', name: UI.hourglass, desc: L('选择一项回溯强化。', 'Choose a Rewind upgrade.'), price: P(170), buy: () => h.offerHourglass() });
-  else items.push({ icon: ICONS.whetstone, color: 'K9', name: UI.calibration, desc: L('选择一项武器校准。', 'Choose a weapon Calibration.'), price: P(95), buy: () => h.offerCalibration() });
+  if (rng.chance(0.5)) items.push({ icon: ICONS.hourglass, color: 'C3', name: UI.hourglass, desc: L('选择一项回溯强化。', 'Choose a Rewind upgrade.'), price: P(170), buy: (who) => h.offerHourglass(who) });
+  else items.push({ icon: ICONS.whetstone, color: 'K9', name: UI.calibration, desc: L('选择一项武器校准。', 'Choose a weapon Calibration.'), price: P(95), buy: (who) => h.offerCalibration(who) });
   const n = items.length;
   items.forEach((it, i) => {
     const x = c.x + (i - (n - 1) / 2) * 48;
@@ -184,37 +195,41 @@ class Workbench extends Interactable {
     if (this.used) return;
     const h = this.host;
     const run = h.run;
-    const polishable = run.memories.filter((m) => m.rarity < 3);
+    // the hand at the bench chooses for themselves (F2c: each hand picks in turn)
+    const who = this.user ?? h.world.player!;
+    const lo = run.lo(who.slot);
+    const polishable = lo.memories.filter((m) => m.rarity < 3);
     const choices: Choice[] = [
       {
-        id: 'oil', title: L('上油', 'Oil Up'), desc: L(`恢复 {y:40%} 生命（{y:${Math.round(run.mods.maxHp * 0.4)}}）。`, `Heal {y:40%} HP ({y:${Math.round(run.mods.maxHp * 0.4)}}).`), icon: ICONS.oil, rarity: 0,
+        id: 'oil', title: L('上油', 'Oil Up'), desc: L(`恢复 {y:40%} 生命（{y:${Math.round(lo.mods.maxHp * 0.4)}}）。`, `Heal {y:40%} HP ({y:${Math.round(lo.mods.maxHp * 0.4)}}).`), icon: ICONS.oil, rarity: 0,
         tag: L('修理', 'Repair'), color: 'G3',
-        apply: () => { const p = h.world.player!; const a = Math.round(p.maxHp * 0.4); p.hp = Math.min(p.maxHp, p.hp + a); h.world.fx.number(p.x, p.y - 26, a, 'G4', true); sfx('heal'); },
+        apply: () => { const p = who; const a = Math.round(p.maxHp * 0.4); p.hp = Math.min(p.maxHp, p.hp + a); h.world.fx.number(p.x, p.y - 26, a, 'G4', true); sfx('heal'); },
       },
     ];
     if (polishable.length) choices.push({
       id: 'polish', title: L('打磨', 'Polish'), desc: L('提升一段回忆的稀有度。', 'Raise the rarity of one Memory.'), icon: ICONS.whetstone, rarity: 2,
       tag: L('修理', 'Repair'), color: 'B5',
       apply: () => {
-        setTimeout(() => h.openChoice(polishable.slice(0, 4 + run.mods.extraChoice).map((om) => {
+        h.world.after(0.65, () => h.openChoice(polishable.slice(0, 4 + lo.mods.extraChoice).map((om) => {
           const d = MEMORIES[om.id];
           return {
             id: om.id, title: d.name, desc: d.desc(d.v[Math.min(3, om.rarity + 1)]), icon: patronSigil(d.patron), rarity: Math.min(3, om.rarity + 1),
             tag: L(`${UI.rarity[om.rarity].zh} → ${UI.rarity[om.rarity + 1].zh}`, `${UI.rarity[om.rarity].en} → ${UI.rarity[om.rarity + 1].en}`), color: PATRONS[d.patron].color,
             apply: () => {
               om.rarity++;
-              run.recompute();
+              lo.recompute();
               // re-register hooks so new values apply
               h.world.bus.off(om);
-              d.hook?.({ ...run.hookCtx!, on: (k, fn) => h.world.bus.on(k, fn, om) }, d.v[om.rarity]);
+              const c = lo.liveCtx(om);
+              if (c) d.hook?.(c, d.v[om.rarity]);
             },
           };
-        }), { title: L('打磨', 'Polish'), color: 'B5', icon: ICONS.whetstone }), 650);
+        }), { title: L('打磨', 'Polish'), color: 'B5', icon: ICONS.whetstone }, undefined, undefined, who), this);
       },
     });
     this.used = true;
     this.enabled = false;
-    h.openChoice(choices, { title: UI.rest, sub: L('一次只能做一件事。', 'There is only time for one.'), icon: ICONS.rest, color: 'G3' });
+    h.openChoice(choices, { title: UI.rest, sub: L('一次只能做一件事。', 'There is only time for one.'), icon: ICONS.rest, color: 'G3' }, undefined, undefined, who);
   }
   render(r: Renderer) {
     drawSprite(r.w, WORKBENCH, this.x, this.y);
@@ -241,22 +256,25 @@ class EventStatue extends Interactable {
     const h = this.host;
     const w = h.world;
     const pending: (() => void)[] = [];
+    // the first hand to walk up decides; gains and costs are theirs (GDD2 §5.8)
+    const who = this.user ?? w.player!;
+    const lo = h.run.lo(who.slot);
     const ctx = {
-      run: h.run, rng: h.rng, player: w.player!,
-      memory: (p: Patron, boost?: number) => pending.push(() => h.offerMemory(p, boost)),
-      hourglass: () => pending.push(() => h.offerHourglass()),
-      calibration: () => pending.push(() => h.offerCalibration()),
+      run: h.run, rng: h.rng, player: who, lo,
+      memory: (p: Patron, boost?: number) => pending.push(() => h.offerMemory(p, boost, who)),
+      hourglass: () => pending.push(() => h.offerHourglass(who)),
+      calibration: () => pending.push(() => h.offerCalibration(who)),
       part: (o?: { allowCursed?: boolean; forceCursed?: boolean }) => {
-        let p = rollPart(h.run, h.rng, { allowCursed: o?.allowCursed });
+        let p = rollPart(h.run, h.rng, { allowCursed: o?.allowCursed, lo });
         if (o?.forceCursed) {
-          const cursed = ['rusted_crown', 'snapped_spring', 'black_sand'].filter((id) => !h.run.parts.includes(id));
+          const cursed = ['rusted_crown', 'snapped_spring', 'black_sand'].filter((id) => !lo.parts.includes(id));
           if (cursed.length) p = (EVENT_PART_LOOKUP(h.rng.pick(cursed)));
         }
-        if (p) pending.push(() => h.grantPart(p!));
+        if (p) pending.push(() => h.grantPart(p!, who));
       },
-      heal: (f: number) => { const p = w.player!; const a = Math.round(p.maxHp * f); p.hp = Math.min(p.maxHp, p.hp + a); w.fx.number(p.x, p.y - 26, a, 'G4', true); sfx('heal'); },
-      damage: (n: number) => { const p = w.player!; p.hp = Math.max(1, p.hp - n); w.fx.number(p.x, p.y - 26, n, 'R4', true); sfx('hurt'); G.r.params.hurt = 0.6; },
-      brass: (n: number) => { h.run.brass += n; sfx('coin'); },
+      heal: (f: number) => { const p = who; const a = Math.round(p.maxHp * f); p.hp = Math.min(p.maxHp, p.hp + a); w.fx.number(p.x, p.y - 26, a, 'G4', true); sfx('heal'); },
+      damage: (n: number) => { const p = who; p.hp = Math.max(1, p.hp - n); w.fx.number(p.x, p.y - 26, n, 'R4', true); sfx('hurt'); G.r.params.hurt = 0.6; },
+      brass: (n: number) => { h.run.addBrass(n); sfx('coin'); },
       shards: (n: number) => { h.run.shards += n; sfx('shard'); },
       lore: (id: string) => { h.run.lore.push(id); },
     };
@@ -299,9 +317,12 @@ class Plate extends Entity {
   wasDown = false;
   constructor(x: number, y: number) { super(); this.x = x; this.y = y; }
   update() {
-    const p = this.world.player;
-    let d = !!p && Math.hypot(p.x - this.x, p.y - this.y) < 9;
-    if (p) for (const e of p.echoes) if (!e.dead && Math.hypot(e.x - this.x, e.y - this.y) < 9) d = true;
+    // any hand (or any hand's echo) holds a plate down
+    let d = false;
+    for (const p of this.world.players) {
+      if (p.state === 'alive' && Math.hypot(p.x - this.x, p.y - this.y) < 9) d = true;
+      for (const e of p.echoes) if (!e.dead && Math.hypot(e.x - this.x, e.y - this.y) < 9) d = true;
+    }
     this.down = d;
     if (d && !this.wasDown) sfx('clank', { vol: 0.4, pan: this.world.pan(this.x) });
     this.wasDown = d;
@@ -361,7 +382,7 @@ export function setupVault(h: RoomHost) {
   const p2 = w.add(new Plate(c.x + 120, c.y + 30));
   w.add(new VaultLogic([p1, p2], cage));
   const part = rollPart(h.run, h.rng, { allowCursed: false });
-  w.add(new Chest(tx * TS + 8, ty * TS + 14, () => { if (part) h.grantPart(part); }, () => tr(UI.part)));
+  w.add(new Chest(tx * TS + 8, ty * TS + 14, (p) => { if (part) h.grantPart(part, p); }, () => tr(UI.part)));
   // inscription on the floor
   w.fx.banner(c.x, c.y + 60, tr(L('两处机关，须同时按下', 'Two plates — pressed at the same moment')), 'B4', 6);
   h.unlockDoors();

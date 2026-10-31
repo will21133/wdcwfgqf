@@ -1,5 +1,5 @@
 // 齿轮回旋镖 Gear Chakram — a returning sawtooth gear; hold to hover it; echo throws split in two.
-import { Weapon, Wielder, Step, Pose, WeaponInput, Hooks } from './weapon';
+import { Weapon, Wielder, Step, Pose, WeaponInput, Hooks, wielderPlayer } from './weapon';
 import type { Renderer } from '../../engine/gfx/renderer';
 import { drawSprite, Sprite } from '../../engine/gfx/sprite';
 import { Entity } from '../entities/entity';
@@ -115,7 +115,7 @@ export class Chakram extends Weapon {
       world.add(new GearProj(w, angle, amount, crit, 120, this));
     }
     sfx(w.isEcho ? 'swingEcho' : 'cogCharge', { pan: world.pan(w.x), vol: 0.6 });
-    world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho });
+    world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   performSpecial(w: Wielder, angle: number) {
@@ -124,7 +124,7 @@ export class Chakram extends Weapon {
     const x = world.map.solidAt(tx, ty) ? w.x : tx, y = world.map.solidAt(tx, ty) ? w.y : ty;
     const { amount } = this.roll(w, 8, true);
     world.add(new Saw(x, y, amount, w, w.isEcho ? 2.5 : 4));
-    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho });
+    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   pose(facing: number): Pose { return { angle: Math.cos(facing) >= 0 ? 0.3 : Math.PI - 0.3, ext: 0, vis: this.inFlight > 0 ? 0 : 1 }; }

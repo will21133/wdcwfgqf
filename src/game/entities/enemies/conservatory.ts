@@ -390,10 +390,7 @@ export class BrassMoth extends Enemy {
         this.vx = Math.cos(this.diveA) * sp; this.vy = Math.sin(this.diveA) * sp;
         const blocked = this.world.move(this, this.vx * dt, this.vy * dt);
         this.z += (5 - this.z) * Math.min(1, dt * 10);
-        const p = this.world.player;
-        if (!this.hitDone && p && Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r + 3) {
-          this.hitDone = p.hurt({ amount: 7, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 120 }) > 0 || this.hitDone;
-        }
+        if (!this.hitDone) this.hitDone = this.world.hurtPlayers({ t: 'circle', x: this.x, y: this.y, r: this.r + 3 }, { amount: 7, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 120 }) > 0;
         if (Math.floor(this.stateT * 40) % 2 === 0) this.world.particles.spawn({ kind: 'px', x: this.x + frand(-3, 3), y: this.y - this.z, vx: frand(-10, 10), vy: frand(-5, 5), life: 0.4, ramp: ['B5', 'B3', 'B1'], layer: 'world', size: 1 });
         if (blocked || this.stateT > 0.38) { this.setState('recover'); if (blocked) { this.world.fx.hitSparks(this.x, this.y - this.z, this.diveA + Math.PI, 'normal', 4); this.squash = 0.5; } }
         break;

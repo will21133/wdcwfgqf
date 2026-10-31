@@ -22,7 +22,7 @@ import { loadSettings } from './settings';
 import { loadProfile } from './save';
 import { Flow } from './flow';
 import { registerDebugRoute, runDebugRoutes } from './debugRoutes';
-import { initPlayersFromUrl } from './players';
+import { initPlayersFromUrl, ensurePlayers } from './players';
 
 function setupAudio() {
   registerSfx(G.audio);
@@ -60,7 +60,7 @@ function registerBuiltinRoutes() {
     // end-of-run report (?scene=summary&kind=victory|death|quit)
     const { SummaryScene } = await import('./scenes/summary');
     const run = new Run(7);
-    run.floor = 3; run.roomIndex = 9; run.time = 912; run.weapon = G.debug.get('weapon') ?? run.weapon;
+    run.floor = 3; run.roomIndex = 9; run.time = 912; run.lo(0).weapon = G.debug.get('weapon') ?? run.lo(0).weapon;
     Object.assign(run.stats, { rooms: 25, kills: 393, damage: 22188, rewinds: 41, paradoxes: 6 });
     G.scenes.set(new SummaryScene(run, (G.debug.get('kind') as any) ?? 'victory', 54, () => {}));
   });
@@ -146,12 +146,14 @@ export async function boot() {
   // debug: straight into a run
   const seed = Number(G.debug.get('seed') ?? (Math.random() * 1e9) | 0);
   const kind = (G.debug.get('room') as any) ?? 'combat';
-  const run = new Run(seed);
+  // every seated hand gets a loadout (debug runs skip the workshop's meta bonuses, as in 1.0)
+  const weapon = G.debug.get('weapon') ?? 'rapier';
+  const seats = ensurePlayers();
+  const run = new Run({ mode: 'standard', seed, contracts: {}, players: seats.map((inp) => ({ slot: inp.slot, device: inp.device, hand: 'tick', weapon })) });
   run.floor = Number(G.debug.get('floor') ?? 0);
   run.roomIndex = Number(G.debug.get('roomIndex') ?? 0);
-  if (G.debug.get('god')) { run.bonuses.push({ apply: (m) => { m.maxHp = 9999; } }); run.recompute(); run.hp = 9999; }
+  if (G.debug.get('god')) { run.bonuses.push({ apply: (m) => { m.maxHp = 9999; } }); run.recompute(); for (const lo of run.all) lo.hp = 9999; }
   if (G.debug.get('brass')) run.brass = Number(G.debug.get('brass'));
-  if (G.debug.get('weapon')) run.weapon = G.debug.get('weapon')!;
   const gs = new GameScene(run, { kind, reward: 'memory', patron: (G.debug.get('patron') as any) ?? 'oren' }, seed);
   Flow.wire(gs);
   G.scenes.set(gs);

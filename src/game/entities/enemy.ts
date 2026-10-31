@@ -8,6 +8,8 @@ import { Pickup } from './pickup';
 import { sfx } from '../G';
 import type { DamageInfo } from '../systems/combat';
 import { col } from '../../art/palette';
+import { coopScale } from '../world/coopScale';
+import { ownerPlayer, slotColor } from '../players';
 
 export abstract class Enemy extends Actor {
   state = 'idle';
@@ -45,20 +47,25 @@ export abstract class Enemy extends Actor {
   added() {
     const ow = this.world.run?.overwind ?? 0;
     if (ow > 0 && !(this as any).owApplied) { (this as any).owApplied = true; this.maxHp = Math.round(this.maxHp * (1 + 0.15 * ow)); this.hp = this.maxHp; }
+    // co-op health scaling (GDD2 §5.8); bullets and fire rates never scale
+    const n = this.world.playerCount;
+    if (n > 1 && !(this as any).coopApplied) {
+      (this as any).coopApplied = true;
+      const sc = coopScale(n);
+      this.maxHp = Math.round(this.maxHp * (this.isBoss || this.isElite ? sc.eliteHp : sc.enemyHp));
+      this.hp = this.maxHp;
+    }
     this.spawnDur = Math.max(0.01, this.spawnT);
     sfx('spawn', { vol: 0.5, pan: this.world.pan(this.x) });
   }
 
-  get target(): Entity | null {
-    const p = this.world.player;
-    if (!p || p.hp <= 0) return null;
-    // taunting echoes draw aggro
-    if (this.world.run?.mods && (this.world as any).tauntEcho) {
-      const e = (this.world as any).tauntEcho as Entity;
-      if (!e.dead && Math.hypot(e.x - this.x, e.y - this.y) < 120) return e;
-    }
-    return p;
-  }
+  /**
+   * Who this enemy is after (PLAN2 §1.4, GDD2 §5.8): the standing hand (or taunting echo) with the
+   * best aggro score, held at least 1.5 s. Solo: the player while standing (1.0).
+   */
+  get target(): Actor | null { return this.world.targetFor(this); }
+  /** slot of the hand being targeted (telegraph tip dots); -1 when none */
+  get targetSlot(): number { return this.world.targetSlotFor(this); }
   distT() { const t = this.target; return t ? Math.hypot(t.x - this.x, t.y - this.y) : 9999; }
   angT() { const t = this.target; return t ? angleTo(this.x, this.y, t.x, t.y) : 0; }
 
@@ -75,6 +82,8 @@ export abstract class Enemy extends Actor {
     this.stateT += dt;
     this.vx = this.vy = 0;
     if (this.st.stun > 0 || this.hitstun > 0) { this.attacking = false; this.onStagger(dt); return; }
+    // nobody left standing (every hand stopped, a ghost, or the solo Last Second): hold still
+    if (!this.target) { this.attacking = false; return; }
     this.think(dt);
   }
 
@@ -87,7 +96,10 @@ export abstract class Enemy extends Actor {
     const d = Math.hypot(dx, dy);
     if (d < 1) return;
     if (!this.world.map.los(this.x, this.y - 2, tx, ty - 2) || this.blockedAhead(dx / d, dy / d)) {
-      const f = this.world.flowDir(this.x, this.y);
+      // follow the field toward the hand we are after when that is where we are heading
+      const t = this.world.playerCount > 1 ? this.target : null;
+      const slot = t && Math.hypot(t.x - tx, t.y - ty) < 32 ? (ownerPlayer(t)?.slot ?? -1) : -1;
+      const f = this.world.flowDir(this.x, this.y, slot);
       if (f) { dx = f.x; dy = f.y; }
     }
     const l = Math.hypot(dx, dy) || 1;
@@ -122,7 +134,10 @@ export abstract class Enemy extends Actor {
     if (info.kind === 'fall') return;
     // drops
     const run = w.run;
-    const nb = Math.round(frand(this.brass[0], this.brass[1]) * (run?.mods.brassMul ?? 1));
+    // Brass income: the killer's Brass multiplier, and more hands find more coins (GDD2 §5.8)
+    const by = ownerPlayer(info.owner) ?? w.player;
+    const mul = by && run ? run.lo(by.slot).mods.brassMul : 1;
+    const nb = Math.round(frand(this.brass[0], this.brass[1]) * mul * coopScale(w.playerCount).brass);
     for (let i = 0; i < nb; i++) w.add(new Pickup(this.x, this.y - 4, 'brass', 1));
     if (this.sandDrop) for (let i = 0; i < this.sandDrop; i++) w.add(new Pickup(this.x, this.y - 4, 'sand', 10));
   }
@@ -204,6 +219,20 @@ export abstract class Enemy extends Actor {
     if (k > 0.85 && Math.floor(this.world.time * 30) % 2 === 0) { ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.5; ctx.fillRect(0, -w / 2, len, w); }
     ctx.restore();
     ctx.globalAlpha = 1;
+    this.teleTip(r, x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+  }
+
+  /** co-op: a dot in the target's colour at the tip of a telegraph says whom it is aimed at (GDD2 §5.2) */
+  teleTip(r: Renderer, x: number, y: number) {
+    if (this.world.playerCount < 2) return;
+    const s = this.targetSlot;
+    if (s < 0) return;
+    const ctx = r.u;
+    const px = Math.round(x), py = Math.round(y);
+    ctx.fillStyle = col('K0');
+    ctx.fillRect(px - 2, py - 2, 4, 4);
+    ctx.fillStyle = col(slotColor(s));
+    ctx.fillRect(px - 1, py - 1, 2, 2);
   }
 
   teleCircle(r: Renderer, x: number, y: number, rad: number, k: number, color = 'R3') {
@@ -241,6 +270,7 @@ export abstract class Enemy extends Actor {
     ctx.arc(Math.round(x), Math.round(y), len * k, ang - half, ang + half);
     ctx.stroke();
     ctx.globalAlpha = 1;
+    this.teleTip(r, x + Math.cos(ang) * len, y + Math.sin(ang) * len);
   }
 
   /** small HP pip bar shown after being damaged */

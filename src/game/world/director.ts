@@ -6,6 +6,7 @@ import { ROSTER as F2 } from '../entities/enemies/conservatory';
 import { ROSTER as F3 } from '../entities/enemies/archive';
 import { ROSTER as F4 } from '../entities/enemies/clockface';
 export type { EnemyDef };
+export { coopScale, type CoopScale } from './coopScale';
 
 /** per floor; an empty roster falls back to the previous floor's (during development) */
 export const ROSTERS: EnemyDef[][] = [F1, F2, F3, F4];
@@ -22,11 +23,12 @@ export function findEnemy(id: string): EnemyDef | undefined {
 
 export interface Wave { defs: EnemyDef[] }
 
-export function planWaves(rng: RNG, floor: number, roomIdx: number, elite: boolean, overwind = 0): Wave[] {
+/** budgetMul: co-op wave budget (GDD2 §5.8 — coopScale(n).budget) */
+export function planWaves(rng: RNG, floor: number, roomIdx: number, elite: boolean, overwind = 0, budgetMul = 1): Wave[] {
   const roster = rosterFor(floor);
   const normal = roster.filter((d) => !d.elite && (d.minRoom ?? 0) <= roomIdx);
   const elites = roster.filter((d) => d.elite);
-  const budget = 7 + floor * 5 + roomIdx * 1.6 + overwind * 2;
+  const budget = (7 + floor * 5 + roomIdx * 1.6 + overwind * 2) * budgetMul;
   const nWaves = roomIdx < 2 ? 2 : rng.chance(0.5) ? 3 : 2;
   const waves: Wave[] = [];
   for (let w = 0; w < nWaves; w++) {

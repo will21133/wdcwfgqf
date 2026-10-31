@@ -106,7 +106,8 @@ import { col } from '../../art/palette';
 /** Expanding ring hazard: hurts the player when the band passes over their feet. */
 export class GroundRing extends Entity {
   rad = 4;
-  hitDone = false;
+  /** hands this ring already hit (each is hit once) */
+  private hitSet = new Set<number>();
   constructor(x: number, y: number, public maxR: number, public dmg: number, public speed: number, public color: string, public owner: Enemy, public fixed = false) {
     super();
     this.x = x; this.y = y;
@@ -114,14 +115,10 @@ export class GroundRing extends Entity {
   update(dt: number) {
     const prev = this.rad;
     this.rad += this.speed * dt;
-    const p = this.world.player;
-    if (p && !this.hitDone) {
+    this.world.hurtPlayers((p) => {
       const d = Math.hypot(p.x - this.x, (p.y - this.y) * 1.5);
-      if (d >= prev - 4 && d <= this.rad + 2) {
-        const dealt = p.hurt({ amount: this.dmg, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 160, fixed: this.fixed });
-        if (dealt > 0) this.hitDone = true;
-      }
-    }
+      return d >= prev - 4 && d <= this.rad + 2;
+    }, { amount: this.dmg, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 160, fixed: this.fixed }, this.hitSet);
     if (Math.floor(this.rad / 6) !== Math.floor(prev / 6)) {
       const a = frand(0, TAU);
       this.world.particles.spawn({ kind: 'smoke', x: this.x + Math.cos(a) * this.rad, y: this.y + Math.sin(a) * this.rad / 1.5, vy: -10, life: 0.4, ramp: ['K8', 'K7', 'K6'], size: 2, size2: 4, alpha: 0.5 });

@@ -49,7 +49,8 @@ export abstract class Interactable extends Entity {
 export class RewardOrb extends Entity {
   t = 0;
   taken = false;
-  constructor(x: number, y: number, public icon: Sprite, public color: string, private onCollect: () => void) {
+  /** onCollect gets the hand that touched it (the reward is theirs) */
+  constructor(x: number, y: number, public icon: Sprite, public color: string, private onCollect: (p: Player) => void) {
     super();
     this.x = x; this.y = y;
   }
@@ -65,7 +66,7 @@ export class RewardOrb extends Entity {
       this.taken = true;
       this.kill();
       this.world.fx.burst(this.x, this.y - 12, 26, ['W', this.color], 160, 0.5);
-      this.onCollect();
+      this.onCollect(p);
     }
     if (Math.floor(this.t * 20) % 3 === 0)
       this.world.particles.spawn({ kind: 'px', x: this.x + frand(-6, 6), y: this.y - 12 + frand(-6, 6), vy: frand(-20, -5), life: frand(0.4, 0.8), ramp: ['W', this.color], layer: 'glow', size: 1 });
@@ -88,7 +89,7 @@ export class RewardOrb extends Entity {
 export class Chest extends Interactable {
   opened = false;
   t = 0;
-  constructor(x: number, y: number, private onOpen: () => void, private label: () => string) {
+  constructor(x: number, y: number, private onOpen: (p: Player | null) => void, private label: () => string) {
     super();
     this.x = x; this.y = y;
     this.range = 22;
@@ -102,7 +103,7 @@ export class Chest extends Interactable {
     this.world.fx.ring(this.x, this.y - 6, 4, 34, 0.4, 'B5', 2);
     sfx('doorOpen');
     sfx('pickupBig', { vol: 0.6 });
-    this.onOpen();
+    this.onOpen(this.user);
   }
   update(dt: number) { this.t += dt; super.update(dt); }
   renderGround(r: Renderer) {

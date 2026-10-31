@@ -32,14 +32,22 @@ export class Camera {
     this.kickY = damp(this.kickY, 0, 18, dt);
   }
 
-  /** top-left of the view in world coords, including shake */
-  view(): { x: number; y: number } {
-    let cx = this.x, cy = this.y;
+  /** centre of the view in world coords after the room bounds, without shake */
+  centre(): { x: number; y: number } { return this.centreOf(this.x, this.y); }
+  /** where the view centre settles when following (x, y), after the room bounds */
+  centreOf(x: number, y: number): { x: number; y: number } {
+    let cx = x, cy = y;
     if (this.bounds) {
       const b = this.bounds;
       cx = b.w <= VIEW_W ? b.x + b.w / 2 : clamp(cx, b.x + VIEW_W / 2, b.x + b.w - VIEW_W / 2);
       cy = b.h <= VIEW_H ? b.y + b.h / 2 : clamp(cy, b.y + VIEW_H / 2, b.y + b.h - VIEW_H / 2);
     }
+    return { x: cx, y: cy };
+  }
+
+  /** top-left of the view in world coords, including shake */
+  view(): { x: number; y: number } {
+    const { x: cx, y: cy } = this.centre();
     const s = this.trauma * this.trauma * this.shakeScale;
     const sx = noise1(this.t * 28, 1) * 7 * s;
     const sy = noise1(this.t * 28, 2) * 7 * s;

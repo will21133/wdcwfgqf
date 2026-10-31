@@ -79,11 +79,11 @@ export class SummaryScene implements Scene {
     });
     // build icons
     const icons: [import('../../engine/gfx/sprite').Sprite, string][] = [];
-    for (const m of run.memories) { const d = MEMORIES[m.id]; if (d) icons.push([patronSigil(d.patron), d.id]); }
-    for (const id of run.parts) { const p = PARTS_BY_ID[id]; if (p) icons.push([partLook(p).icon, id]); }
+    for (const m of run.lo(0).memories) { const d = MEMORIES[m.id]; if (d) icons.push([patronSigil(d.patron), d.id]); }
+    for (const id of run.lo(0).parts) { const p = PARTS_BY_ID[id]; if (p) icons.push([partLook(p).icon, id]); }
     Text.draw(ctx, L('本局构筑', 'Build'), 330, rowsY, { size: 'small', color: 'K8' });
     icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, rowsY + 22 + Math.floor(i / 8) * 22, 1, k); });
-    const wi = WEAPON_INFO.find((x) => x.id === run.weapon);
+    const wi = WEAPON_INFO.find((x) => x.id === run.lo(0).weapon);
     if (wi && this.t > 0.6) {
       const wy = ruleY - 40;
       Text.draw(ctx, L('武器', 'Weapon'), 330, wy, { size: 'small', color: 'K8' });

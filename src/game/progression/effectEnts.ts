@@ -8,6 +8,7 @@ import { TAU } from '../../engine/math';
 import { col } from '../../art/palette';
 import { drawSprite, spriteFromDef, RotCache } from '../../engine/gfx/sprite';
 import { sfx } from '../G';
+import { ownerPlayer } from '../players';
 
 /** Ground fire patch: burns enemies standing in it. */
 export class FireZone extends Entity {
@@ -21,7 +22,7 @@ export class FireZone extends Entity {
     this.tick -= dt;
     if (this.tick <= 0) {
       this.tick = 0.4;
-      for (const e of this.world.enemiesNear(this.x, this.y, this.rad)) this.world.combat.addStatus(e, 'burn', this.stacks);
+      for (const e of this.world.enemiesNear(this.x, this.y, this.rad)) this.world.combat.addStatus(e, 'burn', this.stacks, this.owner);
     }
     if (frand() < 0.5) this.world.particles.spawn({ kind: 'px', x: this.x + frand(-this.rad, this.rad), y: this.y + frand(-this.rad * 0.5, this.rad * 0.5), vy: frand(-30, -12), life: frand(0.3, 0.6), ramp: ['O4', 'O3', 'O2', 'O1'], layer: 'glow', size: 1.5 });
     if (this.t >= this.dur) this.kill();
@@ -71,11 +72,11 @@ const barrelRot = new RotCache(BARREL, 24);
 /** Pip's little gear turret. */
 export class Turret extends Entity {
   t = 0; fire = 0.3; aim = 0;
-  constructor(x: number, y: number, public dur: number, public dmg: number, public rate: number, public extra: Partial<DamageInfo> = {}) {
+  constructor(x: number, y: number, public dur: number, public dmg: number, public rate: number, public extra: Partial<DamageInfo> = {}, public owner: Actor | null = null) {
     super();
     this.x = x; this.y = y;
   }
-  added() { this.world.fx.dust(this.x, this.y, 5); sfx('doorOpen', { vol: 0.25 }); }
+  added() { this.owner ??= this.world.player; this.world.fx.dust(this.x, this.y, 5); sfx('doorOpen', { vol: 0.25 }); }
   update(dt: number) {
     this.t += dt;
     this.fire -= dt;
@@ -83,8 +84,7 @@ export class Turret extends Entity {
     if (tgt) this.aim = Math.atan2(tgt.y - 8 - (this.y - 7), tgt.x - this.x);
     if (tgt && this.fire <= 0) {
       this.fire = this.rate;
-      const p = this.world.player;
-      this.world.add(new Bullet({ team: 'player', x: this.x + Math.cos(this.aim) * 6, y: this.y - 7 + Math.sin(this.aim) * 6, ang: this.aim, speed: 260, dmg: this.dmg, style: 'bolt', r: 2, owner: p, pal: ['W', 'B6', 'B4'], info: { src: 'construct', ...this.extra } }));
+      this.world.add(new Bullet({ team: 'player', x: this.x + Math.cos(this.aim) * 6, y: this.y - 7 + Math.sin(this.aim) * 6, ang: this.aim, speed: 260, dmg: this.dmg, style: 'bolt', r: 2, owner: this.owner, pal: ['W', 'B6', 'B4'], info: { src: 'construct', ...this.extra } }));
       sfx('spit', { vol: 0.3, pan: this.world.pan(this.x) });
     }
     if (this.t >= this.dur) {
@@ -104,16 +104,17 @@ export class Turret extends Entity {
 /** Spinning gear mine: arms, then explodes. */
 export class GearMine extends Entity {
   t = 0;
-  constructor(x: number, y: number, public dmg: number, public fuse = 1.0, public extra: Partial<DamageInfo> = {}, public onBoom?: (x: number, y: number) => void) {
+  constructor(x: number, y: number, public dmg: number, public fuse = 1.0, public extra: Partial<DamageInfo> = {}, public onBoom?: (x: number, y: number) => void, public owner: Actor | null = null) {
     super();
     this.x = x; this.y = y;
   }
+  added() { this.owner ??= this.world.player; }
   update(dt: number) {
     this.t += dt;
     if (this.t >= this.fuse) {
       this.kill();
       const w = this.world;
-      for (const e of w.enemiesNear(this.x, this.y, 30)) e.hurt({ amount: this.dmg, kind: 'aoe', owner: w.player, x: this.x, y: this.y, knock: 120, src: 'construct', ...this.extra });
+      for (const e of w.enemiesNear(this.x, this.y, 30)) e.hurt({ amount: this.dmg, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 120, src: 'construct', ...this.extra });
       w.fx.burst(this.x, this.y - 2, 16, ['W', 'B6', 'B4', 'O2'], 140, 0.35);
       w.fx.ring(this.x, this.y, 3, 30, 0.3, 'B5', 2);
       w.shake(0.1);
@@ -134,18 +135,18 @@ export class GearMine extends Entity {
   }
 }
 
-/** Healing flower left by Fen's memories. */
+/** Healing flower left by Fen's memories. Only the hand who grew it can pick it (heals go to the owner). */
 export class HealFlower extends Entity {
   t = 0;
-  constructor(x: number, y: number, public amount: number, public life = 8) {
+  constructor(x: number, y: number, public amount: number, public life = 8, public owner: Actor | null = null) {
     super();
     this.x = x; this.y = y;
   }
   update(dt: number) {
     this.t += dt;
-    const p = this.world.player;
-    if (p && p.hp > 0 && Math.hypot(p.x - this.x, p.y - this.y) < 9 && this.t > 0.3) {
-      const h = Math.round(this.amount * (this.world.run?.mods.healMul ?? 1));
+    const p = ownerPlayer(this.owner) ?? this.world.player;
+    if (p && p.state === 'alive' && Math.hypot(p.x - this.x, p.y - this.y) < 9 && this.t > 0.3) {
+      const h = Math.round(this.amount * (this.world.run ? this.world.run.lo(p.slot).mods.healMul : 1));
       p.hp = Math.min(p.maxHp, p.hp + h);
       this.world.fx.number(p.x, p.y - 26, h, 'G4', false);
       this.world.fx.burst(this.x, this.y - 3, 8, ['G4', 'G3', 'T5'], 50, 0.5);
@@ -171,7 +172,7 @@ export class HealFlower extends Entity {
 /** Fen's vines: slow + rust enemies passing through. */
 export class VineZone extends Entity {
   t = 0; tick = 0;
-  constructor(x: number, y: number, public dur = 2.5) { super(); this.x = x; this.y = y; }
+  constructor(x: number, y: number, public dur = 2.5, public owner: Actor | null = null) { super(); this.x = x; this.y = y; }
   update(dt: number) {
     this.t += dt;
     this.tick -= dt;
@@ -179,7 +180,7 @@ export class VineZone extends Entity {
       this.tick = 0.5;
       for (const e of this.world.enemiesNear(this.x, this.y, 12)) {
         e.st.slow = Math.max(e.st.slow, 1); e.st.slowAmt = 0.5;
-        this.world.combat.addStatus(e, 'rust', 1);
+        this.world.combat.addStatus(e, 'rust', 1, this.owner);
       }
     }
     if (this.t > this.dur) this.kill();

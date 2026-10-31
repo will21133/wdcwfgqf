@@ -1,5 +1,5 @@
 // 秒针细剑 Second-Hand Rapier — fast thrusts, a wide third sweep, and a piercing lunge.
-import { Weapon, Wielder, Step, Pose, WeaponInput, Hooks } from './weapon';
+import { Weapon, Wielder, Step, Pose, WeaponInput, Hooks, wielderPlayer, wielderLo } from './weapon';
 import type { Renderer } from '../../engine/gfx/renderer';
 import { rapierRot } from '../../art/sprites/weapons';
 import { drawSprite } from '../../engine/gfx/sprite';
@@ -23,7 +23,7 @@ export class Rapier extends Weapon {
     const ox = w.x, oy = w.y - 7;
     w.lunge(c * s.lunge, sn * s.lunge, 0.07);
     const world = w.world;
-    const cal = world.run!.calibrations;
+    const cal = wielderLo(w).calibrations;
     const reach = cal.includes('rp_reach') ? 1.4 : 1;
     const wide = cal.includes('rp_arc');
     const { amount, crit } = this.roll(w, s.dmg * (s.kind === 'sweep' && wide ? 1.4 : 1));
@@ -45,7 +45,7 @@ export class Rapier extends Weapon {
       world.add(new Smear(w, 0, -7, 'arc', angle, { R: wide ? 38 : 30, thick: wide ? 11 : 9, sweep: wide ? 3.2 : 2.6, cw: true }, pal, 0.14));
       sfx(w.isEcho ? 'swingEcho' : 'swingHeavy', { pan: world.pan(w.x), vol: w.isEcho ? 0.5 : 1 });
     }
-    world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho });
+    world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   specialDuration() { return 0.2; }
@@ -63,7 +63,7 @@ export class Rapier extends Weapon {
     const world = w.world;
     const { amount, crit } = this.roll(w, 26, true);
     w.lunge(c * dist, sn * dist, 0.14);
-    const flurry = world.run!.calibrations.includes('rp_flurry');
+    const flurry = wielderLo(w).calibrations.includes('rp_flurry');
     world.combat.add({
       shape: { t: 'line', x0: w.x, y0: w.y - 7, x1: w.x + c * 18, y1: w.y - 7 + sn * 18, r: 9 },
       team: 'player', life: 10, follow: w as any, rehit: flurry ? 0.05 : undefined,
@@ -71,7 +71,7 @@ export class Rapier extends Weapon {
     });
     world.add(new Smear(w, c * 4, -7 + sn * 4, 'thrust', angle, { len: 34, width: 10 }, w.isEcho ? 'echo' : 'brass', 0.2));
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });
-    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho });
+    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   pose(facing: number): Pose {

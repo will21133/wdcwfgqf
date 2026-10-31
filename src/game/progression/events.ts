@@ -1,5 +1,5 @@
 // 凝固的瞬间 Frozen Moments — narrative events with choices.
-import type { Run } from '../run';
+import type { Run, Loadout } from '../run';
 import type { RNG } from '../../engine/rng';
 import type { Player } from '../entities/player';
 import { L, L10n } from '../i18n';
@@ -8,7 +8,9 @@ import type { Patron } from './memories';
 export interface EventCtx {
   run: Run;
   rng: RNG;
+  /** the hand who walked up to the moment decides; gains and costs are theirs (GDD2 §5.8) */
   player: Player;
+  lo: Loadout;
   /** open a memory choice for a patron (after the event closes) */
   memory(patron: Patron, boost?: number): void;
   hourglass(): void;
@@ -24,7 +26,7 @@ export interface EventCtx {
 export interface EventOption {
   label: L10n;
   detail?: L10n;
-  cond?: (run: Run) => boolean;
+  cond?: (run: Run, lo: Loadout) => boolean;
   act: (c: EventCtx) => L10n;
 }
 
@@ -67,8 +69,8 @@ export const EVENTS: EventDef[] = [
     text: L('穿过天窗的雨滴悬停在半空，像一串串玻璃珠。每一滴里都映着同一个瞬间。',
       'Raindrops from a broken skylight hang in the air like strings of glass beads. Each one holds the same reflected moment.'),
     options: [
-      { label: L('饮下雨水', 'Drink the rain'), detail: L('{y:最大生命 +10}', '{y:Max HP +10}'), act: (c) => { c.run.bonuses.push({ apply: (m) => { m.maxHp += 10; } }); c.run.recompute(); return L('雨水尝起来像是很久以前的某个下午。', 'The rain tastes like an afternoon from long ago.'); } },
-      { label: L('收集雨滴', 'Collect the drops'), detail: L('{c:回溯充能全满}，{g:+30 黄铜}', '{c:Fill all rewind charges}, {g:+30 Brass}'), act: (c) => { c.run.charges = c.run.mods.rewindCharges; c.brass(30); return L('雨滴在瓶中轻轻倒流。', 'In the bottle, the drops quietly flow backwards.'); } },
+      { label: L('饮下雨水', 'Drink the rain'), detail: L('{y:最大生命 +10}', '{y:Max HP +10}'), act: (c) => { c.lo.bonuses.push({ apply: (m) => { m.maxHp += 10; } }); c.lo.recompute(); return L('雨水尝起来像是很久以前的某个下午。', 'The rain tastes like an afternoon from long ago.'); } },
+      { label: L('收集雨滴', 'Collect the drops'), detail: L('{c:回溯充能全满}，{g:+30 黄铜}', '{c:Fill all rewind charges}, {g:+30 Brass}'), act: (c) => { c.lo.charges = c.lo.mods.rewindCharges; c.brass(30); return L('雨滴在瓶中轻轻倒流。', 'In the bottle, the drops quietly flow backwards.'); } },
       leave(),
     ],
   },
@@ -92,7 +94,7 @@ export const EVENTS: EventDef[] = [
       { label: L('押上一半黄铜', 'Bet half your Brass'), detail: L('{g:50%} 翻倍，否则输光赌注', '{g:50%} to double it, else lose the bet'), cond: (r) => r.brass >= 10, act: (c) => {
         const bet = Math.floor(c.run.brass / 2);
         if (c.rng.chance(0.5)) { c.brass(bet); return L(`你翻开那张牌——是一张"午夜"。你赢了 ${bet} 黄铜。`, `You flip the card — it's "Midnight". You win ${bet} Brass.`); }
-        c.run.brass -= bet; return L(`那张牌是空白的。你输掉了 ${bet} 黄铜。时间似乎在偷笑。`, `The card is blank. You lose ${bet} Brass. Time seems to snicker.`);
+        c.run.spendBrass(bet); return L(`那张牌是空白的。你输掉了 ${bet} 黄铜。时间似乎在偷笑。`, `The card is blank. You lose ${bet} Brass. Time seems to snicker.`);
       } },
       { label: L('顺走赌注', 'Pocket the pot'), detail: L('{g:+50 黄铜}，{r:失去 12 生命}', '{g:+50 Brass}, {r:lose 12 HP}'), act: (c) => { c.brass(50); c.damage(12); return L('桌下藏着一只发条狗，它咬了你一口。', 'A clockwork dog under the table bites you on the way out.'); } },
       leave(),
@@ -104,7 +106,7 @@ export const EVENTS: EventDef[] = [
     text: L('一个小女孩停在哭泣的那一刻，怀里抱着一个摔坏的锡兵玩具。玩具的发条断了。',
       'A little girl frozen mid-sob, clutching a broken tin soldier. Its spring has snapped.'),
     options: [
-      { label: L('修好玩具', 'Mend the toy'), detail: L('{r:花费 40 黄铜}，选择一段{y:皮普}的回忆', '{r:Pay 40 Brass}, choose a Memory from {y:Pip}'), cond: (r) => r.brass >= 40, act: (c) => { c.run.brass -= 40; c.memory('pip'); return L('你把锡兵放回她怀里。也许时间恢复的时候，她会先笑出来。', 'You tuck the soldier back into her arms. When time returns, perhaps she will laugh first.'); } },
+      { label: L('修好玩具', 'Mend the toy'), detail: L('{r:花费 40 黄铜}，选择一段{y:皮普}的回忆', '{r:Pay 40 Brass}, choose a Memory from {y:Pip}'), cond: (r) => r.brass >= 40, act: (c) => { c.run.spendBrass(40); c.memory('pip'); return L('你把锡兵放回她怀里。也许时间恢复的时候，她会先笑出来。', 'You tuck the soldier back into her arms. When time returns, perhaps she will laugh first.'); } },
       { label: L('轻轻摸摸她的头', 'Pat her head gently'), detail: L('{y:恢复 15% 生命}', '{y:Heal 15% HP}'), act: (c) => { c.heal(0.15); return L('你的手是冷的，但你觉得心里暖了一下。', 'Your hand is cold, but something in you feels warmer.'); } },
       leave(),
     ],
@@ -140,8 +142,8 @@ export const EVENTS: EventDef[] = [
     text: L('一只打翻的沙漏，沙子正从地上缓缓流回瓶中——这座城里唯一还在"倒流"的东西，除了你。',
       'A toppled hourglass. Its sand is slowly flowing back up into the glass — the only thing in the city running backwards, besides you.'),
     options: [
-      { label: L('捧起沙子', 'Scoop up the sand'), detail: L('{c:回溯充能全满}，{c:回溯充能上限 +1}（本局）', '{c:Fill rewind charges}, {c:+1 max charge} (this run)'), act: (c) => { c.run.bonuses.push({ apply: (m) => { m.rewindCharges += 1; } }); c.run.recompute(); c.run.charges = c.run.mods.rewindCharges; return L('沙子在你掌心里发出细微的嗡鸣。', 'The sand hums faintly in your palms.'); } },
-      { label: L('带走玻璃', 'Take the glass'), detail: L('获得零件{g:沙漏碎片}', 'Gain the Part {g:Hourglass Shard}'), cond: (r) => !r.parts.includes('hourglass_shard'), act: (c) => { c.run.parts.push('hourglass_shard'); c.run.recompute(); return L('玻璃还是温的。', 'The glass is still warm.'); } },
+      { label: L('捧起沙子', 'Scoop up the sand'), detail: L('{c:回溯充能全满}，{c:回溯充能上限 +1}（本局）', '{c:Fill rewind charges}, {c:+1 max charge} (this run)'), act: (c) => { c.lo.bonuses.push({ apply: (m) => { m.rewindCharges += 1; } }); c.lo.recompute(); c.lo.charges = c.lo.mods.rewindCharges; return L('沙子在你掌心里发出细微的嗡鸣。', 'The sand hums faintly in your palms.'); } },
+      { label: L('带走玻璃', 'Take the glass'), detail: L('获得零件{g:沙漏碎片}', 'Gain the Part {g:Hourglass Shard}'), cond: (_r, lo) => !lo.parts.includes('hourglass_shard'), act: (c) => { c.lo.parts.push('hourglass_shard'); c.lo.recompute(); return L('玻璃还是温的。', 'The glass is still warm.'); } },
       leave(),
     ],
   },
@@ -151,7 +153,7 @@ export const EVENTS: EventDef[] = [
     text: L('一架黄铜望远镜对着停住的夜空。镜筒旁贴着阿苏的字条："第 86400 次观测：星星还在原地。我也是。"',
       'A brass telescope aimed at the frozen sky. A note from Asu on the tube: "Observation #86400: the stars have not moved. Neither have I."'),
     options: [
-      { label: L('望向星空', 'Look through it'), detail: L('选择一段{v:阿苏}的回忆，{r:最大生命 -8}', 'Choose a Memory from {v:Asu}, {r:max HP -8}'), act: (c) => { c.run.bonuses.push({ apply: (m) => { m.maxHp -= 8; } }); c.run.recompute(); c.memory('asu', 0.15); return L('星光落进你的表盘里，再也没有离开。', 'Starlight falls into your dial and never leaves.'); } },
+      { label: L('望向星空', 'Look through it'), detail: L('选择一段{v:阿苏}的回忆，{r:最大生命 -8}', 'Choose a Memory from {v:Asu}, {r:max HP -8}'), act: (c) => { c.lo.bonuses.push({ apply: (m) => { m.maxHp -= 8; } }); c.lo.recompute(); c.memory('asu', 0.15); return L('星光落进你的表盘里，再也没有离开。', 'Starlight falls into your dial and never leaves.'); } },
       leave(),
     ],
   },

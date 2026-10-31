@@ -65,7 +65,7 @@ export class Foreman extends Boss {
     if (!this.queue.length) {
       const d = this.distT();
       const pool = this.phase === 0 ? ['slam', 'toss', 'charge', 'slam'] : ['slam', 'toss', 'charge', 'whistle', 'vents', 'slam'];
-      this.queue = pool.sort(() => Math.random() - 0.5);
+      this.queue = this.world.rng.shuffle(pool);
       if (d < 70) this.queue.unshift('slam');
     }
     return this.queue.shift()!;
@@ -76,8 +76,7 @@ export class Foreman extends Boss {
     if (!t) return;
     this.bob = Math.sin(this.age * 4) * 1;
     // contact damage
-    const p = this.world.player;
-    if (p && Math.hypot(p.x - this.x, p.y - this.y) < this.r + 4 && this.state !== 'stunned') p.hurt({ amount: this.contactDamage, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 200 });
+    if (this.state !== 'stunned') this.world.hurtPlayers((p) => Math.hypot(p.x - this.x, p.y - this.y) < this.r + 4, { amount: this.contactDamage, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 200 });
     this.updateVents(dt);
     const restArms = () => {
       this.armL.x += (-24 - this.armL.x) * 0.15; this.armL.y += (-20 + Math.sin(this.age * 3) * 2 - this.armL.y) * 0.15;
@@ -121,7 +120,7 @@ export class Foreman extends Boss {
         this.attacking = this.stateT > 0.75 && this.stateT < 0.95;
         void k;
         if (this.stateT > 1.5) {
-          if (this.phase && Math.random() < 0.5 && this.stateT < 1.6) { this.setState('slam'); this.stateT = 0.25; break; }
+          if (this.phase && this.world.rng.chance(0.5) && this.stateT < 1.6) { this.setState('slam'); this.stateT = 0.25; break; }
           this.setState('walk');
         }
         break;

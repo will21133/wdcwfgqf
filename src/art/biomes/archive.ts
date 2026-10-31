@@ -1052,8 +1052,7 @@ class FloatPage extends Entity {
     PAGES ??= buildFloatPages();
   }
   update(dt: number) {
-    const p = this.world.player;
-    if (p) {
+    for (const p of this.world.players) {
       const dx = this.x - p.x, dy = this.y - p.y, d = Math.hypot(dx, dy);
       if (d < 18 && d > 0.1 && Math.hypot(p.vx, p.vy) > 20) {
         this.vx += (dx / d) * 120 * dt; this.vy += (dy / d) * 80 * dt;

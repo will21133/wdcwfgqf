@@ -5,6 +5,7 @@ import { frand } from '../../engine/rng';
 import { TAU } from '../../engine/math';
 import { col } from '../../art/palette';
 import { sfx } from '../G';
+import type { Player } from './player';
 
 export type PickupKind = 'brass' | 'sand' | 'heal' | 'shard';
 
@@ -22,9 +23,14 @@ export class Pickup extends Entity {
     this.collides = false;
   }
 
+  /** the hand this pickup is flying to */
+  private to: Player | null = null;
+
   update(dt: number) {
     this.t += dt;
-    const p = this.world.player;
+    // fly to the nearest standing hand (once it has picked one, it sticks with it)
+    if (!this.to || this.to.state !== 'alive' || this.to.dead) this.to = this.world.nearestPlayer(this.x, this.y) as Player | null;
+    const p = this.to;
     // bounce
     if (!this.magnet) {
       this.vz -= 380 * dt;
@@ -51,21 +57,25 @@ export class Pickup extends Entity {
   collect() {
     const w = this.world;
     const run = w.run!;
+    const p = this.to ?? w.player!;
     this.kill();
     switch (this.kind) {
-      case 'brass': run.brass += this.amount; sfx('coin', { vol: 0.4, pitch: frand(0.95, 1.1) }); break;
-      case 'sand': run.addSand(this.amount); sfx('sand', { vol: 0.4 }); break;
+      // brass and shards go to the shared purse; sand to whoever caught it
+      case 'brass': run.addBrass(this.amount); sfx('coin', { vol: 0.4, pitch: frand(0.95, 1.1) }); break;
+      case 'sand': run.lo(p.slot).addSand(this.amount); sfx('sand', { vol: 0.4 }); break;
       case 'heal': {
-        const p = w.player!;
-        const h = Math.round(this.amount * run.mods.healMul);
-        p.hp = Math.min(p.maxHp, p.hp + h);
-        w.fx.number(p.x, p.y - 26, h, 'G4', true);
+        // oil heals the whole team (GDD2 §5.8), each by their own Heal multiplier
+        for (const q of w.alive()) {
+          const h = Math.round(this.amount * run.lo(q.slot).mods.healMul);
+          q.hp = Math.min(q.maxHp, q.hp + h);
+          w.fx.number(q.x, q.y - 26, h, 'G4', true);
+        }
         sfx('heal');
         break;
       }
       case 'shard': run.shards += this.amount; sfx('shard'); break;
     }
-    w.bus.emit('pickup', { kind: this.kind, amount: this.amount });
+    w.bus.emit('pickup', { kind: this.kind, amount: this.amount, player: p });
   }
 
   renderGround(r: Renderer) {

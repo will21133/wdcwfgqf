@@ -41,10 +41,7 @@ export class Cogling extends Enemy {
         this.spin += dt * 40;
         const hit = this.moveDir(this.chargeA, 215, dt);
         if (Math.floor(this.stateT * 30) % 2 === 0) this.world.fx.dust(this.x, this.y, 1, this.chargeA);
-        const p = this.world.player;
-        if (p && Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r + 2) {
-          p.hurt({ amount: 9, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 160 });
-        }
+        this.world.hurtPlayers({ t: 'circle', x: this.x, y: this.y, r: this.r + 2 }, { amount: 9, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 160 });
         if (hit) { this.setState('dizzy'); this.world.shake(0.1); sfx('clank', { pan: this.world.pan(this.x) }); this.squash = 0.6; this.world.fx.hitSparks(this.x, this.y - 6, this.chargeA + Math.PI, 'normal', 8); }
         else if (this.stateT > 0.55) this.setState('recover');
         break;
@@ -248,8 +245,7 @@ export class Mite extends Enemy {
         this.attacking = true;
         this.z = Math.sin((this.stateT / 0.3) * Math.PI) * 8;
         this.moveDir(this.hopA, 150, dt);
-        const p = this.world.player;
-        if (p && Math.hypot(p.x - this.x, p.y - this.y) < 7) p.hurt({ amount: 5, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 80 });
+        this.world.hurtPlayers((p) => Math.hypot(p.x - this.x, p.y - this.y) < 7, { amount: 5, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 80 });
         if (this.stateT > 0.3) { this.z = 0; this.setState('run'); this.squash = 0.5; }
         break;
       }

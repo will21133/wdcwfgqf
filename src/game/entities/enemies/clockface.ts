@@ -13,7 +13,9 @@ import { Bullet } from '../projectile';
 import { Pickup } from '../pickup';
 import { Afterimage, Smear } from '../fxents';
 import { Scarf } from '../scarf';
-import { tickFrames } from '../player';
+import { tickFrames, type Player } from '../player';
+import { ownerPlayer } from '../../players';
+import { coopScale } from '../../world/coopScale';
 import type { Dir } from '../../../art/sprites/tick';
 import type { Pose } from '../../weapons/weapon';
 import type { DamageInfo } from '../../systems/combat';
@@ -68,7 +70,8 @@ function teleDisc(r: Renderer, x: number, y: number, rad: number, k: number, tim
 
 function dropBrass(e: Enemy) {
   const w = e.world;
-  const nb = Math.round(frand(e.brass[0], e.brass[1]) * (w.run?.mods.brassMul ?? 1));
+  const by = ownerPlayer(e.lastHit?.owner) ?? w.player;
+  const nb = Math.round(frand(e.brass[0], e.brass[1]) * (by && w.run ? w.run.lo(by.slot).mods.brassMul : 1) * coopScale(w.playerCount).brass);
   for (let i = 0; i < nb; i++) w.add(new Pickup(e.x, e.y - 4, 'brass', 1));
   for (let i = 0; i < e.sandDrop; i++) w.add(new Pickup(e.x, e.y - 4, 'sand', 10));
 }
@@ -571,6 +574,8 @@ export class EchoPhantom extends Enemy {
   private trailT = 0;
   private glitchT = 0;
   private glitchOff = 0;
+  /** the hand whose past this phantom copies (the nearest one when it appears) */
+  private victim: Player | null = null;
   constructor(x: number, y: number) {
     super(x, y, 90);
     this.r = 4.5; this.height = 20; this.speed = 165; this.poise = 12; this.mass = 0.9;
@@ -586,21 +591,26 @@ export class EchoPhantom extends Enemy {
   added() {
     super.added();
     sfx('cfPhantomSpawn', { pan: this.world.pan(this.x) });
+    this.victim = (this.world.nearestPlayer(this.x, this.y) as Player | null) ?? this.world.player;
     const bus = this.world.bus;
     bus.on('attack', (e) => {
-      if (e.echo || e.owner !== this.world.player || this.dead) return;
+      if (e.echo || e.owner !== this.victim || this.dead) return;
       this.events.push({ tick: this.tick, kind: e.combo >= 2 ? 'sweep' : 'thrust', angle: e.angle, x: e.owner.x, y: e.owner.y, tele: false });
     }, this);
     bus.on('special', (e) => {
-      if (e.echo || e.owner !== this.world.player || this.dead) return;
+      if (e.echo || e.owner !== this.victim || this.dead) return;
       this.events.push({ tick: this.tick, kind: 'lunge', angle: e.angle, x: e.owner.x, y: e.owner.y, tele: false });
     }, this);
   }
   removed() { this.world.bus.off(this); }
 
   update(dt: number) {
-    // record the player every tick, even while staggered or spawning
-    const p = this.world.player;
+    // record its hand every tick, even while staggered or spawning (a fallen hand passes it on)
+    if (this.victim && (this.victim.dead || this.victim.state !== 'alive') && this.world.alive().length) {
+      this.victim = this.world.nearestPlayer(this.x, this.y) as Player | null;
+      this.buf.length = 0; this.events.length = 0;
+    }
+    const p = this.victim;
     if (p && p.hp > 0) {
       this.buf.push({ x: p.x, y: p.y, dir: p.dir, flip: p.flip, anim: p.anim as number, animT: p.animT, pose: p.weapon.pose(p.aim) });
       if (this.buf.length > PH_DELAY + 90) this.buf.shift();
@@ -665,8 +675,7 @@ export class EchoPhantom extends Enemy {
     this.snap = f;
     this.flip = this.onPath ? f.flip : dx < 0;
     // touching your own past hurts
-    const p = this.world.player;
-    if (p && Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r + 2) p.hurt({ amount: 7, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 130 });
+    this.world.hurtPlayers({ t: 'circle', x: this.x, y: this.y, r: this.r + 2 }, { amount: 7, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 130 });
     this.trailT -= dt;
     if (this.trailT <= 0) {
       this.trailT = 0.07;

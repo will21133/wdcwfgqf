@@ -21,6 +21,14 @@ import type { PlayerInput } from '../../engine/input';
 import { ensurePlayers, slotColor, SLOT_SCARF, SLOT_RAMP, drawSlotBadge } from '../players';
 import { handDef, type HandDef } from '../progression/hands';
 import type { ColorKey } from '../ui/text';
+import type { Loadout } from '../run';
+import type { ReviveSource } from '../systems/bus';
+import * as Down from '../systems/downed';
+import { tr } from '../i18n';
+import { S } from '../strings';
+import '../strings/f2';
+
+export type PlayerState = 'alive' | 'stopped' | 'ghost';
 
 let FRAMES: TickFrames | null = null;
 let KEYS: Sprite[] = [];
@@ -95,6 +103,14 @@ export class Player extends Actor implements Wielder {
   /** scripted walk-in through the entry door */
   autoWalk = 0;
   private beatT = 0;
+  /** GDD2 §5.5: standing, stopped (downed) or a ghost hand */
+  state: PlayerState = 'alive';
+  /** downed bookkeeping (systems/downed.ts) */
+  down: Down.DownState = Down.newDownState();
+  /** ghost hand: tap-attack cooldown */
+  ghostCd = 0;
+  /** a rewind out of a stop is under way (it always restores at least 1 HP) */
+  private rescueRewind = false;
 
   constructor(x: number, y: number, input?: PlayerInput) {
     super();
@@ -118,16 +134,29 @@ export class Player extends Actor implements Wielder {
   }
 
   get run() { return this.world.run!; }
-  get mods() { return this.world.run!.mods; }
+  /** this hand's loadout (PLAN2 §1.5) */
+  get lo(): Loadout { return this.world.run!.lo(this.slot); }
+  get mods() { return this.lo.mods; }
 
   added() {
     const L = this.world.players;
     if (!L.includes(this)) { L.push(this); L.sort((a, b) => a.slot - b.slot); }
-    this.weapon = makeWeapon(this.run.weapon);
-    // slot I carries the run's HP (1.0); other slots keep theirs in run.slotHp until F2b's Loadout
-    const kept = this.slot === 0 ? this.run.hp : this.run.slotHp[this.slot];
-    this.hp = kept === undefined ? this.mods.maxHp : kept > 0 ? kept : Math.round(this.mods.maxHp * 0.25);
+    const lo = this.lo;
+    this.hand = lo.hand;
+    this.weapon = makeWeapon(lo.weapon);
     this.maxHp = this.mods.maxHp;
+    // HP carries over between rooms; a hand that ended the last room stopped or as a ghost is
+    // wound up at 25% when the next room starts (GDD2 §5.5)
+    if (lo.hp > 0) this.hp = lo.hp;
+    else {
+      this.hp = lo.hp = Math.max(1, Math.round(this.maxHp * Down.ROOM_REVIVE_HP));
+      this.world.after(0.5, () => {
+        if (this.dead || this.state !== 'alive') return;
+        this.world.fx.ring(this.x, this.y - 8, 3, 26, 0.45, this.color, 2);
+        this.world.fx.banner(this.x, this.y - 38, tr(S('f2', 'roomRevive')), this.color, 1.4);
+      }, this);
+      this.world.bus.emit('revived', { player: this, by: null, source: 'room' });
+    }
     this.dashCharges = this.mods.dashCharges;
     this.recorder.setWindow(this.mods.rewindWindow);
   }
@@ -144,6 +173,8 @@ export class Player extends Actor implements Wielder {
     if (this.blinkT < -0.12) this.blinkT = frand(2, 5);
 
     if (this.rewinding) { this.updateRewind(dt); this.syncRun(); return; }
+    if (this.state === 'stopped') { Down.updateStopped(this, dt); this.syncRun(); return; }
+    if (this.state === 'ghost') { this.updateGhost(dt); return; }
     if (this.hp <= 0) { this.deadT += dt; return; }
 
     // dash charges
@@ -182,7 +213,7 @@ export class Player extends Actor implements Wielder {
       if (Math.floor(this.dashT * 60) % 2 === 0) this.afterimage('C3', 0.18, 0.45);
       if (this.dashT <= 0) {
         this.airborne = false;
-        this.world.bus.emit('dashEnd', { owner: this, echo: false });
+        this.world.bus.emit('dashEnd', { owner: this, echo: false, player: this });
       }
     } else {
       // weapon
@@ -256,10 +287,78 @@ export class Player extends Actor implements Wielder {
     this.syncRun();
   }
 
-  /** write this player's HP back to the run (slot I = run.hp, as in 1.0) */
-  syncRun() {
-    if (this.slot === 0) this.run.hp = this.hp;
-    this.run.slotHp[this.slot] = this.hp;
+  /** write this player's HP back to its loadout (carried into the next room) */
+  syncRun() { this.lo.hp = this.hp; }
+
+  // ───────────────────────── stopped / ghost / revive (GDD2 §5.5) ─────────────────────────
+  /** wind this hand up again (PLAN2 §1.4) */
+  revive(frac: number, by: Player | null, source: ReviveSource) {
+    if (this.state === 'alive' && this.hp > 0) return;
+    const w = this.world;
+    this.state = 'alive';
+    this.solid = true;
+    this.airborne = false;
+    this.hp = Math.max(1, Math.round(this.maxHp * frac));
+    this.invuln = Math.max(this.invuln, Down.REVIVE_INVULN);
+    this.deadT = 0;
+    this.hurtT = 0;
+    this.down = Down.newDownState();
+    this.dashCharges = this.mods.dashCharges;
+    this.recorder.clear();
+    this.syncRun();
+    w.fx.ring(this.x, this.y - 8, 3, 34, 0.5, (by ?? this).color, 3);
+    w.fx.burst(this.x, this.y - 10, 22, ['W', this.color, (by ?? this).color], 140, 0.5);
+    if (source === 'windup') w.fx.banner(this.x, this.y - 48, tr(S('f2', 'wound')), this.color, 1.2);
+    w.fx.number(this.x, this.y - 26, this.hp, 'G4', false);
+    sfx('chimeRing', { vol: 0.7, pan: w.pan(this.x) });
+    sfx('rewindEnd', { vol: 0.5 });
+    this.input.rumble(0.4, 0.5, 200);
+    by?.input.rumble(0.2, 0.4, 160);
+    w.bus.emit('revived', { player: this, by, source });
+  }
+
+  /** default Last Second / self-rescue rewind (DownedHooks.rewindOut; F3 replaces the cost) */
+  canRewindFromStop() { return this.state === 'stopped' && this.lo.charges >= 1 && this.recorder.length >= 20 && this.falling <= 0 && !this.rewinding; }
+  rewindFromStop(): boolean {
+    if (!this.canRewindFromStop()) { sfx('denied', { vol: 0.6 }); return false; }
+    this.state = 'alive';
+    this.solid = true;
+    this.down = Down.newDownState();
+    this.rescueRewind = true;
+    this.tryRewind(true);
+    this.lo.charges--;
+    this.world.bus.emit('revived', { player: this, by: null, source: 'self' });
+    return true;
+  }
+
+  /** a ghost hand drifts with the team and taps for 1 damage (sand goes to a teammate) */
+  private updateGhost(dt: number) {
+    const inp = this.input;
+    const m = this.mods;
+    if (this.ghostCd > 0) this.ghostCd -= dt;
+    const mv = this.locked ? { x: 0, y: 0 } : inp.move();
+    this.moveX = mv.x; this.moveY = mv.y;
+    this.updateAim(mv);
+    const spd = m.moveSpeed * 0.9;
+    const acc = 1 - Math.exp(-14 * dt);
+    this.vx += (mv.x * spd - this.vx) * acc;
+    this.vy += (mv.y * spd - this.vy) * acc;
+    this.collides = true;
+    this.world.move(this, this.vx * dt, this.vy * dt);
+    const moving = Math.hypot(this.vx, this.vy) > 12;
+    if (moving) this.setFacing(Math.atan2(this.vy, this.vx));
+    this.anim = moving ? Anim.Run : Anim.Idle;
+    if (!this.locked && inp.pressed('attack') && this.ghostCd <= 0) {
+      this.ghostCd = 0.35;
+      const c = Math.cos(this.aim), s2 = Math.sin(this.aim);
+      this.world.combat.add({
+        shape: { t: 'arc', x: this.x, y: this.y - 7, r: 22, a: this.aim, w: 0.9 }, team: 'player', life: 3,
+        info: { amount: 1, kind: 'melee', owner: this, knock: 20, src: 'ghost', quiet: true },
+      });
+      this.world.fx.ring(this.x + c * 12, this.y - 7 + s2 * 12, 1, 7, 0.18, this.color, 1);
+      sfx('swingEcho', { vol: 0.35, pan: this.world.pan(this.x) });
+    }
+    this.updateScarf(dt);
   }
 
   private updateAim(mv: { x: number; y: number }) {
@@ -311,10 +410,11 @@ export class Player extends Actor implements Wielder {
     this.world.fx.dust(this.x, this.y, 4, Math.atan2(dy, dx));
     sfx('dash', { pan: this.world.pan(this.x) });
     this.input.rumble(0, 0.25, 60);
-    this.world.bus.emit('dash', { owner: this, dx, dy, echo: false });
+    this.world.bus.emit('dash', { owner: this, dx, dy, echo: false, player: this });
     // perfect dodge check: enemy projectile/hitbox nearby
     if (this.world.enemies.some((e) => (e as any).attacking && Math.hypot(e.x - this.x, e.y - this.y) < 40)) {
-      this.world.bus.emit('perfectDodge', { x: this.x, y: this.y });
+      this.world.bus.emit('perfectDodge', { x: this.x, y: this.y, player: this });
+      this.world.bus.emit('tickDodge', { x: this.x, y: this.y, player: this });
     }
   }
 
@@ -339,15 +439,15 @@ export class Player extends Actor implements Wielder {
     });
   }
 
-  canRewind() { return this.run.charges >= 1 && this.recorder.length >= 20 && !this.rewinding && this.hp > 0 && this.falling <= 0; }
+  canRewind() { return this.lo.charges >= 1 && this.recorder.length >= 20 && !this.rewinding && this.hp > 0 && this.falling <= 0 && this.state === 'alive'; }
 
   tryRewind(auto = false) {
     if (!this.canRewind() && !auto) {
-      if (!this.rewinding && this.hp > 0) { sfx('denied', { vol: 0.6 }); this.world.fx.banner(this.x, this.y - 30, this.run.charges < 1 ? '时砂不足' : '……', 'K7', 0.6); }
+      if (!this.rewinding && this.hp > 0) { sfx('denied', { vol: 0.6 }); this.world.fx.banner(this.x, this.y - 30, this.lo.charges < 1 ? tr(S('f2', 'noSand')) : '……', 'K7', 0.6); }
       return;
     }
     if (this.recorder.length < 2) return;
-    if (!auto) this.run.charges--;
+    if (!auto) this.lo.charges--;
     const rec = this.recorder.take();
     this.rewinding = { rec, t: 0, dur: 0.42, fromX: this.x, fromY: this.y };
     this.ignoreFreeze = true;
@@ -385,7 +485,9 @@ export class Player extends Actor implements Wielder {
     const first = R.rec.frames[0];
     this.x = first.x; this.y = first.y;
     const fixedDuring = this.fixedTaken - first.fixed;
-    const restoreTo = m.noRewindHeal ? this.hp : Math.max(this.hp, Math.min(this.maxHp, first.hp - fixedDuring));
+    let restoreTo = m.noRewindHeal ? this.hp : Math.max(this.hp, Math.min(this.maxHp, first.hp - fixedDuring));
+    // rewinding out of a stop always stands you back up (tape HP, at least 1)
+    if (this.rescueRewind) { restoreTo = Math.max(1, Math.min(this.maxHp, Math.max(restoreTo, first.hp - fixedDuring))); this.rescueRewind = false; }
     const restored = restoreTo - this.hp;
     this.hp = restoreTo;
     this.rewinding = null;
@@ -398,6 +500,7 @@ export class Player extends Actor implements Wielder {
     const alive = this.echoes.filter((e) => !e.dead);
     while (alive.length >= m.maxEchoes) { const old = alive.shift()!; old.shatter(false); }
     const echo = this.world.add(new Echo(R.rec, this.weapon, m.echoDmg, m.echoSpeed));
+    echo.player = this;
     this.echoes.push(echo);
     if (m.mirrorEcho) {
       // mirrored twin: reflect the path horizontally around the start point
@@ -407,7 +510,11 @@ export class Player extends Actor implements Wielder {
         events: R.rec.events.map((e) => ({ ...e, angle: e.angle !== undefined ? Math.PI - e.angle : undefined, dx: e.dx !== undefined ? -e.dx : undefined })),
       };
       // keep mirrored path inside walkable space
-      if (mir.frames.every((f) => !this.world.map.solidAt(f.x, f.y))) this.echoes.push(this.world.add(new Echo(mir, this.weapon, m.echoDmg * 0.5, m.echoSpeed)));
+      if (mir.frames.every((f) => !this.world.map.solidAt(f.x, f.y))) {
+        const twin = this.world.add(new Echo(mir, this.weapon, m.echoDmg * 0.5, m.echoSpeed));
+        twin.player = this;
+        this.echoes.push(twin);
+      }
     }
     this.recorder.clear();
     this.scarfA.reset(this.x, this.y - 10);
@@ -419,8 +526,8 @@ export class Player extends Actor implements Wielder {
     sfx('rewindEnd');
     this.input.rumble(0.45, 0.3, 140);
     G.audio.muffle(false);
-    this.world.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored });
-    this.world.bus.emit('echoSpawn', { echo });
+    this.world.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored, player: this, seconds: R.rec.frames.length / 60 });
+    this.world.bus.emit('echoSpawn', { echo, player: this });
   }
 
   private paradox(e: Echo) {
@@ -442,18 +549,19 @@ export class Player extends Actor implements Wielder {
     sfx('paradox');
     this.input.rumble(1, 0.8, 260);
     G.audio.duck(0.4, 0.7);
-    w.bus.emit('paradox', { x, y, echo: e });
+    w.bus.emit('paradox', { x, y, echo: e, player: this, kind: 'overlap', chain: 1, duet: false });
     if (!m.paradoxKeepsEcho) e.shatter(true);
     else e.paradoxReady = false;
   }
 
   // ───────────────────────── damage ─────────────────────────
   hurt(info: DamageInfo): number {
-    if (this.hp <= 0 || this.rewinding) return 0;
+    if (this.hp <= 0 || this.rewinding || this.state !== 'alive') return 0;
     if ((this.invuln > 0 || this.dashT > 0) && !info.pierceInvuln) return 0;
     const m = this.mods;
-    if (this.run.shieldReady) {
-      this.run.shieldReady = false;
+    const lo = this.lo;
+    if (lo.shieldReady) {
+      lo.shieldReady = false;
       this.invuln = 0.6;
       this.world.fx.banner(this.x, this.y - 30, '封蜡', 'B5', 0.8);
       this.world.fx.ring(this.x, this.y - 8, 4, 22, 0.3, 'B5', 2);
@@ -481,17 +589,17 @@ export class Player extends Actor implements Wielder {
     G.r.params.hurt = 1;
     sfx('hurt');
     this.input.rumble(0.55, 0.8, 180);
-    w.bus.emit('damaged', { info, dealt: amt });
+    w.bus.emit('damaged', { info, dealt: amt, player: this, undoable: !info.fixed });
     if (this.hp <= 0) {
-      if (this.run.autoRewindLeft > 0 && this.recorder.length > 10) {
-        this.run.autoRewindLeft--;
+      if (lo.autoRewindLeft > 0 && this.recorder.length > 10) {
+        lo.autoRewindLeft--;
         this.hp = 1;
         this.tryRewind(true);
         w.fx.banner(this.x, this.y - 36, '最后一秒！', 'C3', 1.2);
         return amt;
       }
-      if (this.run.revivesUsed < m.revives) {
-        this.run.revivesUsed++;
+      if (lo.revivesUsed < m.revives) {
+        lo.revivesUsed++;
         this.hp = Math.round(this.maxHp * 0.4);
         this.invuln = 2;
         w.fx.banner(this.x, this.y - 36, '第二根发条', 'B5', 1.4);
@@ -501,9 +609,9 @@ export class Player extends Actor implements Wielder {
         sfx('rewindEnd');
         return amt;
       }
-      this.hp = 0;
-      this.deadT = 0;
-      sfx('playerDeath');
+      // the clock stops (solo: the Last Second window first; co-op: 15 s to be wound up)
+      Down.stop(this);
+      this.syncRun();
     }
     return amt;
   }
@@ -546,13 +654,15 @@ export class Player extends Actor implements Wielder {
 
   renderGround(r: Renderer) {
     if (this.falling > 0) return;
+    if (this.state === 'ghost') return;
+    if (this.state === 'stopped') Down.renderStoppedGround(r, this);
     const ctx = r.w;
     ctx.fillStyle = 'rgba(11,10,20,0.45)';
     ctx.beginPath();
     ctx.ellipse(Math.round(this.x), Math.round(this.y), 6, 2.5, 0, 0, TAU);
     ctx.fill();
     // co-op: a pixel ring in the slot colour under each hand (GDD2 §5.2)
-    if (this.world.playerCount > 1 && this.hp > 0) {
+    if (this.world.playerCount > 1 && this.hp > 0 && this.state === 'alive') {
       const cx = Math.round(this.x), cy = Math.round(this.y);
       ctx.globalAlpha = 0.75;
       ctx.fillStyle = col(this.color);
@@ -562,6 +672,9 @@ export class Player extends Actor implements Wielder {
   }
 
   render(r: Renderer) {
+    if (this.state === 'ghost') return this.renderGhost(r);
+    if (this.state === 'stopped' && this.world.playerCount > 1) { Down.renderStoppedBody(r, this, this.frames.hurt.down); return; }
+    if (this.state === 'stopped' && !this.down.final) { Down.renderStoppedBody(r, this, this.currentSprite()); return; }
     if (this.hp <= 0 && this.deadT > 0.05) return this.renderDead(r);
     const ctx = r.w;
     const spr = this.currentSprite();
@@ -605,6 +718,11 @@ export class Player extends Actor implements Wielder {
   renderUnlit(r: Renderer) {
     // aim reticle (mouse) is drawn by HUD; here: future path of echoes
     for (const e of this.echoes) if (!e.dead) e.renderPath(r);
+    if (this.state === 'stopped') { Down.renderStoppedUnlit(r, this); Down.renderStoppedLabel(r, this); return; }
+    if (this.state === 'ghost') {
+      if (this.world.playerCount > 1) drawSlotBadge(r.u, this.slot, Math.round(this.x), Math.round(this.y) - 27 + Math.round(Math.sin(this.world.time * 3)));
+      return;
+    }
     // co-op: shape badge 3 px above the crown so colour-blind players can tell the hands apart
     if (this.world.playerCount > 1 && this.hp > 0 && this.falling <= 0) drawSlotBadge(r.u, this.slot, Math.round(this.x), Math.round(this.y) - 25);
     // low-HP heartbeat outline
@@ -612,6 +730,19 @@ export class Player extends Actor implements Wielder {
       const spr = this.currentSprite();
       drawSprite(r.u, spr, this.x, this.y, { flip: this.flip, tint: 'R3', alpha: 0.35 });
     }
+  }
+
+  /** a pale, floating hand with its scarf still in the slot colour */
+  private renderGhost(r: Renderer) {
+    const spr = this.currentSprite();
+    const bob = Math.round(Math.sin(this.world.time * 3) * 1.5) - 2;
+    this.scarfB.draw(r.w, undefined, 0.45);
+    this.scarfA.draw(r.w, undefined, 0.45);
+    drawSprite(r.w, spr, this.x, this.y + bob, { flip: this.flip, tint: 'K8', alpha: 0.4 });
+    r.g.globalCompositeOperation = 'lighter';
+    drawSprite(r.g, spr, this.x, this.y + bob, { flip: this.flip, tint: this.color, alpha: 0.18 });
+    r.g.globalCompositeOperation = 'source-over';
+    r.lightAt(this.x, this.y - 8, 26, 'K8', 0.2);
   }
 
   private renderDead(r: Renderer) {

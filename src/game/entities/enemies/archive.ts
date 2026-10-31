@@ -123,10 +123,10 @@ export class PageSwarm extends Enemy {
         const sp = 235 * this.speedMul;
         const hit = this.world.move(this, Math.cos(this.diveA) * sp * dt, Math.sin(this.diveA) * sp * dt);
         if (Math.floor(this.stateT * 40) % 2 === 0) this.world.particles.spawn({ kind: 'px', x: this.x, y: this.y - this.hover, vx: frand(-8, 8), vy: frand(-8, 8), life: 0.25, ramp: ['K9', 'K7'], size: 1 });
-        const p = this.world.player;
-        if (!this.hitDone && p && Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r + 3) {
+        const sh = { t: 'circle' as const, x: this.x, y: this.y, r: this.r + 3 };
+        if (!this.hitDone && this.world.playersIn(sh).length) {
           this.hitDone = true;
-          p.hurt({ amount: 6, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 90 });
+          this.world.hurtPlayers(sh, { amount: 6, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 90 });
         }
         if (hit) { this.setState('crumple'); this.squash = 0.6; sfx('paperHit', { vol: 0.5, pan: this.world.pan(this.x) }); this.world.fx.burst(this.x, this.y - 6, 4, ['K9', 'K8'], 60, 0.3, 'world', 'px'); }
         else if (this.stateT > 0.4) this.setState('recover');
@@ -194,9 +194,9 @@ export class InkPuddle extends Entity {
   update(dt: number) {
     this.life -= dt;
     if (this.life <= 0) { this.kill(); return; }
-    const p = this.world.player;
-    if (!p || p.hp <= 0 || p.falling > 0 || (p as any).airborne) return;
     const rx = this.rx * (0.5 + this.k * 0.5), ry = this.ry * (0.5 + this.k * 0.5);
+    for (const p of this.world.players) {
+    if (p.state !== 'alive' || p.falling > 0 || (p as any).airborne) continue;
     const dx = (p.x - this.x) / rx, dy = (p.y - this.y) / ry;
     if (dx * dx + dy * dy < 1) {
       if (p.st.slow <= 0) sfx('inkStep', { vol: 0.5, pan: this.world.pan(p.x) });
@@ -207,6 +207,7 @@ export class InkPuddle extends Entity {
         this.dripT = 0.12;
         this.world.particles.spawn({ kind: 'px', x: p.x + frand(-3, 3), y: p.y, z: frand(0, 4), vz: frand(20, 45), grav: 260, vx: frand(-12, 12), vy: frand(-4, 4), life: 0.4, ramp: ['K1', 'U1'], size: 1, bounce: 0 });
       }
+    }
     }
   }
   renderGround(r: Renderer) {
@@ -285,10 +286,10 @@ export class InkHound extends Enemy {
         }
         if (Math.floor(this.stateT * 30) % 2 === 0)
           this.world.particles.spawn({ kind: 'px', x: this.x - Math.cos(this.dashA) * 8, y: this.y - 6, z: 4, vz: frand(20, 50), grav: 280, vx: -Math.cos(this.dashA) * frand(20, 60), vy: frand(-10, 10), life: 0.45, ramp: ['K1', 'U1'], size: 2, bounce: 0 });
-        const p = this.world.player;
-        if (!this.hitDone && p && Math.hypot(p.x - this.x, p.y - this.y) < this.r + p.r + 3) {
+        const sh = { t: 'circle' as const, x: this.x, y: this.y, r: this.r + 3 };
+        if (!this.hitDone && this.world.playersIn(sh).length) {
           this.hitDone = true;
-          p.hurt({ amount: 12, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 180 });
+          this.world.hurtPlayers(sh, { amount: 12, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 180 });
         }
         if (hit || moved < 0.5) {
           this.setState('skid');

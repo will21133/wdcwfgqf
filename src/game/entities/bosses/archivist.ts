@@ -74,13 +74,12 @@ class InkLine extends Entity {
   update(dt: number) {
     this.t += dt;
     if (this.t > this.warn && this.t < this.warn + this.live) {
-      const p = this.world.player;
-      if (p) {
-        const vx = this.x1 - this.x0, vy = this.y1 - this.y0;
-        const L2 = vx * vx + vy * vy;
-        const k = clamp(((p.x - this.x0) * vx + (p.y - this.y0) * vy) / L2, 0, 1);
-        if (Math.hypot(p.x - (this.x0 + vx * k), p.y - (this.y0 + vy * k)) < 7) p.hurt({ amount: 9, kind: 'aoe', owner: this.owner, x: p.x, y: p.y - 10, knock: 80 });
-      }
+      const vx = this.x1 - this.x0, vy = this.y1 - this.y0;
+      const L2 = vx * vx + vy * vy;
+      for (const p of this.world.playersIn((q) => {
+        const k = clamp(((q.x - this.x0) * vx + (q.y - this.y0) * vy) / L2, 0, 1);
+        return Math.hypot(q.x - (this.x0 + vx * k), q.y - (this.y0 + vy * k)) < 7;
+      })) this.world.hurtPlayers((q) => q === p, { amount: 9, kind: 'aoe', owner: this.owner, x: p.x, y: p.y - 10, knock: 80 });
     }
     if (this.t > this.warn + this.live) this.kill();
   }
@@ -107,8 +106,7 @@ class SandFall extends Entity {
     const prev = this.t;
     this.t += dt;
     if (prev < this.warn && this.t >= this.warn) {
-      const p = this.world.player;
-      if (p && Math.hypot(p.x - this.x, (p.y - this.y) * 1.4) < 18) p.hurt({ amount: 12, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 120, fixed: true });
+      this.world.hurtPlayers((p) => Math.hypot(p.x - this.x, (p.y - this.y) * 1.4) < 18, { amount: 12, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 120, fixed: true });
       for (let i = 0; i < 14; i++) this.world.particles.spawn({ kind: 'debris', x: this.x + frand(-8, 8), y: this.y, z: frand(0, 6), vx: frand(-40, 40), vy: frand(-20, 20), vz: frand(30, 80), grav: 300, life: frand(0.4, 0.8), ramp: ['S4', 'S3', 'V3'], size: 1 });
       this.world.fx.ring(this.x, this.y, 3, 20, 0.3, 'V3', 2, 'unlit');
       sfx('splash', { vol: 0.4, pan: this.world.pan(this.x) });
@@ -185,7 +183,7 @@ export class Archivist extends Boss {
     if (this.revT <= 0) { this.revT = this.phase >= 2 ? 6 : 8; return 'revise'; }
     if (!this.queue.length) {
       this.queue = this.phase === 0 ? ['pages', 'ink', 'sand', 'pages'] : this.phase === 1 ? ['pages', 'ink', 'sand', 'teleport', 'pages', 'ink'] : ['pages', 'sand', 'ink', 'teleport', 'sand', 'pages'];
-      this.queue.sort(() => Math.random() - 0.5);
+      this.world.rng.shuffle(this.queue);
     }
     return this.queue.shift()!;
   }

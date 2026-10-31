@@ -56,7 +56,8 @@ export class Bullet extends Entity {
     this.speed += this.accel * dt;
     this.ang += this.turn * dt;
     if (this.homing) {
-      const tgt = this.team === 'player' ? this.world.nearestEnemy(this.x, this.y, 140) : this.world.player;
+      // enemy homing shots curve toward the nearest standing hand (GDD2 §5.8)
+      const tgt = this.team === 'player' ? this.world.nearestEnemy(this.x, this.y, 140) : this.world.nearestPlayer(this.x, this.y);
       if (tgt) {
         const want = Math.atan2(tgt.y - 6 - this.y, tgt.x - this.x);
         let d = want - this.ang;

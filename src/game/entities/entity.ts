@@ -45,6 +45,8 @@ export interface StatusState {
   resonance: number;
   slow: number; slowAmt: number;
   stun: number;
+  /** who applied each status (its damage and sand go to that hand; F2b) */
+  burnBy?: Actor | null; rustBy?: Actor | null; stasisBy?: Actor | null; resonanceBy?: Actor | null;
 }
 
 export const newStatus = (): StatusState => ({ burn: 0, burnT: 0, burnTick: 0, rust: 0, stasis: 0, stasisStored: 0, resonance: 0, slow: 0, slowAmt: 0, stun: 0 });

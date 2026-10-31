@@ -110,7 +110,7 @@ export class LanternMoth extends Boss {
   }
 
   private next(): string {
-    if (!this.queue.length) this.queue = (this.phase ? ['spiral', 'dive', 'gust', 'swarm', 'spiral', 'dive', 'darkness'] : ['spiral', 'gust', 'dive', 'swarm', 'spiral']).sort(() => Math.random() - 0.5);
+    if (!this.queue.length) this.queue = this.world.rng.shuffle(this.phase ? ['spiral', 'dive', 'gust', 'swarm', 'spiral', 'dive', 'darkness'] : ['spiral', 'gust', 'dive', 'swarm', 'spiral']);
     return this.queue.shift()!;
   }
 

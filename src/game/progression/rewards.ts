@@ -1,5 +1,5 @@
 // Floor plan (door options) and reward generation / granting.
-import type { Run, OwnedMemory } from '../run';
+import type { Run, OwnedMemory, Loadout } from '../run';
 import type { RoomKind } from '../world/roomgen';
 import type { Sprite } from '../../engine/gfx/sprite';
 import { MEMORIES, MEMORY_LIST, PATRONS, Patron, offerable, EXCLUSIVE_SLOTS, MemoryDef } from './memories';
@@ -19,10 +19,12 @@ export interface RoomOption { kind: RoomKind; reward: RewardKind | null; patron?
 const PATRON_IDS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
 
 export function pickPatron(run: Run, rng: RNG): Patron {
-  // weight patrons you already have a bit higher (builds cohere), but keep variety
+  // weight patrons the hands already have a bit higher (builds cohere), but keep variety
+  const L = run.all;
   return rng.weighted(PATRON_IDS, (p) => {
-    const owned = run.memories.filter((m) => MEMORIES[m.id]?.patron === p).length;
-    const avail = offerable(run, p).length;
+    let owned = 0, avail = 0;
+    for (const lo of L) { owned += lo.memories.filter((m) => MEMORIES[m.id]?.patron === p).length; avail += offerable(lo, p).length; }
+    owned /= Math.max(1, L.length);
     if (avail === 0) return 0;
     return 1 + Math.min(owned, 3) * 0.35;
   }) ?? 'oren';
@@ -41,7 +43,7 @@ export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; eli
     [() => ({ kind: 'combat', reward: 'memory', patron: pickPatron(run, rng) }), 46],
     [() => ({ kind: 'combat', reward: 'hourglass' }), next > 1 ? 9 : 0],
     [() => ({ kind: 'combat', reward: 'brass' }), 9],
-    [() => ({ kind: 'combat', reward: 'heal' }), run.hp < run.mods.maxHp * 0.6 ? 12 : 5],
+    [() => ({ kind: 'combat', reward: 'heal' }), run.all.some((lo) => lo.hp < lo.mods.maxHp * 0.6) ? 12 : 5],
     [() => ({ kind: 'combat', reward: 'calibration' }), next > 1 ? 9 : 0],
     [() => ({ kind: 'combat', reward: 'part' }), 6],
     [() => ({ kind: 'elite', reward: rng.chance(0.5) ? 'part' : 'memory', patron: pickPatron(run, rng) }), next >= 3 && floorState.elites < 2 ? 11 : 0],
@@ -119,9 +121,9 @@ export function rollRarity(rng: RNG, floor: number, boost = 0): number {
   return 0;
 }
 
-export function memoryChoices(run: Run, rng: RNG, patron: Patron, onApplied: (om: OwnedMemory, replaced: OwnedMemory | null) => void, boost = 0): Choice[] {
-  const pool = offerable(run, patron);
-  const n = 3 + run.mods.extraChoice;
+export function memoryChoices(run: Run, lo: Loadout, rng: RNG, patron: Patron, onApplied: (om: OwnedMemory, replaced: OwnedMemory | null) => void, boost = 0): Choice[] {
+  const pool = offerable(lo, patron);
+  const n = 3 + lo.mods.extraChoice;
   // prefer slot variety; legendaries/duos are rarer
   const picks: MemoryDef[] = [];
   const bag = rng.shuffle(pool.slice());
@@ -132,9 +134,9 @@ export function memoryChoices(run: Run, rng: RNG, patron: Patron, onApplied: (om
     picks.push(m);
   }
   return picks.map((m) => {
-    const b = boost + run.luck;
+    const b = boost + lo.luck;
     const rarity = m.slot === 'legendary' || m.slot === 'duo' ? Math.max(2, rollRarity(rng, run.floor, b)) : rollRarity(rng, run.floor, b);
-    const existing = EXCLUSIVE_SLOTS.includes(m.slot) ? run.memories.find((o) => MEMORIES[o.id]?.slot === m.slot) : undefined;
+    const existing = EXCLUSIVE_SLOTS.includes(m.slot) ? lo.memories.find((o) => MEMORIES[o.id]?.slot === m.slot) : undefined;
     const p = PATRONS[m.patron];
     return {
       id: m.id,
@@ -149,9 +151,9 @@ export function memoryChoices(run: Run, rng: RNG, patron: Patron, onApplied: (om
       apply: () => {
         const om: OwnedMemory = { id: m.id, rarity };
         let replaced: OwnedMemory | null = null;
-        if (existing) { replaced = existing; run.memories = run.memories.filter((o) => o !== existing); }
-        run.memories.push(om);
-        run.recompute();
+        if (existing) { replaced = existing; lo.memories = lo.memories.filter((o) => o !== existing); }
+        lo.memories.push(om);
+        lo.recompute();
         onApplied(om, replaced);
       },
     };
@@ -164,26 +166,28 @@ function weightOf(m: MemoryDef) {
   return 1;
 }
 
-export function hourglassChoices(run: Run, rng: RNG, onApplied: (id: string) => void): Choice[] {
-  const pool = HOURGLASS.filter((h) => run.hourglass.filter((x) => x === h.id).length < (h.max ?? 1));
+export function hourglassChoices(lo: Loadout, rng: RNG, onApplied: (id: string) => void): Choice[] {
+  const pool = HOURGLASS.filter((h) => lo.hourglass.filter((x) => x === h.id).length < (h.max ?? 1));
   return rng.shuffle(pool.slice()).slice(0, 3).map((h) => ({
     id: h.id, title: h.name, desc: h.desc, icon: ICONS.hourglass, rarity: 1,
     tag: L('沙漏 · 回溯强化', 'Hourglass · Rewind'), color: 'C3',
-    apply: () => { run.hourglass.push(h.id); run.recompute(); onApplied(h.id); },
+    apply: () => { lo.hourglass.push(h.id); lo.recompute(); onApplied(h.id); },
   }));
 }
 
-export function calibrationChoices(run: Run, rng: RNG, onApplied: (id: string) => void): Choice[] {
-  const pool = CALIBRATIONS.filter((c) => c.weapon === run.weapon && run.calibrations.filter((x) => x === c.id).length < (c.max ?? 1));
+export function calibrationChoices(lo: Loadout, rng: RNG, onApplied: (id: string) => void): Choice[] {
+  const pool = CALIBRATIONS.filter((c) => c.weapon === lo.weapon && lo.calibrations.filter((x) => x === c.id).length < (c.max ?? 1));
   return rng.shuffle(pool.slice()).slice(0, 3).map((c) => ({
     id: c.id, title: c.name, desc: c.desc, icon: ICONS.whetstone, rarity: 0,
     tag: L('校准 · 武器强化', 'Calibration · Weapon'), color: 'K9',
-    apply: () => { run.calibrations.push(c.id); run.recompute(); onApplied(c.id); },
+    apply: () => { lo.calibrations.push(c.id); lo.recompute(); onApplied(c.id); },
   }));
 }
 
-export function rollPart(run: Run, rng: RNG, opts: { shop?: boolean; allowCursed?: boolean } = {}): PartDef | null {
-  const pool = PARTS.filter((p) => !run.parts.includes(p.id) && (opts.shop || !p.shopOnly) && (opts.allowCursed !== false || !p.cursed));
+/** a part none of `owners` has yet (default: every hand in the run) */
+export function rollPart(run: Run, rng: RNG, opts: { shop?: boolean; allowCursed?: boolean; lo?: Loadout } = {}): PartDef | null {
+  const owners = opts.lo ? [opts.lo] : run.all;
+  const pool = PARTS.filter((p) => !owners.some((lo) => lo.parts.includes(p.id)) && (opts.shop || !p.shopOnly) && (opts.allowCursed !== false || !p.cursed));
   return rng.weighted(pool, (p) => [6, 3, 1.2][p.rarity] * (p.cursed ? 0.5 : 1)) ?? null;
 }
 

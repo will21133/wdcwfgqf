@@ -1,5 +1,5 @@
 // 报时长弓 Chime Bow — tap for quick arrows, hold to charge a piercing chime; echo arrows home in.
-import { Weapon, Wielder, Step, Pose, WeaponInput, Hooks } from './weapon';
+import { Weapon, Wielder, Step, Pose, WeaponInput, Hooks, wielderPlayer } from './weapon';
 import type { Renderer } from '../../engine/gfx/renderer';
 import { bowRot } from '../../art/sprites/weapons';
 import { drawSprite } from '../../engine/gfx/sprite';
@@ -63,7 +63,7 @@ export class Bow extends Weapon {
     if (full && !w.isEcho) { world.shake(0.12); world.fx.ring(w.x + Math.cos(angle) * 10, w.y - 8 + Math.sin(angle) * 10, 2, 16, 0.2, 'B6', 2); }
     sfx(w.isEcho ? 'swingEcho' : full ? 'lunge' : 'thrust', { pan: world.pan(w.x), vol: w.isEcho ? 0.4 : 0.8 });
     if (full) sfx('charge', { vol: 0.4 });
-    world.bus.emit('attack', { owner: w as any, combo: full ? 2 : 0, angle, echo: w.isEcho });
+    world.bus.emit('attack', { owner: w as any, combo: full ? 2 : 0, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   specialDuration() { return 0.25; }
@@ -74,7 +74,7 @@ export class Bow extends Weapon {
       world.add(new Bullet({ team: 'player', x: w.x, y: w.y - 8, ang: angle + i * 0.17, speed: 340, dmg: amount, style: 'arrow', r: 2, owner: w as any, homing: w.isEcho ? 3 : 0, echo: w.isEcho, pal: w.isEcho ? ['W', 'C4', 'C2'] : ['W', 'B6', 'B4'], life: 1.2, knock: 90, info: { crit, src: 'special' } }));
     }
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });
-    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho });
+    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   pose(facing: number): Pose {

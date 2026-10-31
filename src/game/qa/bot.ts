@@ -60,21 +60,34 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   br.tapT -= dt;
   const roomT = br.roomT;
   const tap = (a: Action) => { if (br.tapT <= 0) { b.pressed.add(a); br.tapT = 0.35; } };
+  // stopped: try to rewind out (Last Second / self-rescue), otherwise wait for a teammate
+  if (p.state === 'stopped' && !s.overlays.some((o) => o.blocks)) { if (Math.random() < 0.04) b.pressed.add('rewind'); if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
   // overlays / death: confirm
-  if (s.overlays.some((o) => o.blocks) || p.hp <= 0) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
+  if (s.overlays.some((o) => o.blocks) || (p.hp <= 0 && p.state !== 'ghost')) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
   const go = (x: number, y: number) => {
     const step = pathStep(s, p.x, p.y, x, y);
     const tx = step ? step.x : x, ty = step ? step.y : y;
     const d = Math.hypot(tx - p.x, ty - p.y);
     if (d > 2) b.move = { x: (tx - p.x) / d, y: (ty - p.y) / d };
   };
+  // a teammate has stopped: walk over and hold Interact to wind them up (GDD2 §5.5)
+  if (p.state === 'alive') {
+    let down: Player | null = null, dd = 320;
+    for (const q of w.players) if (q !== p && q.state === 'stopped') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; down = q; } }
+    if (down) {
+      if (dd > 12) go(down.x, down.y);
+      if (dd < 18) b.held.add('interact');
+      return;
+    }
+  }
   const enemies = w.aliveEnemies;
   if (enemies.length) {
     let tgt = enemies[0], bd = 1e9;
     for (const e of enemies) { const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < bd) { bd = d; tgt = e; } }
     const a = angleTo(p.x, p.y, tgt.x, tgt.y);
     b.aimX = Math.cos(a); b.aimY = Math.sin(a);
-    const range = s.run.weapon === 'bow' || s.run.weapon === 'chakram' ? 90 : 26;
+    const wpn = s.run.lo(p.slot).weapon;
+    const range = wpn === 'bow' || wpn === 'chakram' ? 90 : 26;
     // co-op bots circle on their own side so four of them don't stack on one spot
     const side = p.slot % 2 ? -1 : 1;
     if (bd > range) go(tgt.x, tgt.y);
@@ -83,7 +96,7 @@ export function botStep(s: GameScene, p: Player, dt: number) {
     if (Math.random() < 0.01) b.pressed.add('special');
     const danger = enemies.some((e) => (e as any).attacking && Math.hypot(e.x - p.x, e.y - p.y) < 50);
     if (danger && Math.random() < 0.3) { b.pressed.add('dash'); b.move = { x: -Math.sin(a) * side, y: Math.cos(a) * side }; }
-    if (p.hp < p.maxHp * 0.6 && s.run.charges > 0 && Math.random() < 0.05) b.pressed.add('rewind');
+    if (p.hp < p.maxHp * 0.6 && s.run.lo(p.slot).charges > 0 && Math.random() < 0.05) b.pressed.add('rewind');
     return;
   }
   // rewards first (give up after a while; skip vault chests — the cage needs the echo puzzle)

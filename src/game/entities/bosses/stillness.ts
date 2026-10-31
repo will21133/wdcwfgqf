@@ -89,13 +89,12 @@ class SweepHand extends Entity {
     this.t += dt;
     if (this.t > this.warn) this.ang += this.speed * dt;
     if (this.t > this.warn) {
-      const p = this.world.player;
-      if (p) {
-        const vx = Math.cos(this.ang), vy = Math.sin(this.ang);
+      const vx = Math.cos(this.ang), vy = Math.sin(this.ang);
+      this.world.hurtPlayers((p) => {
         const along = (p.x - this.cx) * vx + (p.y - this.cy) * vy;
         const across = Math.abs(-(p.x - this.cx) * vy + (p.y - this.cy) * vx);
-        if (along > 0 && along < this.len && across < this.width / 2 + 3) p.hurt({ amount: 12, kind: 'aoe', owner: this.owner, x: this.cx, y: this.cy, knock: 160, fixed: this.owner.phase >= 2 });
-      }
+        return along > 0 && along < this.len && across < this.width / 2 + 3;
+      }, { amount: 12, kind: 'aoe', owner: this.owner, x: this.cx, y: this.cy, knock: 160, fixed: this.owner.phase >= 2 });
     }
     if (this.t > this.warn + this.dur) this.kill();
   }
@@ -186,7 +185,7 @@ export class Stillness extends Boss {
       this.queue = this.phase === 0 ? ['hands', 'tears', 'wave', 'hands', 'tears']
         : this.phase === 1 ? ['hands', 'tears', 'stop', 'wave', 'phantoms', 'hands', 'stop']
           : ['hands', 'tears', 'stop', 'wave', 'hands', 'tears', 'phantoms'];
-      this.queue.sort(() => Math.random() - 0.5);
+      this.world.rng.shuffle(this.queue);
     }
     return this.queue.shift()!;
   }
@@ -270,7 +269,7 @@ export class Stillness extends Boss {
           this.stopDmg = 0;
           this.world.frozen = true;
           (this as any).ignoreFreeze = true;
-          for (const e of this.world.player?.echoes ?? []) (e as any).ignoreFreeze = true;
+          for (const pl of this.world.players) for (const e of pl.echoes) (e as any).ignoreFreeze = true;
           sfx('stasisBreak');
           G.audio.muffle(true, 500);
           rumbleAll(0.3, 0.9, 400);
@@ -302,7 +301,7 @@ export class Stillness extends Boss {
     this.world.frozen = false;
     this.world.timeStop = 0;
     (this as any).ignoreFreeze = false;
-    for (const e of this.world.player?.echoes ?? []) (e as any).ignoreFreeze = false;
+    for (const pl of this.world.players) for (const e of pl.echoes) (e as any).ignoreFreeze = false;
     G.audio.muffle(false);
     if (broken) {
       this.world.fx.banner(this.x, this.y - 100, tr(L('过去击碎了静止！', 'The past shatters the stillness!')), 'C3', 1.6);

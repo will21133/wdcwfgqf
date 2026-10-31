@@ -43,6 +43,12 @@ import { settings } from '../settings';
 import { Hints, hintsHooks } from '../ui/hints';
 import { Text } from '../ui/text';
 import { col } from '../../art/palette';
+import type { Loadout, OwnedMemory } from '../run';
+import { coopScale } from '../world/coopScale';
+import * as Down from '../systems/downed';
+import { coopCamera, renderCoopEdges, type CoopCam } from '../world/coopCamera';
+import { S } from '../strings';
+import '../strings/f2';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
 
@@ -69,6 +75,8 @@ export class GameScene implements Scene, RoomHost {
   titleCard: { title: string; sub: string; t: number } | null = null;
   boss: Boss | null = null;
   private bossPhase = 0;
+  /** co-op camera state (tether glow, catch-up timers) */
+  private coop: CoopCam = { glow: [], away: [] };
   /** set by the flow controller (hub/title) */
   onDeath?: (run: Run) => void;
   onVictory?: (run: Run) => void;
@@ -102,7 +110,6 @@ export class GameScene implements Scene, RoomHost {
       pl.autoWalk = 0.32;
       return w.add(pl);
     });
-    const p = ps[0];
     w.cam.snap(ex, ey - 40);
     map.exits.forEach((e, i) => {
       const o = this.options[i];
@@ -110,16 +117,21 @@ export class GameScene implements Scene, RoomHost {
       this.doors.push(w.add(new Door(e, { icon: look.icon, label: tr(look.label), color: look.color }, () => this.leave(o ?? null))));
     });
     w.flushAdds();
-    run.registerHooks(w, p);
+    // every hand's own inventory hooks, bound to that hand (PLAN2 §1.5)
+    run.registerHooks(w);
     w.bus.on('spawn', (e) => { const k = (e.e as any).codexId; if (k) markSeen((e.e as any).isBoss ? 'bosses' : 'enemies', k); }, this);
-    run.shieldReady = run.mods.firstHitShield > 0;
-    run.onCharge = () => { sfx('charge'); this.world.player?.input.rumble(0.12, 0.25, 90); };
+    for (const pl of ps) {
+      const lo = run.lo(pl.slot);
+      lo.shieldReady = lo.mods.firstHitShield > 0;
+      lo.onCharge = () => { sfx('charge'); pl.input.rumble(0.12, 0.25, 90); };
+    }
+    const scale = coopScale(ps.length);
     const dbgSpawn = G.debug.get('spawn');
     const kind = this.opt.kind;
     if (dbgSpawn && run.roomIndex === 0 && run.floor === Number(G.debug.get('floor') ?? 0)) {
       this.waves = [{ defs: dbgSpawn.split(',').map((id) => findEnemy(id)).filter((d) => !!d) as any }];
     } else if (kind === 'combat' || kind === 'elite') {
-      this.waves = planWaves(this.rng, run.floor, run.roomIndex, kind === 'elite', run.overwind);
+      this.waves = planWaves(this.rng, run.floor, run.roomIndex, kind === 'elite', run.overwind, scale.budget);
       if (kind === 'elite') run.floorState.elites++;
     } else if (kind === 'boss') {
       const c = this.center();
@@ -130,7 +142,7 @@ export class GameScene implements Scene, RoomHost {
         this.cleared = false;
         for (const pl of ps) pl.locked = true;
         this.titleCard = { title: tr(b.bossName), sub: tr(b.bossTitle), t: -0.2 };
-      } else this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind);
+      } else this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind, scale.budget);
     } else if (kind === 'tutorial') {
       const c = this.center();
       w.add(new Dummy(c.x, c.y - 30));
@@ -157,56 +169,68 @@ export class GameScene implements Scene, RoomHost {
       else this.offerMemory(off as Patron);
     }
     if (run.roomIndex === 0 && !this.boss) this.titleCard = { title: tr(th.name), sub: tr(L(`第 ${run.floor + 1} 层`, `FLOOR ${run.floor + 1}`)), t: 0 };
+    w.bus.emit('roomStart', { kind });
   }
+
+  /** the hand a reward / choice belongs to (default: the first one standing) */
+  private who(p?: Player | null): Player { return p ?? this.world.player!; }
+  private loFor(p?: Player | null): Loadout { return this.run.lo(this.who(p).slot); }
 
   // ───────────────────────── RoomHost ─────────────────────────
   openOverlay(o: Overlay) { this.overlays.push(o); }
 
-  openChoice(choices: Choice[], header: ChoiceHeader, after?: () => void, regen?: () => Choice[]) {
+  openChoice(choices: Choice[], header: ChoiceHeader, after?: () => void, regen?: () => Choice[], who?: Player | null) {
     if (!choices.length) { after?.(); return; }
-    const run = this.run;
+    const pl = this.who(who);
+    const lo = this.loFor(pl);
     const ov = new ChoiceOverlay(choices, header, (c) => {
-      const p = this.world.player!;
-      this.world.fx.banner(p.x, p.y - 36, tr(c.title), c.color, 1.4);
-      p.input.rumble(0.2, 0.2, 100);
+      this.world.fx.banner(pl.x, pl.y - 36, tr(c.title), c.color, 1.4);
+      pl.input.rumble(0.2, 0.2, 100);
       if (MEMORIES[c.id]) markSeen('memories', c.id);
       after?.();
-    }, regen ? () => { if (run.rerolls <= 0) return null; run.rerolls--; return regen(); } : undefined);
-    ov.rerollsLeft = () => run.rerolls;
+    }, regen ? () => { if (lo.rerolls <= 0) return null; lo.rerolls--; return regen(); } : undefined);
+    ov.rerollsLeft = () => lo.rerolls;
     this.openOverlay(ov);
   }
 
-  offerMemory(patron: Patron, boost = 0) {
+  offerMemory(patron: Patron, boost = 0, who?: Player | null) {
     const pd = PATRONS[patron];
-    const applied = (om: import('../run').OwnedMemory, replaced: import('../run').OwnedMemory | null) => {
+    const pl = this.who(who), lo = this.loFor(pl);
+    const applied = (om: OwnedMemory, replaced: OwnedMemory | null) => {
       if (replaced) this.world.bus.off(replaced);
       const d = MEMORIES[om.id];
-      d.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, om) }, d.v[om.rarity]);
-      this.syncPlayer();
+      const c = lo.liveCtx(om);
+      if (c) d.hook?.(c, d.v[om.rarity]);
+      this.syncPlayer(pl);
     };
-    const gen = () => memoryChoices(this.run, this.rng, patron, applied, boost);
-    this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color, term: 'memory' }, undefined, gen);
+    const gen = () => memoryChoices(this.run, lo, this.rng, patron, applied, boost);
+    this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color, term: 'memory' }, undefined, gen, pl);
   }
 
-  offerHourglass() {
-    this.openChoice(hourglassChoices(this.run, this.rng, () => this.syncPlayer()), { title: UI.hourglass, sub: L('回溯的本质', 'The nature of rewinding'), icon: ICONS.hourglass, color: 'C3', term: 'hourglass' });
+  offerHourglass(who?: Player | null) {
+    const pl = this.who(who), lo = this.loFor(pl);
+    this.openChoice(hourglassChoices(lo, this.rng, () => this.syncPlayer(pl)), { title: UI.hourglass, sub: L('回溯的本质', 'The nature of rewinding'), icon: ICONS.hourglass, color: 'C3', term: 'hourglass' }, undefined, undefined, pl);
   }
 
-  offerCalibration() {
-    this.openChoice(calibrationChoices(this.run, this.rng, (id) => {
-      CAL_BY_ID[id]?.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, id) });
-      this.syncPlayer();
-    }), { title: UI.calibration, sub: WEAPON_INFO.find((x) => x.id === this.run.weapon)?.name, icon: ICONS.whetstone, color: 'K9', term: 'calibration' });
+  offerCalibration(who?: Player | null) {
+    const pl = this.who(who), lo = this.loFor(pl);
+    this.openChoice(calibrationChoices(lo, this.rng, (id) => {
+      const c = lo.liveCtx(lo.key(id));
+      if (c) CAL_BY_ID[id]?.hook?.(c);
+      this.syncPlayer(pl);
+    }), { title: UI.calibration, sub: WEAPON_INFO.find((x) => x.id === lo.weapon)?.name, icon: ICONS.whetstone, color: 'K9', term: 'calibration' }, undefined, undefined, pl);
   }
 
-  grantPart(p: PartDef) {
+  grantPart(p: PartDef, who?: Player | null) {
+    const pl = this.who(who), lo = this.loFor(pl);
     markSeen('parts', p.id);
-    this.run.parts.push(p.id);
-    this.run.recompute();
-    p.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, p.id) });
+    lo.parts.push(p.id);
+    lo.recompute();
+    const c = lo.liveCtx(lo.key(p.id));
+    if (c) p.hook?.(c);
     const look = partLook(p);
     this.toast(look.icon, tr(p.name), tr(p.desc), look.color);
-    this.syncPlayer();
+    this.syncPlayer(pl);
   }
 
   toast(icon: Sprite | null, title: string, desc: string, color = 'B5') { this.overlays.push(new Toast(icon, title, desc, color)); }
@@ -224,25 +248,29 @@ export class GameScene implements Scene, RoomHost {
     return { x: Math.round((sx / n) * TS + 8), y: Math.round((sy / n) * TS + 8) };
   }
 
-  /** keep the live player in sync with recomputed stats */
-  private syncPlayer() {
-    const p = this.world.player;
+  /** keep a live hand in sync with its recomputed stats */
+  syncPlayer(who?: Player | null) {
+    const p = who ?? this.world.player;
     if (!p) return;
+    const m = this.run.lo(p.slot).mods;
     const before = p.maxHp;
-    p.maxHp = this.run.mods.maxHp;
-    if (p.maxHp > before) p.hp += p.maxHp - before;
+    p.maxHp = m.maxHp;
+    if (p.maxHp > before && p.state === 'alive') p.hp += p.maxHp - before;
     p.hp = Math.min(p.maxHp, p.hp);
-    this.run.hp = p.hp;
-    p.recorder.setWindow(this.run.mods.rewindWindow);
-    if (p.dashCharges > this.run.mods.dashCharges) p.dashCharges = this.run.mods.dashCharges;
+    p.syncRun();
+    p.recorder.setWindow(m.rewindWindow);
+    if (p.dashCharges > m.dashCharges) p.dashCharges = m.dashCharges;
   }
 
   // ───────────────────────── flow ─────────────────────────
   private spawnWave() {
     const w = this.world;
     const wave = this.waves[this.waveIdx];
-    const p = w.player!;
-    const spots = w.map.spawnable.filter((s) => Math.hypot(s.tx * TS + 8 - p.x, s.ty * TS + 8 - p.y) > 90);
+    // never spawn on top of anyone standing
+    const L = w.alive().length ? w.alive() : w.players;
+    let spots = w.map.spawnable.filter((s) => L.every((p) => Math.hypot(s.tx * TS + 8 - p.x, s.ty * TS + 8 - p.y) > 90));
+    if (!spots.length) spots = w.map.spawnable.filter((s) => Math.hypot(s.tx * TS + 8 - L[0].x, s.ty * TS + 8 - L[0].y) > 90);
+    if (!spots.length) spots = w.map.spawnable.slice();
     this.rng.shuffle(spots);
     let si = 0;
     for (const d of wave.defs) {
@@ -263,7 +291,8 @@ export class GameScene implements Scene, RoomHost {
     const run = this.run;
     run.stats.rooms++;
     sfx('roomClear');
-    w.fx.banner(w.player!.x, w.player!.y - 40, tr(UI.cleared), 'B5', 1.6);
+    const bp = w.player!;
+    w.fx.banner(bp.x, bp.y - 40, tr(UI.cleared), 'B5', 1.6);
     w.bus.emit('roomClear', {});
     w.slowmo(0.35, 0.35);
     rumbleAll(0.2, 0.3, 120);
@@ -273,7 +302,7 @@ export class GameScene implements Scene, RoomHost {
     if (o.kind === 'boss') {
       for (let i = 0; i < 8 + run.floor * 3; i++) w.add(new Pickup(c.x, c.y, 'shard', 1));
       this.spawnReward({ kind: 'combat', reward: 'memory', patron: this.rng.pick(ALL_PATRONS) }, c, 0.3);
-      w.add(new Pickup(c.x + 30, c.y, 'heal', Math.round(run.mods.maxHp * 0.5)));
+      w.add(new Pickup(c.x + 30, c.y, 'heal', Math.round(run.lo(bp.slot).mods.maxHp * 0.5)));
     } else this.spawnReward(o, c);
     this.unlockDoors();
   }
@@ -282,19 +311,24 @@ export class GameScene implements Scene, RoomHost {
     const w = this.world, run = this.run;
     if (!o.reward) return;
     const look = rewardKindLook(o.reward, o.patron);
+    // the hand that touches an orb gets that choice (F2c gives each hand its own orb)
     switch (o.reward) {
-      case 'memory': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => this.offerMemory(o.patron ?? 'oren', boost + (o.kind === 'elite' ? 0.15 : 0)))); break;
-      case 'hourglass': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => this.offerHourglass())); break;
-      case 'calibration': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => this.offerCalibration())); break;
+      case 'memory': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, (p) => this.offerMemory(o.patron ?? 'oren', boost + (o.kind === 'elite' ? 0.15 : 0), p))); break;
+      case 'hourglass': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, (p) => this.offerHourglass(p))); break;
+      case 'calibration': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, (p) => this.offerCalibration(p))); break;
       case 'heal': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => {
-        const p = w.player!; const a = Math.round(p.maxHp * 0.3 * run.mods.healMul);
-        p.hp = Math.min(p.maxHp, p.hp + a); w.fx.number(p.x, p.y - 26, a, 'G4', true); sfx('heal');
+        // oil heals the whole team (GDD2 §5.8)
+        for (const p of w.alive()) {
+          const a = Math.round(p.maxHp * 0.3 * run.lo(p.slot).mods.healMul);
+          p.hp = Math.min(p.maxHp, p.hp + a); w.fx.number(p.x, p.y - 26, a, 'G4', true);
+        }
+        sfx('heal');
       })); break;
-      case 'brass': for (let i = 0; i < 18 + run.floor * 6; i++) w.add(new Pickup(c.x, c.y, 'brass', 3)); break;
+      case 'brass': for (let i = 0, n = Math.round((18 + run.floor * 6) * coopScale(w.playerCount).brass); i < n; i++) w.add(new Pickup(c.x, c.y, 'brass', 3)); break;
       case 'shards': for (let i = 0; i < 4; i++) w.add(new Pickup(c.x, c.y, 'shard', 1)); break;
       case 'part': {
         const part = rollPart(run, this.rng, { allowCursed: false });
-        w.add(new Chest(c.x, c.y, () => { if (part) this.grantPart(part); }, () => tr(UI.part)));
+        w.add(new Chest(c.x, c.y, (p) => { if (part) this.grantPart(part, p); }, () => tr(UI.part)));
         break;
       }
     }
@@ -317,7 +351,7 @@ export class GameScene implements Scene, RoomHost {
       run.floor++;
       run.roomIndex = 0;
       run.floorState = { shop: false, elites: 0, vault: false };
-      run.autoRewindLeft = run.mods.autoRewindPerFloor;
+      for (const lo of run.all) lo.autoRewindLeft = lo.mods.autoRewindPerFloor;
       G.scenes.go(() => this.next({ kind: 'combat', reward: 'memory', patron: this.rng.pick(ALL_PATRONS) }), 'clock', 0.8);
       return;
     }
@@ -339,6 +373,7 @@ export class GameScene implements Scene, RoomHost {
     this.t += dt;
     const w = this.world;
     const p = w.player!;
+    const out = w.players.every((q) => Down.isOut(q));
     this.run.time += dt;
     if (this.titleCard) { this.titleCard.t += dt; if (this.titleCard.t > 3.2) this.titleCard = null; }
     // overlays: the topmost blocking overlay owns input; toasts tick underneath
@@ -351,8 +386,8 @@ export class GameScene implements Scene, RoomHost {
       if (top.blocks && this.overlays.includes(top)) { this.hud.update(dt, w); return; }
       if (this.overlays.some((o) => o.blocks)) { this.hud.update(dt, w); return; }
     }
-    if (G.input.pressed('pause') && p.hp > 0) { this.overlays.push(new PauseMenu(this)); return; }
-    if (G.input.pressed('info') && p.hp > 0) { this.overlays.push(new RunInfoPanel(this.run)); return; }
+    if (G.input.pressed('pause') && !out) { this.overlays.push(new PauseMenu(this)); return; }
+    if (G.input.pressed('info') && !out) { this.overlays.push(new RunInfoPanel(this.run)); return; }
     w.update(dt);
     if (!w.frozen && !this.cleared) w.bus.emit('tick', { dt });
     if (this.boss) {
@@ -362,7 +397,7 @@ export class GameScene implements Scene, RoomHost {
       if (this.boss.phase !== this.bossPhase) { this.bossPhase = this.boss.phase; Hints.hold(4); }
       if (!this.cleared && this.boss.dead) { this.cleared = true; this.onClear(); }
       G.music.layer('boss', this.boss.phase > 0 && !this.boss.dead ? 1 : 0, this.boss.dead ? 4 : 2);
-    } else if (!this.cleared && p.hp > 0) {
+    } else if (!this.cleared && w.alive().length > 0) {
       const alive = w.aliveEnemies.length;
       if (this.waveIdx < 0 || (alive <= (this.waveIdx < this.waves.length - 1 ? 1 : 0) && this.waveIdx < this.waves.length - 1)) {
         this.waveDelay -= dt;
@@ -373,23 +408,21 @@ export class GameScene implements Scene, RoomHost {
     const combat = !this.cleared && w.aliveEnemies.length > 0;
     G.music.layer('combat', combat ? 1 : 0, combat ? 0.8 : 3);
     if (w.playerCount > 1) {
-      // co-op: the camera holds the midpoint of everyone standing, no aim look-ahead (GDD2 §5.3;
-      // F2b adds the tether and off-screen arrows)
-      const ls = w.alive().length ? w.alive() : w.players;
-      let cx = 0, cy = 0;
-      for (const pl of ls) { cx += pl.x; cy += pl.y; }
-      w.cam.follow(cx / ls.length, cy / ls.length - 10, dt, 7);
+      // co-op: midpoint of everyone standing, no aim look-ahead, a 600×340 tether and catch-up
+      // (GDD2 §5.3; world/coopCamera.ts)
+      coopCamera(w, this.coop, dt);
     } else {
       const look = p.input.aiming() ? 0.36 : 0;
       w.cam.follow(p.x + Math.cos(p.aim) * 40 * look, p.y - 10 + Math.sin(p.aim) * 30 * look, dt, 7);
     }
     this.hud.update(dt, w);
     this.postFx(dt, p);
-    if (p.hp <= 0) {
+    // the run ends when every hand has stopped (solo: once the Last Second has run out)
+    if (out) {
       this.deathT += dt;
       if (this.deathT < dt * 1.5) { w.slowmo(0.25, 1.2); rumbleAll(0.9, 1, 500); G.music.stop(2); }
       if (this.deathT > 2.4 && (G.input.pressed('confirm') || G.input.pressed('attack'))) {
-        this.run.hp = 0;
+        for (const q of w.players) q.syncRun();
         this.bankStats();
         if (this.onDeath) this.onDeath(this.run);
         else G.scenes.go(() => new GameScene(new Run(), { kind: 'combat', reward: 'memory', patron: 'oren' }), 'clock', 0.6);
@@ -400,14 +433,15 @@ export class GameScene implements Scene, RoomHost {
   /** pause when the window loses focus (alt-tab, overlay) */
   autoPause() {
     if (G.debug.has('bot')) return;
-    if (this.world?.player && this.world.player.hp > 0 && !this.overlays.some((o) => o.blocks)) this.overlays.push(new PauseMenu(this));
+    if (this.world?.alive().length && !this.overlays.some((o) => o.blocks)) this.overlays.push(new PauseMenu(this));
   }
 
   /** failsafe: an enemy nobody has touched for 40s gets pulled back to reachable ground */
   private stuckT = new Map<number, number>();
   private unstick(dt: number) {
-    const w = this.world, p = w.player!;
+    const w = this.world;
     for (const e of w.aliveEnemies) {
+      const p = (w.nearestPlayer(e.x, e.y) ?? w.player)!;
       if (e.isBoss) continue;
       const t = (this.stuckT.get(e.id) ?? 0) + dt;
       this.stuckT.set(e.id, e.hp < e.maxHp && e.flash > 0 ? 0 : t);
@@ -449,17 +483,22 @@ export class GameScene implements Scene, RoomHost {
     this.world.render(r);
     r.flushWorldUi();
     this.hud.boss = this.boss && !this.boss.inIntro && !this.boss.dead ? this.boss : null;
-    this.hud.render(r, this.world);
     const ctx = r.ui2;
+    // co-op: tether glow on the screen edges and arrows to anyone off screen (under the HUD)
+    if (this.world.playerCount > 1) renderCoopEdges(ctx, this.world, this.coop);
+    this.hud.render(r, this.world);
     // the floor / boss title card yields to menus and reward screens (it would sit half under them)
     if (this.titleCard && !blocking) this.renderTitleCard(ctx);
-    if (this.world.player!.hp <= 0 && this.deathT > 1.0) {
+    const lp = this.world.players[0];
+    if (lp && !blocking) Down.renderLastSecondUi(ctx, lp);
+    if (this.world.players.every((q) => Down.isOut(q)) && this.deathT > 1.0) {
       const a = Math.min(1, (this.deathT - 1.0) / 1.0);
       ctx.globalAlpha = a * 0.75;
       ctx.fillStyle = '#0b0a14';
       ctx.fillRect(0, 0, 640, 360);
       ctx.globalAlpha = a;
       G.font.draw(ctx, tr(UI.stopped), 320, 150, { align: 'center', color: 'R3', outline: 'K0' });
+      if (this.world.playerCount > 1) Text.draw(ctx, S('f2', 'allStopped'), 320, 178, { align: 'center', color: 'K9', outline: 'K0' });
       if (this.deathT > 2.4) G.font.draw(ctx, tr(UI.retry), 320, 196, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K8' });
       ctx.globalAlpha = 1;
     }

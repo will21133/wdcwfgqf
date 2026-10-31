@@ -262,7 +262,7 @@ class OverwindLever extends Interactable {
   }
 }
 
-export interface HubHooks { startRun(): void; title(): void }
+export interface HubHooks { startRun(config?: import('../run').RunConfig): void; title(): void }
 
 export class HubScene implements Scene {
   world!: World;
@@ -397,7 +397,7 @@ export class HubScene implements Scene {
     w.update(dt);
     // keep everyone topped up in the workshop
     for (const q of w.players) q.hp = q.maxHp;
-    this.run.charges = this.run.mods.rewindCharges;
+    for (const q of w.players) { const lo = this.run.lo(q.slot); lo.charges = lo.mods.rewindCharges; }
     let fx = p.rewindFx;
     if (w.playerCount > 1) {
       let cx = 0, cy = 0;

@@ -8,6 +8,8 @@ import { rect } from './ui/draw';
 import type { ColorKey } from './ui/text';
 import { SLOT_COLOR } from './ui/widgets';
 import { hintsHooks } from './ui/hints';
+import type { Player } from './entities/player';
+import type { Loadout } from './run';
 
 export { SLOT_COLOR };
 export const SLOT_SHAPE = ['tri', 'circle', 'square', 'diamond'] as const;
@@ -91,3 +93,25 @@ export function initPlayersFromUrl(q: URLSearchParams = G.debug) {
 
 // Ines's notes pause the game only in solo (GDD2 §9.2)
 hintsHooks.players = () => Math.max(1, devices.count);
+
+// ───────────────────────── ownership (F2b) ─────────────────────────
+/**
+ * The hand an attacker belongs to: a Player itself, an echo's player, or anything that carries an
+ * `owner` / `player` back-reference (effect entities, bullets, constructs). null for enemies and
+ * world hazards.
+ */
+export function ownerPlayer(owner: unknown, depth = 0): Player | null {
+  const o = owner as { kind?: string; team?: string; input?: unknown; slot?: unknown; player?: unknown; owner?: unknown } | null | undefined;
+  if (!o || depth > 3) return null;
+  if (o.kind === 'player' && o.team === 'player' && o.input && typeof o.slot === 'number') return o as unknown as Player;
+  if (o.player) return ownerPlayer(o.player, depth + 1);
+  if (o.owner && o.owner !== o) return ownerPlayer(o.owner, depth + 1);
+  return null;
+}
+
+/** that hand's loadout (or null when the owner is no player) */
+export function loOf(owner: unknown): Loadout | null {
+  const p = ownerPlayer(owner);
+  const run = p?.world?.run;
+  return p && run ? run.lo(p.slot) : null;
+}

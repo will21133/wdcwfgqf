@@ -11,11 +11,16 @@ import { sfx } from '../G';
 import type { Dir } from '../../art/sprites/tick';
 import { frand } from '../../engine/rng';
 import { TAU } from '../../engine/math';
+import type { Player } from './player';
 
 const ECHO_RAMP = ['C0', 'C1', 'C2', 'C3', 'C4'];
 
 export class Echo extends Entity implements Wielder {
   isEcho = true;
+  /** the hand whose past this is (hits, kills and sand are credited to it) */
+  player: Player | null = null;
+  /** > 0 while this echo draws aggro (Mina's taunt, GDD2 §5.2; P5) */
+  taunt = 0;
   dmgScale: number;
   lastSecond = false;
   flip = false;
@@ -66,7 +71,7 @@ export class Echo extends Entity implements Wielder {
       if (e.type === 'attack') this.weapon.perform(this, e.combo!, e.angle!);
       else if (e.type === 'special') this.weapon.performSpecial(this, e.angle!, e.charge);
       else if (e.type === 'dash') {
-        this.world.bus.emit('dash', { owner: this as any, dx: e.dx!, dy: e.dy!, echo: true });
+        this.world.bus.emit('dash', { owner: this as any, dx: e.dx!, dy: e.dy!, echo: true, player: this.player ?? undefined });
         sfx('dashEcho', { vol: 0.4, pan: this.world.pan(this.x) });
       }
       this.lastSecond = false;
@@ -106,7 +111,7 @@ export class Echo extends Entity implements Wielder {
       w.particles.spawn({ kind: 'debris', x: this.x, y: this.y - 2, z: frand(4, 16), vx: Math.cos(a) * frand(20, 60), vy: Math.sin(a) * frand(20, 60), vz: frand(30, 80), grav: 300, life: frand(0.4, 0.8), ramp: ['C3', 'C2'], layer: 'glow', size: 1 });
     }
     if (!paradox) sfx('echoEnd', { vol: 0.5, pan: w.pan(this.x) });
-    w.bus.emit('echoEnd', { echo: this, paradox });
+    w.bus.emit('echoEnd', { echo: this, paradox, player: this.player ?? undefined });
     this.kill();
   }
 

@@ -1,5 +1,5 @@
 // 钟摆巨锤 Pendulum Maul — slow, heavy, wide; echoes send out shockwaves.
-import { Weapon, Wielder, Step, Pose } from './weapon';
+import { Weapon, Wielder, Step, Pose, wielderPlayer, wielderLo } from './weapon';
 import type { Renderer } from '../../engine/gfx/renderer';
 import { maulRot } from '../../art/sprites/weapons';
 import { drawSprite } from '../../engine/gfx/sprite';
@@ -38,8 +38,8 @@ export class Maul extends Weapon {
       sfx('slam', { vol: w.isEcho ? 0.4 : 0.8, pan: world.pan(w.x) });
     }
     // echo trait: every echo swing releases a shockwave
-    if (w.isEcho) world.add(new Shockwave(w.x, w.y - 4, 46, { amount: 14 * world.run!.mods.dmg, kind: 'aoe', owner: world.player, knock: 140, echo: true, src: 'attack' }, 'C3', 0.25));
-    world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho });
+    if (w.isEcho) world.add(new Shockwave(w.x, w.y - 4, 46, { amount: 14 * wielderLo(w).mods.dmg, kind: 'aoe', owner: w as any, knock: 140, echo: true, src: 'attack' }, 'C3', 0.25));
+    world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   specialDuration() { return 0.65; }
@@ -47,9 +47,9 @@ export class Maul extends Weapon {
     const world = w.world;
     const { amount, crit } = this.roll(w, 12, true);
     world.combat.add({ shape: { t: 'circle', x: w.x, y: w.y - 7, r: 36 }, team: 'player', life: 39, follow: w as any, rehit: 0.13, info: { amount, crit, kind: 'melee', knock: 120, owner: w as any, echo: w.isEcho, src: 'special', hitstop: 0.02 } });
-    for (let i = 0; i < 4; i++) setTimeout(() => world.add(new Smear(w, 0, -7, 'arc', angle + i * 1.6, { R: 36, thick: 10, sweep: 3.4 }, w.isEcho ? 'echo' : 'ember', 0.16)), i * 150);
+    for (let i = 0; i < 4; i++) world.after(i * 0.15, () => world.add(new Smear(w, 0, -7, 'arc', angle + i * 1.6, { R: 36, thick: 10, sweep: 3.4 }, w.isEcho ? 'echo' : 'ember', 0.16)), w);
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });
-    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho });
+    world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
   moveMul() { return this.phase === 'special' ? 0.55 : super.moveMul(); }

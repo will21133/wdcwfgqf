@@ -1111,7 +1111,7 @@ class FrozenButterfly extends Entity {
     this.t += dt;
     this.glint -= dt;
     if (this.glint < -0.35) this.glint = frand(2.5, 7);
-    const p = this.world.player;
+    const p = this.world.nearestPlayer(this.x, this.y, { alive: false });
     if (this.flutter <= 0 && p && Math.hypot(p.x - this.x, p.y - this.y) < 14) {
       // startle: flutter to a nearby open spot
       for (let k = 0; k < 8; k++) {

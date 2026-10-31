@@ -1,0 +1,8 @@
+[
+  {"t": 0, "eval": "(() => { const s = __G.scenes.current, w = s.world; window.__rev = null; window.__down = null; w.bus.on('downed', (e) => { window.__down = { slot: e.player.slot, t: w.time }; }); w.bus.on('revived', (e) => { window.__rev = { slot: e.player.slot, by: e.by ? e.by.slot : null, source: e.source, hp: e.player.hp, maxHp: e.player.maxHp, frac: Math.round(e.player.hp / e.player.maxHp * 100) / 100 }; }); const p = w.players[1]; p.lo.charges = 0; p.lo.sand = 0; p.invuln = 0; p.dashT = 0; p.hurt({ amount: 9999, kind: 'contact', pierceInvuln: true }); return { players: w.playerCount, p2: { state: p.state, hp: p.hp }, down: window.__down }; })()"},
+  {"t": 700, "shot": "stopped"},
+  {"t": 720, "eval": "(() => { const w = __G.scenes.current.world, p = w.players[1]; return { state: p.state, stoppedFor: Math.round(p.down.t * 100) / 100, wind: Math.round(p.down.wind * 100) / 100 }; })()"},
+  {"t": 1500, "shot": "winding"},
+  {"t": 6000, "eval": "(() => { const w = __G.scenes.current.world, p = w.players[1]; return { revived: window.__rev, now: { state: p.state, hp: p.hp, maxHp: p.maxHp } }; })()"},
+  {"t": 6020, "shot": "revived"}
+]

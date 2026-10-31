@@ -13,7 +13,7 @@ class Sign extends Entity {
   constructor(x: number, y: number, private actions: Action[], private text: L10n, private when?: () => boolean) { super(); this.x = x; this.y = y; }
   renderUnlit(r: Renderer) {
     if (this.when && !this.when()) return;
-    const p = this.world.player;
+    const p = this.world.nearestPlayer(this.x, this.y, { alive: false });
     const near = p ? Math.max(0, 1 - Math.hypot(p.x - this.x, p.y - this.y) / 220) : 0;
     // floor inscriptions never fade below 0.7 so they stay readable from across the room
     const a = Math.max(0.7, 0.35 + near * 0.65);
@@ -40,12 +40,15 @@ class RewindCoach extends Entity {
   /** seconds until the follow-up line ("touch it to cause a Paradox"); runs on world time */
   private followUp = -1;
   constructor() { super(); }
+  /** the hand being coached (whoever took the hit) */
+  private who: import('../entities/player').Player | null = null;
   added() {
-    this.world.bus.on('damaged', () => { if (!this.done) { this.shown = true; this.t = 0; } }, this);
-    this.world.bus.on('rewind', () => {
+    this.world.bus.on('damaged', (e) => { if (!this.done) { this.shown = true; this.t = 0; this.who = e.player ?? this.who; } }, this);
+    this.world.bus.on('rewind', (e) => {
       if (this.done) return;
       this.done = true;
-      const p = this.world.player!;
+      const p = e.player ?? this.world.player!;
+      this.who = p;
       this.world.fx.banner(p.x, p.y - 44, tr(L('那是三秒前的你。', 'That is you, three seconds ago.')), 'C3', 2.4);
       this.followUp = 2.5;
     }, this);
@@ -54,17 +57,19 @@ class RewindCoach extends Entity {
   update(dt: number) {
     this.t += dt;
     if (this.followUp > 0 && (this.followUp -= dt) <= 0) {
-      const p = this.world.player;
+      const p = this.who ?? this.world.player;
       if (p) this.world.fx.banner(p.x, p.y - 44, tr(L('触碰它，引发{c:悖论}。', 'Touch it to cause a {c:Paradox}.')), 'C3', 2.4);
     }
   }
   renderUnlit(r: Renderer) {
     if (!this.shown || this.done) return;
-    const p = this.world.player!;
+    const p = this.who ?? this.world.player;
+    if (!p) return;
     const t = tr(L('受伤了？按下回溯，撤销刚才的伤害！', 'Hurt? Rewind to undo the damage!'));
     const blink = Math.floor(this.t * 3) % 2 === 0;
     const px = p.x, py = p.y - 52;
-    r.worldUi((ctx, toUi) => { const q = toUi(px, py); drawPromptLabel(ctx, 'rewind', t, q.x, q.y, { color: blink ? 'C3' : 'C4' }); });
+    const who = p.input;
+    r.worldUi((ctx, toUi) => { const q = toUi(px, py); drawPromptLabel(ctx, 'rewind', t, q.x, q.y, { color: blink ? 'C3' : 'C4', who }); });
   }
 }
 

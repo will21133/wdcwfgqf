@@ -116,18 +116,20 @@ export class RunInfoPanel implements Overlay {
   blocks = true;
   hidesNotes = true;
   sel = 0;
-  constructor(private run: Run) {}
+  /** slot: whose build to show (F2c opens one per hand) */
+  constructor(private run: Run, private slot = 0) {}
   private entries(): { icon: Sprite; name: string; desc: string; color: string; tag: string }[] {
     const run = this.run;
     const out: { icon: Sprite; name: string; desc: string; color: string; tag: string }[] = [];
-    for (const om of run.memories) {
+    const lo = run.lo(this.slot);
+    for (const om of lo.memories) {
       const d = MEMORIES[om.id];
       if (!d) continue;
       out.push({ icon: patronSigil(d.patron), name: tr(d.name), desc: tr(d.desc(d.v[om.rarity])), color: RARITY_TEXT[om.rarity], tag: `${tr(PATRONS[d.patron].name)} · ${tr(UI.slots[d.slot])} · ${tr(UI.rarity[om.rarity])}` });
     }
-    for (const id of run.hourglass) { const h = HOURGLASS_BY_ID[id]; if (h) out.push({ icon: ICONS.hourglass, name: tr(h.name), desc: tr(h.desc), color: 'C3', tag: tr(UI.hourglass) }); }
-    for (const id of run.calibrations) { const c = CAL_BY_ID[id]; if (c) out.push({ icon: ICONS.whetstone, name: tr(c.name), desc: tr(c.desc), color: 'K9', tag: tr(UI.calibration) }); }
-    for (const id of run.parts) { const p = PARTS_BY_ID[id]; if (p) { const lk = partLook(p); out.push({ icon: lk.icon, name: tr(p.name), desc: tr(p.desc), color: lk.color, tag: tr(UI.part) }); } }
+    for (const id of lo.hourglass) { const h = HOURGLASS_BY_ID[id]; if (h) out.push({ icon: ICONS.hourglass, name: tr(h.name), desc: tr(h.desc), color: 'C3', tag: tr(UI.hourglass) }); }
+    for (const id of lo.calibrations) { const c = CAL_BY_ID[id]; if (c) out.push({ icon: ICONS.whetstone, name: tr(c.name), desc: tr(c.desc), color: 'K9', tag: tr(UI.calibration) }); }
+    for (const id of lo.parts) { const p = PARTS_BY_ID[id]; if (p) { const lk = partLook(p); out.push({ icon: lk.icon, name: tr(p.name), desc: tr(p.desc), color: lk.color, tag: tr(UI.part) }); } }
     return out;
   }
   update(dt: number) {
@@ -147,9 +149,10 @@ export class RunInfoPanel implements Overlay {
     panel(ctx, 40, 24, 560, 312);
     const run = this.run;
     G.font.draw(ctx, tr(L('本局构筑', 'Your Build')), 320, 34, { align: 'center', color: 'B5' });
-    const m = run.mods;
+    const lo = run.lo(this.slot);
+    const m = lo.mods;
     const stats = [
-      `${tr(L('生命', 'HP'))} ${Math.ceil(run.hp)}/${m.maxHp}`,
+      `${tr(L('生命', 'HP'))} ${Math.ceil(lo.hp)}/${m.maxHp}`,
       `${tr(L('伤害', 'Damage'))} ${Math.round(m.dmg * 100)}%`,
       `${tr(L('暴击', 'Crit'))} ${Math.round(m.critChance * 100)}%`,
       `${tr(L('回溯', 'Rewind'))} ${m.rewindCharges}×${m.rewindWindow.toFixed(1)}s`,

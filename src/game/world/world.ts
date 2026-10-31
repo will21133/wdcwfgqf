@@ -3,17 +3,30 @@ import { Particles } from '../../engine/particles';
 import { Camera } from '../../engine/camera';
 import { makeCanvas } from '../../engine/gfx/canvas';
 import { Actor, Entity } from '../entities/entity';
-import { Combat } from '../systems/combat';
+import { Combat, circleHits, type Shape, type DamageInfo } from '../systems/combat';
 import { Bus } from '../systems/bus';
 import { RoomMap, TS, T } from './room';
 import { RoomVisual, renderRoom } from './roomRender';
 import { Theme } from '../../art/themes';
 import { FX } from './fx';
-import { frand } from '../../engine/rng';
+import { frand, RNG } from '../../engine/rng';
 import { mix } from '../../art/palette';
 import { VIEW_W } from '../../engine/gfx/post';
 import type { Run } from '../run';
 import type { Player } from '../entities/player';
+import { ownerPlayer } from '../players';
+
+/** a sim-time timer (world.after / world.every) */
+interface Timer { t: number; fn: () => void; owner: unknown; every: number; dead: boolean }
+/** an enemy's current aggro choice (GDD2 §5.8) */
+interface Aggro { target: Actor | null; slot: number; until: number }
+/** damage dealt to an enemy by a hand, for aggro scoring */
+interface DmgMark { t: number; slot: number; amount: number }
+
+/** aggro lock-in (s): an enemy keeps its target at least this long so it doesn't jitter */
+export const AGGRO_LOCK = 1.5;
+/** aggro damage memory (s) */
+export const AGGRO_MEMORY = 3;
 
 export interface WorldStats { damage: number; kills: number; rewinds: number; paradoxes: number; hitsTaken: number }
 
@@ -26,12 +39,14 @@ export class World {
   players: Player[] = [];
   /** compat (1.0 code): the first living player, else the first player */
   get player(): Player | null {
-    for (const p of this.players) if (p.hp > 0) return p;
+    for (const p of this.players) if (p.state === 'alive') return p;
     return this.players[0] ?? null;
   }
   get playerCount(): number { return this.players.length; }
-  /** players still standing */
-  alive(): Player[] { return this.players.filter((p) => p.hp > 0); }
+  /** players still standing (not stopped, not a ghost) */
+  alive(): Player[] { return this.players.filter((p) => p.state === 'alive'); }
+  /** this room's seeded stream (derived from run.rng); use it for gameplay choices, never Math.random */
+  rng: RNG;
   particles = new Particles();
   combat: Combat;
   bus = new Bus();
@@ -56,9 +71,14 @@ export class World {
   timeStop = 0;
   private dustT = 0;
   private toAdd: Entity[] = [];
-  /** BFS distance field toward the player (for enemy navigation) */
+  /** multi-source BFS distance field toward the nearest standing player (enemy navigation) */
   flow: Int16Array;
+  /** one field per player slot, so an enemy can path to the hand it is after */
+  private flowSlot: (Int16Array | null)[] = [];
   private flowT = 0;
+  private timers: Timer[] = [];
+  private aggro = new Map<number, Aggro>();
+  private dmgLog = new Map<number, DmgMark[]>();
 
   constructor(public map: RoomMap, public theme: Theme, seed: number) {
     this.combat = new Combat(this);
@@ -67,20 +87,173 @@ export class World {
     [this.decals, this.dctx] = makeCanvas(map.pw, map.ph);
     this.cam.bounds = { x: 0, y: -8, w: map.pw, h: map.ph + 8 };
     this.flow = new Int16Array(map.w * map.h).fill(-1);
+    this.rng = new RNG((seed * 2654435761) >>> 0);
   }
 
-  private updateFlow() {
-    const p = this.player;
+  // ───────────────────────── players & targeting (PLAN2 §1.4) ─────────────────────────
+  /**
+   * The nearest player to (x, y). alive (default true): standing hands only. taunts: a taunting
+   * echo (Mina, GDD2 §5.2; echo.taunt > 0) counts as a target too.
+   */
+  nearestPlayer(x: number, y: number, o: { alive?: boolean; taunts?: boolean } = {}): Actor | null {
+    const onlyAlive = o.alive !== false;
+    let best: Actor | null = null, bd = Infinity;
+    for (const p of this.players) {
+      if (p.dead || (onlyAlive && p.state !== 'alive')) continue;
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (o.taunts) for (const p of this.players) for (const e of p.echoes) {
+      if (e.dead || !((e as unknown as { taunt?: number }).taunt! > 0)) continue;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d < bd) { bd = d; best = e as unknown as Actor; }
+    }
+    return best;
+  }
+
+  /**
+   * Enemy contact / hazard damage to every standing player the shape touches (the one entry point
+   * for direct damage; PLAN2 §1.4). `shape` may also be a predicate for odd footprints (bands,
+   * ellipses). `once` (optional) remembers who was already hit so a sweep hits each hand once.
+   * Returns the total damage dealt.
+   */
+  hurtPlayers(shape: Shape | ((p: Player) => boolean), info: DamageInfo, once?: Set<number>): number {
+    let total = 0;
+    for (const p of this.players) {
+      if (p.dead || p.state !== 'alive' || p.falling > 0) continue;
+      if (once?.has(p.id)) continue;
+      const touch = typeof shape === 'function' ? shape(p) : circleHits(shape, p.x, p.y, p.r);
+      if (!touch) continue;
+      const dealt = p.hurt(info);
+      if (dealt > 0) { total += dealt; once?.add(p.id); }
+    }
+    return total;
+  }
+
+  /** standing players a shape (or predicate) touches */
+  playersIn(shape: Shape | ((p: Player) => boolean)): Player[] {
+    const out: Player[] = [];
+    for (const p of this.players) {
+      if (p.dead || p.state !== 'alive' || p.falling > 0) continue;
+      if (typeof shape === 'function' ? shape(p) : circleHits(shape, p.x, p.y, p.r)) out.push(p);
+    }
+    return out;
+  }
+
+  /** a hand dealt damage to an enemy (combat calls this; feeds aggro scoring) */
+  noteDamage(target: Actor, owner: unknown, amount: number) {
+    if (this.players.length < 2 || target.team !== 'enemy') return;
+    const p = ownerPlayer(owner);
     if (!p) return;
+    let l = this.dmgLog.get(target.id);
+    if (!l) this.dmgLog.set(target.id, (l = []));
+    l.push({ t: this.time, slot: p.slot, amount });
+    while (l.length && this.time - l[0].t > AGGRO_MEMORY) l.shift();
+  }
+
+  /**
+   * Who an enemy goes after (GDD2 §5.8): the standing hand (or taunting echo) with the best score
+   *   score = 1 / distance (in tiles) + 0.5 × its share of the damage this enemy took in the last 3 s
+   * held for at least 1.5 s unless the target falls. Solo: the player (1.0).
+   */
+  targetFor(e: Actor): Actor | null {
+    if (this.players.length <= 1) {
+      const p = this.players[0];
+      return p && p.state === 'alive' ? p : null;
+    }
+    const cur = this.aggro.get(e.id);
+    if (cur && cur.target && this.time < cur.until && this.validTarget(cur.target)) return cur.target;
+    const log = this.dmgLog.get(e.id);
+    let sum = 0;
+    const by: number[] = [0, 0, 0, 0];
+    if (log) for (const m of log) if (this.time - m.t <= AGGRO_MEMORY) { sum += m.amount; by[m.slot % 4] += m.amount; }
+    let best: Actor | null = null, bs = -Infinity, slot = -1;
+    const consider = (a: Actor, s: number, sl: number) => { if (s > bs) { bs = s; best = a; slot = sl; } };
+    for (const p of this.players) {
+      if (p.dead || p.state !== 'alive') continue;
+      const d = Math.max(0.5, Math.hypot(p.x - e.x, p.y - e.y) / TS);
+      consider(p, 1 / d + (sum > 0 ? 0.5 * (by[p.slot % 4] / sum) : 0), p.slot);
+    }
+    for (const p of this.players) for (const ec of p.echoes) {
+      if (ec.dead || !((ec as unknown as { taunt?: number }).taunt! > 0)) continue;
+      const d = Math.max(0.5, Math.hypot(ec.x - e.x, ec.y - e.y) / TS);
+      consider(ec as unknown as Actor, 1 / d, p.slot);
+    }
+    this.aggro.set(e.id, { target: best, slot, until: this.time + AGGRO_LOCK });
+    return best;
+  }
+  /** slot of the hand an enemy is after (telegraph tip dots); -1 when none */
+  targetSlotFor(e: Actor): number {
+    const t = this.targetFor(e);
+    if (!t) return -1;
+    const p = ownerPlayer(t);
+    return p ? p.slot : (this.aggro.get(e.id)?.slot ?? -1);
+  }
+  private validTarget(t: Actor): boolean {
+    if (t.dead) return false;
+    const p = t as unknown as Player;
+    if (typeof p.state === 'string') return p.state === 'alive';
+    return true;
+  }
+
+  // ───────────────────────── sim-time timers (PLAN2 §1.4) ─────────────────────────
+  /** run fn after sec seconds of simulation time (pauses with the game, hitstop and slow motion) */
+  after(sec: number, fn: () => void, owner?: unknown): void {
+    this.timers.push({ t: Math.max(0, sec), fn, owner: owner ?? null, every: 0, dead: false });
+  }
+  /** run fn every sec seconds of simulation time */
+  every(sec: number, fn: () => void, owner?: unknown): void {
+    const s = Math.max(1 / 60, sec);
+    this.timers.push({ t: s, fn, owner: owner ?? null, every: s, dead: false });
+  }
+  /** cancel every timer an owner set */
+  cancelTimers(owner: unknown) { for (const t of this.timers) if (t.owner === owner) t.dead = true; }
+  private tickTimers(dt: number) {
+    if (!this.timers.length) return;
+    const due: Timer[] = [];
+    for (const t of this.timers) {
+      if (t.dead) continue;
+      t.t -= dt;
+      if (t.t <= 0) due.push(t);
+    }
+    for (const t of due) {
+      if (t.dead) continue;
+      if (t.every > 0) t.t += t.every; else t.dead = true;
+      t.fn();
+    }
+    if (due.length) this.timers = this.timers.filter((t) => !t.dead);
+  }
+
+  /** local time scale at a point (F3: rewind time bubbles); F2: the world's */
+  timeScaleAt(_x: number, _y: number): number { return this.timeScale; }
+
+  // ───────────────────────── navigation ─────────────────────────
+  private updateFlow() {
+    const seeds: { x: number; y: number }[] = [];
+    const L = this.players.length ? this.players : [];
+    for (const p of L) if (p.state === 'alive') seeds.push(p);
+    if (!seeds.length) return;
+    this.bfs(this.flow, seeds);
+    if (this.players.length > 1) {
+      for (const p of this.players) {
+        if (p.state !== 'alive') { this.flowSlot[p.slot] = null; continue; }
+        const f = (this.flowSlot[p.slot] ??= new Int16Array(this.map.w * this.map.h));
+        this.bfs(f, [p]);
+      }
+    }
+  }
+
+  private bfs(f: Int16Array, seeds: { x: number; y: number }[]) {
     const m = this.map, W = m.w;
-    const f = this.flow;
     f.fill(-1);
-    const sx = Math.floor(p.x / TS), sy = Math.floor(p.y / TS);
-    if (!m.in(sx, sy)) return;
     const q = new Int32Array(m.w * m.h);
     let qh = 0, qt = 0;
-    q[qt++] = sy * W + sx;
-    f[sy * W + sx] = 0;
+    for (const p of seeds) {
+      const sx = Math.floor(p.x / TS), sy = Math.floor(p.y / TS);
+      if (!m.in(sx, sy) || f[sy * W + sx] === 0) continue;
+      q[qt++] = sy * W + sx;
+      f[sy * W + sx] = 0;
+    }
     const walk = (t: number) => t === T.FLOOR;
     while (qh < qt) {
       const i = q[qh++];
@@ -100,17 +273,18 @@ export class World {
     }
   }
 
-  /** direction toward the player following the flow field */
-  flowDir(x: number, y: number): { x: number; y: number } | null {
+  /** direction toward the nearest player (or player `slot`) following the flow field */
+  flowDir(x: number, y: number, slot = -1): { x: number; y: number } | null {
     const m = this.map, W = m.w;
+    const field = (slot >= 0 && this.players.length > 1 && this.flowSlot[slot]) || this.flow;
     const tx = Math.floor(x / TS), ty = Math.floor(y / TS);
-    const cur = m.in(tx, ty) ? this.flow[ty * W + tx] : -1;
+    const cur = m.in(tx, ty) ? field[ty * W + tx] : -1;
     let best = -1, bx = 0, by = 0;
     for (let k = 0; k < 8; k++) {
       const dx = [1, -1, 0, 0, 1, 1, -1, -1][k], dy = [0, 0, 1, -1, 1, -1, 1, -1][k];
       const nx = tx + dx, ny = ty + dy;
       if (!m.in(nx, ny)) continue;
-      const v = this.flow[ny * W + nx];
+      const v = field[ny * W + nx];
       if (v < 0) continue;
       if (dx && dy && (m.isSolid(nx, ty) || m.isSolid(tx, ny) || m.isPit(nx, ty) || m.isPit(tx, ny))) continue;
       if (best < 0 || v < best) { best = v; bx = dx; by = dy; }
@@ -161,6 +335,7 @@ export class World {
     }
     const sdt = dt * this.timeScale;
     this.time += sdt;
+    this.tickTimers(sdt);
     this.flowT -= dt;
     if (this.flowT <= 0) { this.flowT = 0.25; this.updateFlow(); }
     for (const e of this.entities) {
@@ -189,6 +364,10 @@ export class World {
       this.playerTeam = this.playerTeam.filter((e) => !e.dead);
       this.breakables = this.breakables.filter((e) => !e.dead);
       if (this.players.some((p) => p.dead)) this.players = this.players.filter((p) => !p.dead);
+      if (this.aggro.size) {
+        const live = new Set(this.enemies.map((e) => e.id));
+        for (const id of [...this.aggro.keys()]) if (!live.has(id)) { this.aggro.delete(id); this.dmgLog.delete(id); }
+      }
     }
     this.flushAdds();
   }
@@ -206,8 +385,10 @@ export class World {
         // wall slam: dust, and bonus damage with the Anvil part
         this.fx.dust(a.x, a.y, 5);
         this.shake(0.08);
-        const slam = this.run?.mods.wallSlam ?? 0;
-        if (slam > 0) a.hurt({ amount: slam, kind: 'contact', owner: this.player, src: 'wallslam', quiet: true });
+        // the hand that sent it flying owns the slam (and its Anvil bonus)
+        const by = ownerPlayer(a.lastHit?.owner) ?? this.player;
+        const slam = by && this.run ? this.run.lo(by.slot).mods.wallSlam : 0;
+        if (slam > 0) a.hurt({ amount: slam, kind: 'contact', owner: by, src: 'wallslam', quiet: true });
         a.kx = a.ky = 0;
       }
       a.kx *= k; a.ky *= k;
@@ -228,7 +409,10 @@ export class World {
           this.fx.splash(a.x, a.y);
           a.hp = 0;
           a.die({ amount: 999, kind: 'fall' });
-          if (a.team === 'enemy') this.bus.emit('kill', { target: a, info: { amount: 999, kind: 'fall', owner: this.player } });
+          if (a.team === 'enemy') {
+            const by = ownerPlayer(a.lastHit?.owner) ?? this.player;
+            this.bus.emit('kill', { target: a, info: { amount: 999, kind: 'fall', owner: by }, player: by ?? undefined });
+          }
         }
       }
     }

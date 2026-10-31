@@ -27,7 +27,7 @@ export class EventOverlay implements Overlay {
   }
 
   private opts() { return this.ev.options; }
-  private ok(i: number) { const o = this.opts()[i]; return !o.cond || o.cond(this.run); }
+  private ok(i: number) { const o = this.opts()[i]; return !o.cond || o.cond(this.run, this.ctx.lo); }
 
   update(dt: number): boolean {
     this.t += dt;

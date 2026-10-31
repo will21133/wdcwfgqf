@@ -1,6 +1,7 @@
 // Game flow: title → (intro) → workshop → run → report → workshop …
 import { G } from './G';
-import { Run, type RunEndKind } from './run';
+import { Run, type RunEndKind, type RunConfig } from './run';
+import { ensurePlayers } from './players';
 import { TitleScene } from './scenes/title';
 import { HubScene } from './scenes/hub';
 import { GameScene } from './scenes/game';
@@ -26,26 +27,36 @@ export const Flow = {
   },
 
   hub(context: 'start' | 'death' | 'victory' | 'quit') {
-    G.scenes.go(() => new HubScene({ startRun: () => Flow.startRun(), title: () => Flow.title() }, context), 'clock', 0.6);
+    G.scenes.go(() => new HubScene({ startRun: (config?: RunConfig) => Flow.startRun(config), title: () => Flow.title() }, context), 'clock', 0.6);
   },
 
-  newRun(seed?: number): Run {
-    const run = new Run(seed);
+  /** the seated hands as a run config (solo: slot I with your workshop weapon) */
+  configFromSeats(seed = (Math.random() * 2 ** 31) | 0): RunConfig {
+    const seats = ensurePlayers();
+    return {
+      mode: 'standard', seed, contracts: {},
+      players: seats.map((inp) => ({ slot: inp.slot, device: inp.device, hand: 'tick', weapon: profile.weapon })),
+    };
+  },
+
+  /** a new run with the meta bonuses applied to every hand */
+  newRun(seedOrConfig?: number | RunConfig): Run {
+    const config = typeof seedOrConfig === 'object' ? seedOrConfig : Flow.configFromSeats(seedOrConfig);
+    const run = new Run({ ...config, players: [] });
     run.bonuses.push(metaBonus());
-    run.recompute();
-    run.hp = run.mods.maxHp;
-    run.weapon = profile.weapon;
     run.brass = nodeLevel('brass') * 40;
-    run.charges = nodeLevel('sand') ? run.mods.rewindCharges : 1;
-    run.rerolls = nodeLevel('reroll');
+    run.startFullSand = !!nodeLevel('sand');
+    run.startRerolls = nodeLevel('reroll');
     run.luck = nodeLevel('luck') ? 0.08 : 0;
-    run.autoRewindLeft = run.mods.autoRewindPerFloor;
     run.overwind = profile.overwind;
+    run.config = config;
+    for (const pc of config.players) run.lo(pc.slot);
+    for (const lo of run.all) lo.hp = lo.mods.maxHp;
     return run;
   },
 
-  startRun() {
-    const run = Flow.newRun();
+  startRun(config?: RunConfig) {
+    const run = Flow.newRun(config);
     profile.runs++;
     saveProfile();
     const first = new GameScene(run, { kind: profile.tutorialDone ? 'combat' : 'tutorial', reward: 'memory', patron: run.rng.pick(PATRONS) });
