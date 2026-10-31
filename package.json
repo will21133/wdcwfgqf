@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
-    "build": "tsc --noEmit && vite build",
-    "build:single": "tsc --noEmit && vite build --mode single",
+    "build": "tsc --noEmit && python3 tools/subset-fonts.py && vite build",
+    "build:single": "tsc --noEmit && python3 tools/subset-fonts.py && vite build --mode single",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview --port 4173"
+    "preview": "vite preview --port 4173",
+    "subset-fonts": "python3 tools/subset-fonts.py"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

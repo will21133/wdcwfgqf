@@ -6,7 +6,8 @@ const { chromium } = require('playwright');
   const p = await b.newPage({ viewport: { width: 960, height: 540 } });
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n')));
-  p.on('console', (m) => { if (m.type() === 'error') errs.push('[console] ' + m.text()); });
+  let tinyCjk = 0;
+  p.on('console', (m) => { if (m.type() === 'error') errs.push('[console] ' + m.text()); if (m.text().includes('[text] CJK in tiny')) tinyCjk++; });
   await p.goto(process.env.BASE || ('http://127.0.0.1:5173/?' + query));
   const n = Math.ceil(+secs / 20);
   for (let i = 0; i < n; i++) {
@@ -16,6 +17,7 @@ const { chromium } = require('playwright');
   const log = await p.evaluate(() => (window.__botLog || []).join('\n'));
   console.log(log);
   console.log('ERRORS:', errs.length);
+  console.log('TEXT WARNINGS ([text] CJK in tiny):', tinyCjk);
   console.log([...new Set(errs)].slice(0, 10).join('\n---\n'));
   await b.close();
 })();

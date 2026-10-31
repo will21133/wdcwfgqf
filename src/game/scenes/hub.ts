@@ -365,10 +365,11 @@ export class HubScene implements Scene {
     pp.tint = th.grade.tint; pp.lift = th.grade.lift; pp.saturation = th.grade.sat * (this.overlays.length ? 0.6 : 1); pp.contrast = th.grade.contrast;
     pp.vignette = 0.45; pp.bloom = 0.5; pp.bloomThreshold = 0.6; pp.lighting = true; pp.hurt = 0; pp.fade = 0;
     this.world.render(r);
+    r.flushWorldUi();
     const ctx = r.ui2;
     // shard counter
-    shardIcon(ctx, 610, 10);
-    ctx.drawImage(G.digitsSmall.render(String(profile.shards), 'V4', 'K0'), 608 - G.digitsSmall.render(String(profile.shards), 'V4', 'K0').width, 11);
+    shardIcon(ctx, 624, 11);
+    G.digits.draw(ctx, String(profile.shards), 621, 10, { fill: 'V4', align: 'right' });
     G.small.draw(ctx, tr(HUB_THEME.name), 10, 10, { color: 'B4' });
     for (const o of this.overlays) o.render(r);
   }

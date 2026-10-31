@@ -8,8 +8,12 @@ import type { Music } from '../engine/audio/music';
 
 export const G = {
   r: null as unknown as Renderer,
+  /** FP12 — body text and every key piece of information */
   font: null as unknown as PixelFont,
+  /** FP10 — secondary text: tag chips, flavour, HUD labels */
   small: null as unknown as PixelFont,
+  /** FP8 — latin letters and digits only (CJK is routed to `small` with a dev warning) */
+  tiny: null as unknown as PixelFont,
   digits: null as unknown as DigitFont,
   digitsSmall: null as unknown as DigitFont,
   scenes: new SceneManager(),

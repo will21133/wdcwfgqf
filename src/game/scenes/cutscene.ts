@@ -125,8 +125,8 @@ export class CutsceneScene implements Scene {
     const shown = text.slice(0, Math.floor(this.t * 30));
     ctx.globalAlpha = 0.6; ctx.fillStyle = col('K0'); ctx.fillRect(0, 290, 640, 70); ctx.globalAlpha = 1;
     G.font.draw(ctx, shown, 320, 300, { align: 'center', color: 'K10', wrap: 520, lineH: 16 });
-    if (this.t * 30 >= text.length) drawHint(ctx, 600, 344, [['confirm', '']]);
-    G.small.draw(ctx, tr(L('[ESC] 跳过', '[ESC] Skip')), 8, 348, { color: 'K5' });
+    if (this.t * 30 >= text.length) drawHint(ctx, 600, 341, [['confirm', '']]);
+    drawHint(ctx, 44, 341, [['cancel', tr(L('跳过', 'Skip'))]]);
   }
 }
 

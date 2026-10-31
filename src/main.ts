@@ -3,15 +3,15 @@ import { PixelFont, DigitFont } from './engine/gfx/font';
 import { startLoop } from './engine/loop';
 import { G } from './game/G';
 import font12url from './assets/fonts/fusion-12.woff2?url';
+import font10url from './assets/fonts/fusion-10.woff2?url';
 import font8url from './assets/fonts/fusion-8.woff2?url';
 import { boot } from './game/boot';
+import './game/ui/text'; // installs the world-label painter
 
 async function loadFonts() {
-  const f12 = new FontFace('FP12', `url(${font12url})`);
-  const f8 = new FontFace('FP8', `url(${font8url})`);
-  await Promise.all([f12.load(), f8.load()]);
-  document.fonts.add(f12);
-  document.fonts.add(f8);
+  const faces = [new FontFace('FP12', `url(${font12url})`), new FontFace('FP10', `url(${font10url})`), new FontFace('FP8', `url(${font8url})`)];
+  await Promise.all(faces.map((f) => f.load()));
+  for (const f of faces) document.fonts.add(f);
 }
 
 const SPEED = Math.max(1, Math.min(8, Number(new URLSearchParams(location.search).get('speed') ?? 1)));
@@ -24,7 +24,8 @@ async function main() {
   r.resize();
   window.addEventListener('resize', () => r.resize());
   G.font = new PixelFont('FP12', 12, 15);
-  G.small = new PixelFont('FP8', 8, 10);
+  G.small = new PixelFont('FP10', 10, 13);
+  G.tiny = new PixelFont('FP8', 8, 10, { latinOnly: true, fallback: () => G.small });
   G.digits = new DigitFont(true);
   G.digitsSmall = new DigitFont(false);
   G.input.attach(screen, (x, y) => r.toView(x, y));

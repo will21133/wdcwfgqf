@@ -75,7 +75,7 @@ export class MenuList {
         rect(ctx, x - 4, yy - 3, w + 8, this.rowH - 2, 'K3');
         rect(ctx, x - 4, yy - 3, 2, this.rowH - 2, 'B5');
       }
-      G.font.draw(ctx, it.label(), x + 6, yy, { color: dis ? 'K5' : sel ? 'K10' : 'K8' });
+      G.font.draw(ctx, it.label(), x + 6, yy, { color: dis ? 'K7' : sel ? 'K10' : 'K8' });
       const kind = it.kind ?? 'button';
       const rx = x + w - 90;
       if (kind === 'slider') {
@@ -84,7 +84,7 @@ export class MenuList {
         rect(ctx, rx, yy + 5, 80, 3, 'K0');
         rect(ctx, rx, yy + 5, Math.round(80 * k), 3, sel ? 'B5' : 'B3');
         rect(ctx, rx + Math.round(80 * k) - 1, yy + 3, 3, 7, sel ? 'B6' : 'B4');
-        ctx.drawImage(G.digitsSmall.render(String(Math.round(v * 100)), 'K9', 'K0'), rx - 18, yy + 3);
+        G.digits.draw(ctx, String(Math.round(v * 100)), rx - 6, yy + 2, { fill: 'K9', align: 'right' });
       } else if (kind === 'toggle') {
         const on = !!it.get?.();
         rect(ctx, rx + 56, yy + 2, 22, 9, 'K0');
@@ -95,7 +95,7 @@ export class MenuList {
         const o = it.options?.find((x) => x.value === cur);
         G.font.draw(ctx, `◀ ${o?.label ?? ''} ▶`, rx + 80, yy, { align: 'right', color: sel ? 'B5' : 'K8' });
       }
-      if (sel && it.hint) G.small.draw(ctx, it.hint(), x + 6, y + this.items.length * this.rowH + 6, { color: 'K6', wrap: w });
+      if (sel && it.hint) G.small.draw(ctx, it.hint(), x + 6, y + this.items.length * this.rowH + 6, { color: 'K8', wrap: w });
     });
     void col;
   }

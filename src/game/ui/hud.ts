@@ -56,7 +56,7 @@ export class HUD {
     // brass caps
     rect(ctx, bx - 2, by - 2, 2, bh + 4, 'B3');
     rect(ctx, bx + bw, by - 2, 2, bh + 4, 'B3');
-    ctx.drawImage(G.digitsSmall.render(`${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, 'K10', 'K0'), bx + bw + 5, by);
+    G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, bx + bw + 5, by - 1, { fill: 'K10' });
 
     // ── Sand charges (hourglasses) ──
     const hy = y + 14;
@@ -91,13 +91,11 @@ export class HUD {
 
     // ── currencies (top-right) ──
     const brass = Math.round(this.brassShown);
-    const bimg = G.digitsSmall.render(String(brass), 'B5', 'K0');
-    coinIcon(ctx, 640 - 14, 10);
-    ctx.drawImage(bimg, 640 - 17 - bimg.width, 11);
+    coinIcon(ctx, 640 - 16, 11);
+    G.digits.draw(ctx, String(brass), 640 - 19, 10, { fill: 'B5', align: 'right' });
     if (run.shards > 0) {
-      const simg = G.digitsSmall.render(String(run.shards), 'V4', 'K0');
-      shardIcon(ctx, 640 - 14, 21);
-      ctx.drawImage(simg, 640 - 17 - simg.width, 22);
+      shardIcon(ctx, 640 - 16, 23);
+      G.digits.draw(ctx, String(run.shards), 640 - 19, 23, { fill: 'V4', align: 'right' });
     }
     ctx.globalAlpha = 1;
 
@@ -121,11 +119,11 @@ export class HUD {
         }
       });
       const extra = run.memories.filter((m) => !slots.includes(MEMORIES[m.id]?.slot)).length;
-      if (extra) ctx.drawImage(G.digitsSmall.render('+' + extra, 'K8', 'K0'), 10 + 5 * 22, y0 + 6);
+      if (extra) G.digits.draw(ctx, '+' + extra, 10 + 5 * 22, y0 + 5, { fill: 'K8' });
       if (run.parts.length) {
-        const px = 10 + 5 * 22 + (extra ? 18 : 2);
+        const px = 10 + 5 * 22 + (extra ? 4 + Math.ceil(G.digits.measure('+' + extra)) : 2);
         ctx.drawImage(partIcon('gear').img, px, y0 + 1);
-        ctx.drawImage(G.digitsSmall.render(String(run.parts.length), 'B5', 'K0'), px + 17, y0 + 6);
+        G.digits.draw(ctx, String(run.parts.length), px + 17, y0 + 5, { fill: 'B5' });
       }
     }
 

@@ -7,7 +7,7 @@ import { tr, L, L10n } from '../i18n';
 import { REBINDABLE, DEFAULT_BINDINGS, keyLabel, Action } from '../../engine/input';
 import { settings, saveSettings } from '../settings';
 import { drawHint } from './prompts';
-import { col } from '../../art/palette';
+import { drawPadGlyph, drawKeycap, keycapW, PadGlyph } from './widgets';
 
 const NAMES: Record<string, L10n> = {
   up: L('上', 'Up'), down: L('下', 'Down'), left: L('左', 'Left'), right: L('右', 'Right'),
@@ -15,19 +15,19 @@ const NAMES: Record<string, L10n> = {
   interact: L('交互', 'Interact'), info: L('构筑信息', 'Build info'),
 };
 
-const PAD_ROWS: [string, string, L10n][] = [
-  ['A', 'G3', L('冲刺 / 确认', 'Dash / Confirm')],
-  ['B', 'R3', L('交互 / 返回', 'Interact / Back')],
-  ['X', 'U3', L('攻击', 'Attack')],
-  ['Y', 'B5', L('特技', 'Special')],
-  ['RB', 'K6', L('回溯', 'Rewind')],
-  ['LB', 'K6', L('回溯', 'Rewind')],
-  ['RT', 'K6', L('攻击', 'Attack')],
-  ['LT', 'K6', L('特技', 'Special')],
-  ['LS', 'K5', L('移动', 'Move')],
-  ['RS', 'K5', L('瞄准', 'Aim')],
-  ['☰', 'K5', L('暂停', 'Pause')],
-  ['⧉', 'K5', L('构筑信息', 'Build info')],
+const PAD_ROWS: [PadGlyph, L10n][] = [
+  ['A', L('冲刺 / 确认', 'Dash / Confirm')],
+  ['B', L('交互 / 返回', 'Interact / Back')],
+  ['X', L('攻击', 'Attack')],
+  ['Y', L('特技', 'Special')],
+  ['RB', L('回溯', 'Rewind')],
+  ['LB', L('回溯', 'Rewind')],
+  ['RT', L('攻击', 'Attack')],
+  ['LT', L('特技', 'Special')],
+  ['LS', L('移动', 'Move')],
+  ['RS', L('瞄准', 'Aim')],
+  ['MENU', L('暂停', 'Pause')],
+  ['VIEW', L('构筑信息', 'Build info')],
 ];
 
 export class ControlsPanel implements Overlay {
@@ -78,8 +78,8 @@ export class ControlsPanel implements Overlay {
     ctx.globalAlpha = 0.85; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
     panel(ctx, 40, 22, 560, 316);
     G.font.draw(ctx, tr(L('按键设置', 'Controls')), 320, 32, { align: 'center', color: 'B5' });
-    G.small.draw(ctx, tr(L('键盘 / 鼠标', 'Keyboard / Mouse')), 70, 56, { color: 'K7' });
-    G.small.draw(ctx, tr(L('Xbox 手柄', 'Xbox controller')), 380, 56, { color: 'K7' });
+    G.small.draw(ctx, tr(L('键盘 / 鼠标', 'Keyboard / Mouse')), 70, 53, { color: 'K8' });
+    G.small.draw(ctx, tr(L('Xbox 手柄', 'Xbox controller')), 380, 53, { color: 'K8' });
     this.rows.forEach((row, i) => {
       const y = 72 + i * 18;
       const sel = i === this.sel;
@@ -96,24 +96,19 @@ export class ControlsPanel implements Overlay {
         let x = 330;
         for (let k = b.length - 1; k >= 0; k--) {
           const lab = keyLabel(b[k]);
-          const w = Math.max(14, G.small.measure(lab) + 8);
-          x -= w;
-          rect(ctx, x, y - 1, w, 12, 'K0'); rect(ctx, x + 1, y - 1, w - 2, 11, 'K6'); rect(ctx, x + 1, y, w - 2, 9, 'K4');
-          G.small.draw(ctx, lab, x + w / 2, y, { align: 'center', color: 'K10', shadow: false });
+          x -= keycapW(lab);
+          drawKeycap(ctx, lab, x, y - 1);
           x -= 4;
         }
       }
     });
     // Xbox reference
-    PAD_ROWS.forEach(([b, c, name], i) => {
+    PAD_ROWS.forEach(([b, name], i) => {
       const y = 72 + i * 18;
-      const w = b.length > 1 ? 18 : 12;
-      ctx.fillStyle = col('K0'); ctx.fillRect(380, y - 2, w, 13);
-      ctx.fillStyle = col(c); ctx.fillRect(381, y - 1, w - 2, 11);
-      G.small.draw(ctx, b, 380 + w / 2, y, { align: 'center', color: 'K10', shadow: false });
+      drawPadGlyph(ctx, b, 380 + Math.floor((19 - (b === 'LB' || b === 'RB' ? 19 : b === 'LT' || b === 'RT' ? 15 : 13)) / 2), y - 1);
       G.font.draw(ctx, tr(name), 406, y - 2, { color: 'K8' });
     });
-    G.small.draw(ctx, tr(L('手柄可在任何时候直接使用，会自动切换按键提示。', 'Pick up a controller anytime — prompts switch automatically.')), 380, 292, { color: 'K6', wrap: 200 });
-    drawHint(ctx, 320, 320, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('重新绑定', 'Rebind'))], ['cancel', tr(L('返回', 'Back'))]]);
+    G.small.draw(ctx, tr(L('手柄可在任何时候直接使用，会自动切换按键提示。', 'Pick up a controller anytime — prompts switch automatically.')), 380, 285, { color: 'K8', wrap: 205 });
+    drawHint(ctx, 320, 321, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('重新绑定', 'Rebind'))], ['cancel', tr(L('返回', 'Back'))]]);
   }
 }

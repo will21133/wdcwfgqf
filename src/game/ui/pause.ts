@@ -108,7 +108,7 @@ export class RunInfoPanel implements Overlay {
     stats.forEach((s, i) => G.small.draw(ctx, s, 60 + i * 90, 54, { color: 'K8' }));
     rect(ctx, 56, 68, 528, 1, 'B1');
     const es = this.entries();
-    if (!es.length) { G.font.draw(ctx, tr(L('还没有任何回忆或零件。', 'No memories or parts yet.')), 320, 170, { align: 'center', color: 'K6' }); return; }
+    if (!es.length) { G.font.draw(ctx, tr(L('还没有任何回忆或零件。', 'No memories or parts yet.')), 320, 170, { align: 'center', color: 'K7' }); return; }
     es.forEach((e, i) => {
       const cx = 72 + (i % 10) * 50, cy = 98 + Math.floor(i / 10) * 44;
       if (i === this.sel) { rect(ctx, cx - 20, cy - 20, 40, 40, 'K3'); rect(ctx, cx - 20, cy + 19, 40, 1, 'B5'); }
@@ -117,7 +117,7 @@ export class RunInfoPanel implements Overlay {
     const e = es[Math.min(this.sel, es.length - 1)];
     rect(ctx, 56, 246, 528, 1, 'B1');
     G.font.draw(ctx, e.name, 64, 254, { color: e.color });
-    G.small.draw(ctx, e.tag, 64 + G.font.measure(e.name) + 10, 257, { color: 'K6' });
+    G.small.draw(ctx, e.tag, 64 + G.font.measure(e.name) + 10, 257, { color: 'K7' });
     G.font.draw(ctx, e.desc, 64, 274, { color: 'K9', wrap: 512 });
   }
 }

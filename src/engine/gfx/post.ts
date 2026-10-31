@@ -107,7 +107,7 @@ void main(){
 const FS_FINAL = `#version 300 es
 precision highp float;
 in vec2 vUv; out vec4 o;
-uniform sampler2D uScene, uBloomA, uBloomB, uUi;
+uniform sampler2D uScene, uBloomA, uBloomB;
 uniform vec2 uSrcSize;   // world texture size (642x362)
 uniform vec2 uViewSize;  // 640x360
 uniform vec2 uCamFrac;
@@ -151,10 +151,7 @@ void main(){
   c = mix(c, vec3(1.0), uFlash);
   c += (hash(v + fract(uTime) * 91.0) - 0.5) * uGrain;
   c *= 1.0 - uFade;
-
-  // UI over everything (unaffected by grade/camera)
-  vec4 u = texture(uUi, sharp(v, uViewSize));
-  c = mix(c, u.rgb, u.a);
+  // the UI is not composited here: it lives on its own device-resolution canvas above this one
   o = vec4(c, 1.0);
 }`;
 
@@ -188,7 +185,7 @@ export class PostFX {
   gl: WebGL2RenderingContext;
   private progComposite; private progBright; private progBlur; private progFinal;
   private texWorld: WebGLTexture; private texLight: WebGLTexture; private texUnlit: WebGLTexture;
-  private texGlow: WebGLTexture; private texUi: WebGLTexture;
+  private texGlow: WebGLTexture;
   private scene: Target; private bA: Target; private bA2: Target; private bB: Target; private bB2: Target;
 
   constructor(public canvas: HTMLCanvasElement) {
@@ -210,7 +207,6 @@ export class PostFX {
     this.texLight = this.mkTex(gl.LINEAR);
     this.texUnlit = this.mkTex(gl.NEAREST);
     this.texGlow = this.mkTex(gl.LINEAR);
-    this.texUi = this.mkTex(gl.LINEAR);
 
     this.scene = this.mkTarget(WORLD_W, WORLD_H, gl.LINEAR);
     this.bA = this.mkTarget(WORLD_W >> 1, WORLD_H >> 1, gl.LINEAR);
@@ -265,13 +261,12 @@ export class PostFX {
     return { x: Math.floor((cw - w) / 2), y: Math.floor((ch - h) / 2), w, h, s };
   }
 
-  render(layers: { world: HTMLCanvasElement; light: HTMLCanvasElement; unlit: HTMLCanvasElement; glow: HTMLCanvasElement; ui: HTMLCanvasElement }, p: PostParams) {
+  render(layers: { world: HTMLCanvasElement; light: HTMLCanvasElement; unlit: HTMLCanvasElement; glow: HTMLCanvasElement }, p: PostParams) {
     const gl = this.gl;
     this.upload(this.texWorld, layers.world);
     if (p.lighting) this.upload(this.texLight, layers.light);
     this.upload(this.texUnlit, layers.unlit);
     this.upload(this.texGlow, layers.glow);
-    this.upload(this.texUi, layers.ui);
 
     // 1. composite
     let pr = this.progComposite;
@@ -321,7 +316,6 @@ export class PostFX {
     this.bind(0, this.scene.tex); gl.uniform1i(pr.u('uScene'), 0);
     this.bind(1, this.bA.tex); gl.uniform1i(pr.u('uBloomA'), 1);
     this.bind(2, this.bB2.tex); gl.uniform1i(pr.u('uBloomB'), 2);
-    this.bind(3, this.texUi); gl.uniform1i(pr.u('uUi'), 3);
     gl.uniform2f(pr.u('uSrcSize'), WORLD_W, WORLD_H);
     gl.uniform2f(pr.u('uViewSize'), VIEW_W, VIEW_H);
     gl.uniform2f(pr.u('uCamFrac'), p.camFracX, p.camFracY);

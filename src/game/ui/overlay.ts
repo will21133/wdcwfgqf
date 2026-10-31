@@ -9,6 +9,7 @@ import { ease, clamp } from '../../engine/math';
 import type { Choice } from '../progression/rewards';
 import { SLOT_GLYPH } from '../../art/sprites/icons';
 import { col } from '../../art/palette';
+import { Text } from './text';
 
 export interface Overlay {
   /** returns false when finished */
@@ -121,12 +122,12 @@ export class ChoiceOverlay implements Overlay {
     const hy = 26 + Math.round((1 - ease.outCubic(fadeIn)) * -12);
     ctx.globalAlpha = A;
     if (h.icon) drawScaled(ctx, h.icon, 320, hy + 18, 2, A);
-    G.font.draw(ctx, tr(h.title), 320, hy + 40, { align: 'center', color: h.color, outline: 'K0' });
-    if (h.sub) G.small.draw(ctx, tr(h.sub), 320, hy + 56, { align: 'center', color: 'K7' });
+    Text.draw(ctx, h.title, 320, hy + 39, { align: 'center', color: h.color, outline: 'K0' });
+    if (h.sub) Text.draw(ctx, h.sub, 320, hy + 57, { size: 'small', align: 'center', color: 'K8' });
     if (h.quote) {
       const q = tr(h.quote);
       const n = Math.floor(clamp((this.t - 0.2) * 40, 0, q.length));
-      G.small.draw(ctx, '“' + q.slice(0, n) + (n < q.length ? '' : '”'), 320, hy + 70, { align: 'center', color: 'K8' });
+      Text.draw(ctx, '“' + q.slice(0, n) + (n < q.length ? '' : '”'), 320, hy + 71, { size: 'small', align: 'center', color: 'K8' });
     }
     ctx.globalAlpha = 1;
     // cards
@@ -160,26 +161,28 @@ export class ChoiceOverlay implements Overlay {
   private drawCard(ctx: CanvasRenderingContext2D, c: Choice, x: number, y: number, w: number, h: number, sel: boolean, pickT: number) {
     const rim = sel ? 'B6' : RARITY_RIM[c.rarity];
     card(ctx, x, y, w, h, rim, sel);
-    // coloured header band
-    rect(ctx, x + 3, y + 3, w - 6, 38, sel ? 'K4' : 'K3');
-    rect(ctx, x + 3, y + 41, w - 6, 1, RARITY_RIM[c.rarity]);
+    // coloured header band: title (12px, or 10px when a long name would not fit) + tag line (10px)
+    const band = 44;
+    rect(ctx, x + 3, y + 3, w - 6, band - 3, sel ? 'K4' : 'K3');
+    rect(ctx, x + 3, y + band, w - 6, 1, RARITY_RIM[c.rarity]);
     // icon medallion at 2x
-    drawScaled(ctx, c.icon, x + 24, y + 22, 2);
+    drawScaled(ctx, c.icon, x + 24, y + 23, 2);
     // slot glyph
     const slotKey = Object.keys(SLOT_GLYPH).find((k) => tr(c.tag).toLowerCase().includes(tr(UI.slots[k]).toLowerCase()));
     if (slotKey) glyph(ctx, SLOT_GLYPH[slotKey], x + w - 14, y + 8, RARITY_TEXT[c.rarity]);
-    // title & tag
-    G.font.draw(ctx, tr(c.title), x + 44, y + 9, { color: RARITY_TEXT[c.rarity], wrap: w - 60 });
-    G.small.draw(ctx, tr(c.tag), x + 44, y + 27, { color: 'K7' });
-    // description
-    G.font.draw(ctx, tr(c.desc), x + 9, y + 50, { color: 'K9', wrap: w - 18, lineH: 15 });
-    // replaces / flavour
-    let fy = y + h - 22;
-    if (c.replaces) {
-      G.small.draw(ctx, `${tr(UI.replaces)}：${tr(c.replaces)}`, x + 9, fy - 12, { color: 'R4' });
-    }
-    if (c.flavor) G.small.draw(ctx, tr(c.flavor), x + 9, fy, { color: c.color, wrap: w - 18 });
-    if (c.isNew) G.small.draw(ctx, tr(UI.new), x + w - 30, y + h - 14, { color: 'B5' });
+    const title = tr(c.title);
+    const tw = w - 62;
+    const tSize = Text.measure(title, 'body').w <= tw ? 'body' : 'small';
+    const ty = y + 6;
+    Text.draw(ctx, title, x + 44, ty + (tSize === 'small' ? 2 : 0), { size: tSize, color: RARITY_TEXT[c.rarity], maxW: tw });
+    Text.draw(ctx, c.tag, x + 44, ty + Text.lineH('body') + 3, { size: 'small', color: 'K8', maxW: w - 50 });
+    // description (12px)
+    Text.draw(ctx, c.desc, x + 9, y + band + 7, { color: 'K9', maxW: w - 18 });
+    // replaces (12px, red) / flavour (10px) pinned to the bottom
+    const fy = y + h - 8 - Text.lineH('small');
+    if (c.replaces) Text.draw(ctx, `${tr(UI.replaces)}：${tr(c.replaces)}`, x + 9, fy - Text.lineH('body') - 2, { color: 'R4', maxW: w - 18 });
+    if (c.flavor) Text.draw(ctx, c.flavor, x + 9, fy, { size: 'small', color: c.color, maxW: w - 18 });
+    if (c.isNew) Text.draw(ctx, UI.new, x + w - 8, y + band - 2 - Text.lineH('small'), { size: 'small', color: 'B5', align: 'right' });
     // selection: ticking clock hand above the card
     if (sel) {
       const cx = x + w / 2, cy = y - 8;
@@ -210,11 +213,13 @@ export class Toast implements Overlay {
   render(r: Renderer) {
     const ctx = r.ui2;
     const k = this.t < 0.3 ? ease.outBack(this.t / 0.3) : this.t > this.dur - 0.3 ? 1 - (this.t - (this.dur - 0.3)) / 0.3 : 1;
-    const w = 260, h = 46;
+    const w = 280;
+    const dh = Text.measureWrapped(this.desc, 'small', w - 52).h;
+    const h = Math.max(46, Math.ceil(8 + Text.lineH('body') + dh + 6));
     const x = 320 - w / 2, y = Math.round(-h + (h + 44) * k);
     panel(ctx, x, y, w, h, { fill: 'K1' });
     if (this.icon) drawScaled(ctx, this.icon, x + 22, y + 23, 2);
-    G.font.draw(ctx, this.title, x + 42, y + 7, { color: this.color });
-    G.small.draw(ctx, this.desc, x + 42, y + 24, { color: 'K8', wrap: w - 50 });
+    Text.draw(ctx, this.title, x + 42, y + 5, { color: this.color });
+    Text.draw(ctx, this.desc, x + 42, y + 6 + Text.lineH('body'), { size: 'small', color: 'K8', maxW: w - 52 });
   }
 }

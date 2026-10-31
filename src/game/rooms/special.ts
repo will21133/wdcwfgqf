@@ -21,6 +21,9 @@ import { tr, L, L10n, UI } from '../i18n';
 import { TS, T } from '../world/room';
 import { col } from '../../art/palette';
 import { frand } from '../../engine/rng';
+import { Text } from '../ui/text';
+import { drawPanel } from '../ui/widgets';
+import { rect } from '../ui/draw';
 
 export interface RoomHost {
   world: World;
@@ -57,14 +60,23 @@ class Manman extends Entity {
   renderUnlit(r: Renderer) {
     if (this.sayT <= 0) return;
     const a = Math.min(1, this.sayT, (4 - this.sayT) * 4);
-    const w = Math.min(200, G.small.measure(this.say) + 10);
-    const x = Math.round(this.x - w / 2), y = Math.round(this.y - 44);
-    r.u.globalAlpha = a;
-    r.u.fillStyle = col('K10'); r.u.fillRect(x, y, w, 14);
-    r.u.fillStyle = col('K0'); r.u.fillRect(x, y + 14, w, 1);
-    r.u.fillStyle = col('K10'); r.u.fillRect(Math.round(this.x) - 1, y + 14, 3, 2);
-    G.small.draw(r.u, this.say, this.x, y + 3, { align: 'center', color: 'K1', shadow: false, alpha: a });
-    r.u.globalAlpha = 1;
+    const say = this.say, sx = this.x, sy = this.y - 44;
+    r.worldUi((ctx, toUi) => {
+      const q = toUi(sx, sy);
+      const w = Math.ceil(Math.min(220, Text.measure(say, 'small').w + 12));
+      const x = Math.round(q.x - w / 2), y = Math.round(q.y);
+      ctx.globalAlpha = a;
+      // speech bubble: paper body, ink outline, a little tail pointing at Manman
+      rect(ctx, x + 1, y - 1, w - 2, 1, 'K0'); rect(ctx, x + 1, y + 15, w - 2, 1, 'K0');
+      rect(ctx, x, y, 1, 15, 'K0'); rect(ctx, x + w - 1, y, 1, 15, 'K0');
+      rect(ctx, x + 1, y, w - 2, 15, 'K10');
+      rect(ctx, x + 1, y + 14, w - 2, 1, 'K9');
+      const tx = Math.round(q.x);
+      rect(ctx, tx - 2, y + 15, 5, 1, 'K10'); rect(ctx, tx - 1, y + 16, 3, 1, 'K10'); rect(ctx, tx, y + 17, 1, 1, 'K10');
+      rect(ctx, tx - 3, y + 15, 1, 1, 'K0'); rect(ctx, tx + 3, y + 15, 1, 1, 'K0'); rect(ctx, tx - 2, y + 16, 1, 1, 'K0'); rect(ctx, tx + 2, y + 16, 1, 1, 'K0'); rect(ctx, tx - 1, y + 17, 1, 1, 'K0'); rect(ctx, tx + 1, y + 17, 1, 1, 'K0'); rect(ctx, tx, y + 18, 1, 1, 'K0');
+      Text.draw(ctx, say, q.x, y - 1, { size: 'small', color: 'K1', shadow: false, align: 'center' });
+      ctx.globalAlpha = 1;
+    });
   }
 }
 
@@ -111,17 +123,20 @@ class ShopItem extends Interactable {
       r.glowAt(this.x, y, 12, this.color, 0.3);
       drawSprite(r.u, this.icon, this.x, y);
       const affordable = this.host.run.brass >= this.price;
-      const img = G.digitsSmall.render(String(this.price), affordable ? 'B5' : 'R3', 'K0');
-      r.u.drawImage(img, Math.round(this.x - img.width / 2), Math.round(this.y + 3));
-      if (this.near) {
-        // description panel
-        const d = tr(this.desc);
-        const [bw, bh] = G.small.blockSize(d, 150);
-        const x = Math.round(this.x - (bw + 10) / 2), yy = Math.round(this.y - 60 - bh);
-        r.u.globalAlpha = 0.9; r.u.fillStyle = col('K1'); r.u.fillRect(x, yy, bw + 10, bh + 6); r.u.globalAlpha = 1;
-        r.u.fillStyle = col(this.color); r.u.fillRect(x, yy, bw + 10, 1);
-        G.small.draw(r.u, d, x + 5, yy + 3, { wrap: 150, color: 'K9' });
-      }
+      const price = String(this.price), px = this.x, py = this.y + 3;
+      const near = this.near, d = tr(this.desc), color = this.color;
+      r.worldUi((ctx, toUi) => {
+        const q = toUi(px, py);
+        G.digits.draw(ctx, price, q.x, q.y, { fill: affordable ? 'B5' : 'R4', align: 'center' });
+        if (!near) return;
+        // description card above the item (prompt sits between it and the item)
+        const m = Text.measureWrapped(d, 'body', 156);
+        const w = Math.ceil(m.w) + 12, h = Math.ceil(m.h) + 6;
+        const x = Math.round(q.x - w / 2), y = Math.round(q.y - 70 - h);
+        drawPanel(ctx, x, y, w, h, 'dark');
+        rect(ctx, x + 2, y + 1, w - 4, 1, color);
+        Text.draw(ctx, d, x + 6, y + 1, { maxW: 156, color: 'K9' });
+      });
     }
     super.renderUnlit(r);
   }

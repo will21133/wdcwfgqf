@@ -5,8 +5,9 @@ import { frand, fpick } from '../../engine/rng';
 import { G } from '../G';
 import { col, rgba } from '../../art/palette';
 import { TAU } from '../../engine/math';
+import { Text } from '../ui/text';
 
-interface Num { x: number; y: number; vy: number; vx: number; t: number; img: HTMLCanvasElement; big: boolean }
+interface Num { x: number; y: number; vy: number; vx: number; t: number; str: string; color: string; big: boolean }
 interface Ring { x: number; y: number; r0: number; r1: number; t: number; dur: number; color: string; width: number; layer: 'glow' | 'unlit' }
 interface Banner { text: string; t: number; dur: number; color: string; x: number; y: number }
 
@@ -54,28 +55,32 @@ export class FX {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
     }
-    for (const n of this.nums) {
-      const pop = n.t < 0.06 ? 2 : 1;
-      const a = n.t > 0.55 ? 1 - (n.t - 0.55) / 0.2 : 1;
-      u.globalAlpha = Math.max(0, a);
-      const w = n.img.width * pop, h = n.img.height * pop;
-      u.drawImage(n.img, Math.round(n.x - w / 2), Math.round(n.y - h / 2), w, h);
-      u.globalAlpha = 1;
-    }
-    for (const b of this.banners) {
-      const k = b.t / b.dur;
-      const a = k < 0.1 ? k / 0.1 : k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;
-      const yo = k < 0.1 ? (1 - k / 0.1) * 6 : 0;
-      G.font.draw(u, b.text, b.x, b.y - yo - k * 8, { color: b.color, align: 'center', outline: 'K0', alpha: a });
-    }
+    // numbers and banners are world-anchored UI: crisp, steady during rewind, above the post effects
+    if (!this.nums.length && !this.banners.length) return;
+    const nums = this.nums.slice(), banners = this.banners.slice();
+    r.worldUi((ctx, toUi) => {
+      for (const n of nums) {
+        const pop = n.t < 0.06 ? 2 : 1;
+        const a = n.t > 0.55 ? 1 - (n.t - 0.55) / 0.2 : 1;
+        if (a <= 0) continue;
+        const q = toUi(n.x, n.y);
+        G.digits.draw(ctx, n.str, q.x, q.y - 4.5 * pop, { fill: n.color, hi: n.big ? 'B6' : undefined, align: 'center', alpha: a, pop });
+      }
+      for (const b of banners) {
+        const k = b.t / b.dur;
+        const a = k < 0.1 ? k / 0.1 : k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;
+        const yo = k < 0.1 ? (1 - k / 0.1) * 6 : 0;
+        const q = toUi(b.x, b.y - yo - k * 8);
+        Text.draw(ctx, b.text, q.x, q.y, { color: b.color, align: 'center', outline: 'K0', alpha: a });
+      }
+    });
   }
 
   number(x: number, y: number, amt: number, color: string, big: boolean) {
     const v = Math.round(amt);
     if (v <= 0) return;
     // merge with a very recent number at the same spot (dot ticks)
-    const img = (big ? G.digits : G.digits).render(String(v), color, 'K0', big ? 'B6' : undefined);
-    this.nums.push({ x: x + frand(-4, 4), y, vy: big ? -95 : -70, vx: frand(-12, 12), t: 0, img, big });
+    this.nums.push({ x: x + frand(-4, 4), y, vy: big ? -95 : -70, vx: frand(-12, 12), t: 0, str: String(v), color, big });
   }
 
   banner(x: number, y: number, text: string, color = 'K10', dur = 1.1) {

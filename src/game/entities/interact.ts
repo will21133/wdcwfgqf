@@ -4,8 +4,7 @@ import type { Renderer } from '../../engine/gfx/renderer';
 import { G, sfx } from '../G';
 import { tr, L10n } from '../i18n';
 import { drawSprite, Sprite } from '../../engine/gfx/sprite';
-import { keyLabel } from '../../engine/input';
-import { drawButton } from '../ui/prompts';
+import { drawPromptLabel } from '../ui/widgets';
 import { TAU } from '../../engine/math';
 import { frand } from '../../engine/rng';
 import { ICONS } from '../../art/sprites/icons';
@@ -26,18 +25,9 @@ export abstract class Interactable extends Entity {
   }
   renderUnlit(r: Renderer) {
     if (!this.near) return;
-    const ctx = r.u;
     const text = this.prompt();
-    const tw = G.small.measure(text);
-    const kw = G.input.lastDevice === 'pad' ? 11 : Math.max(11, G.small.measure(keyLabel(G.input.bindings.interact[0])) + 6);
-    const total = kw + 4 + tw;
-    const x = Math.round(this.x - total / 2), y = Math.round(this.y - this.promptY());
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = '#0b0a14';
-    ctx.fillRect(x - 3, y - 2, total + 6, 15);
-    ctx.globalAlpha = 1;
-    drawButton(ctx, x, y, 'interact');
-    G.small.draw(ctx, text, x + kw + 4, y + 1, { color: 'K10' });
+    const x = this.x, y = this.y - this.promptY();
+    r.worldUi((ctx, toUi) => { const p = toUi(x, y); drawPromptLabel(ctx, 'interact', text, p.x, p.y); });
   }
   promptY() { return 34; }
 }

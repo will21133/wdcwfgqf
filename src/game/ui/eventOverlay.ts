@@ -5,6 +5,8 @@ import { drawScaled } from './overlay';
 import { G, sfx } from '../G';
 import { tr, L10n } from '../i18n';
 import { panel, rect } from './draw';
+import { Text } from './text';
+import { drawPrompt } from './widgets';
 import type { Sprite } from '../../engine/gfx/sprite';
 import { clamp, ease } from '../../engine/math';
 import type { EventDef, EventCtx } from '../progression/events';
@@ -49,7 +51,7 @@ export class EventOverlay implements Overlay {
       let h = -1;
       for (let i = 0; i < n; i++) {
         const y = this.optY(i);
-        if (inp.mx > 250 && inp.mx < 610 && inp.my >= y - 2 && inp.my < y + 22) h = i;
+        if (inp.mx > 250 && inp.mx < 610 && inp.my >= y - 4 && inp.my < y + 27) h = i;
       }
       if (h >= 0 && h !== this.hover) { this.sel = h; sfx('uiMove'); }
       this.hover = h;
@@ -63,7 +65,7 @@ export class EventOverlay implements Overlay {
     return true;
   }
 
-  private optY(i: number) { return 196 + i * 26; }
+  private optY(i: number) { return 190 + i * 32; }
 
   render(r: Renderer) {
     const ctx = r.ui2;
@@ -92,15 +94,15 @@ export class EventOverlay implements Overlay {
       const rt = tr(this.result);
       const rs = Math.floor(clamp(this.resT * 70, 0, rt.length));
       G.font.draw(ctx, rt.slice(0, rs), x + 228, y + 170, { color: 'K10', wrap: 340, lineH: 16 });
-      if (this.resT > 0.6) G.small.draw(ctx, '▶', x + w - 22, y + h - 18, { color: Math.floor(this.t * 3) % 2 ? 'B5' : 'B3' });
+      if (this.resT > 0.6 && Math.floor(this.t * 3) % 2 === 0) drawPrompt(ctx, 'confirm', x + w - 26, y + h - 22);
     } else if (shown >= text.length || this.t > 1.2) {
       this.opts().forEach((o, i) => {
         const oy = this.optY(i) - 30 + y;
         const sel = i === this.sel;
         const ok = this.ok(i);
-        if (sel) { rect(ctx, x + 226, oy - 3, 344, 24, 'K3'); rect(ctx, x + 226, oy - 3, 2, 24, 'B5'); }
-        G.font.draw(ctx, (sel ? '▸ ' : '  ') + tr(o.label), x + 234, oy - 1, { color: !ok ? 'K5' : sel ? 'K10' : 'K8' });
-        if (o.detail) G.small.draw(ctx, tr(o.detail), x + 246, oy + 12, { color: ok ? 'K7' : 'K5' });
+        if (sel) { rect(ctx, x + 226, oy - 4, 344, 31, 'K3'); rect(ctx, x + 226, oy - 4, 2, 31, 'B5'); }
+        Text.draw(ctx, (sel ? '▸ ' : '  ') + tr(o.label), x + 234, oy - 4, { color: !ok ? 'K7' : sel ? 'K10' : 'K9' });
+        if (o.detail) Text.draw(ctx, o.detail, x + 246, oy + 12, { size: 'small', color: ok ? 'K8' : 'R4', maxW: 320 });
       });
     }
     ctx.globalAlpha = 1;

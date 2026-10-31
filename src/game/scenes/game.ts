@@ -421,6 +421,7 @@ export class GameScene implements Scene, RoomHost {
     if (!settings.flashes) pp.flash = 0;
     this.world.cam.shakeScale = settings.shake;
     this.world.render(r);
+    r.flushWorldUi();
     this.hud.boss = this.boss && !this.boss.inIntro && !this.boss.dead ? this.boss : null;
     this.hud.render(r, this.world);
     const ctx = r.ui2;
@@ -432,7 +433,7 @@ export class GameScene implements Scene, RoomHost {
       ctx.fillRect(0, 0, 640, 360);
       ctx.globalAlpha = a;
       G.font.draw(ctx, tr(UI.stopped), 320, 150, { align: 'center', color: 'R3', outline: 'K0' });
-      if (this.deathT > 2.4) G.small.draw(ctx, tr(UI.retry), 320, 200, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K7' });
+      if (this.deathT > 2.4) G.font.draw(ctx, tr(UI.retry), 320, 196, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K8' });
       ctx.globalAlpha = 1;
     }
     for (const o of this.overlays) o.render(r);
@@ -445,13 +446,14 @@ export class GameScene implements Scene, RoomHost {
     const w = Math.round(220 * clamp(t / 0.6, 0, 1));
     ctx.globalAlpha = a * 0.55;
     ctx.fillStyle = '#0b0a14';
-    ctx.fillRect(0, 96, 640, 54);
+    ctx.fillRect(0, 94, 640, 58);
     ctx.globalAlpha = a;
     ctx.fillStyle = '#d99c45';
-    ctx.fillRect(320 - w, 100, w * 2, 1);
-    ctx.fillRect(320 - w, 145, w * 2, 1);
-    G.small.draw(ctx, this.titleCard!.sub, 320, 106, { align: 'center', color: 'B4' });
-    G.font.draw(ctx, this.titleCard!.title, 320, 122, { align: 'center', color: 'K10', outline: 'K0' });
+    ctx.fillRect(320 - w, 96, w * 2, 1);
+    ctx.fillRect(320 - w, 149, w * 2, 1);
+    // floor card: 10px kicker + the floor name at 12px × 2, inside the 96–150 band
+    G.small.draw(ctx, this.titleCard!.sub, 320, 98, { align: 'center', color: 'B5' });
+    G.font.draw(ctx, this.titleCard!.title, 320, 111, { align: 'center', color: 'K10', outline: 'K0', scale: 2 });
     ctx.globalAlpha = 1;
   }
 }

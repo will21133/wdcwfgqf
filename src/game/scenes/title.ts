@@ -11,6 +11,8 @@ import { tr, L } from '../i18n';
 import { SettingsPanel } from '../ui/pause';
 import type { Overlay } from '../ui/overlay';
 import { drawHint } from '../ui/prompts';
+import { panel } from '../ui/draw';
+import { drawPixelArt } from '../ui/widgets';
 import { frand } from '../../engine/rng';
 
 export interface TitleHooks { start(): void; credits(): void; ledger(): void }
@@ -109,7 +111,7 @@ function paintBackdrop() {
   const nums = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
   nums.forEach((n, i) => {
     const a = (i / 12) * TAU - Math.PI / 2;
-    G.small.draw(tctx, n, cx + Math.cos(a) * (r - 15), cy + Math.sin(a) * (r - 15) - 4, { align: 'center', color: 'K2', shadow: false });
+    G.tiny.draw(tctx, n, cx + Math.cos(a) * (r - 15), cy + Math.sin(a) * (r - 15) - 4, { align: 'center', color: 'K2', shadow: false });
   });
 
   // city rooftops
@@ -273,25 +275,32 @@ export class TitleScene implements Scene {
     const la = ease.outCubic(clamp((t - 0.6) / 1.2, 0, 1));
     ui.globalAlpha = la;
     const lx = 430, ly = 58 - Math.round((1 - la) * 10);
-    ui.drawImage(LOGO!, Math.round(lx - LOGO!.width / 2), ly);
-    G.font.draw(ui, 'S E C O N D   H A N D', lx, ly + 74, { align: 'center', color: 'K9', outline: 'K0' });
+    drawPixelArt(ui, LOGO!, lx, ly + LOGO!.height / 2);
+    G.font.draw(ui, 'S E C O N D   H A N D', lx, ly + 73, { align: 'center', color: 'K9', outline: 'K0' });
     ui.fillStyle = col('R3');
-    ui.fillRect(lx - 70, ly + 92, 140, 1);
+    ui.fillRect(lx - 70, ly + 94, 140, 1);
     ui.fillStyle = col('B4');
-    ui.fillRect(lx - 3, ly + 90, 6, 5);
-    G.small.draw(ui, tr(L('撤销失误，保留胜果', 'Undo your wounds. Keep your victories.')), lx, ly + 100, { align: 'center', color: 'K7' });
+    ui.fillRect(lx - 3, ly + 92, 6, 5);
+    G.small.draw(ui, tr(L('撤销失误，保留胜果', 'Undo your wounds. Keep your victories.')), lx, ly + 101, { align: 'center', color: 'K8' });
+    // brass plaque that carries the menu (and the first "press any key" prompt)
+    const pa = ease.outCubic(clamp((t - 0.9) / 0.6, 0, 1));
+    if (pa > 0) {
+      ui.globalAlpha = pa;
+      panel(ui, lx - 68, 203, 136, 90, { fill: 'K1' });
+    }
     ui.globalAlpha = 1;
     if (t > 1.2 && !G.audio.ctx) {
       // first interaction gives the page keyboard focus and unlocks audio
-      G.font.draw(ui, tr(L('按任意键 / 点击画面', 'Press any key / click')), lx, 240, { align: 'center', color: Math.floor(t * 2) % 2 ? 'K10' : 'K7', outline: 'K0' });
+      G.font.draw(ui, tr(L('按任意键', 'Press any key')), lx, 230, { align: 'center', color: Math.floor(t * 2) % 2 ? 'K10' : 'K8' });
+      G.small.draw(ui, tr(L('或点击画面', 'or click the screen')), lx, 250, { align: 'center', color: 'K8' });
     } else if (t > 1.2) {
       const ma = clamp((t - 1.2) / 0.5, 0, 1);
       ui.globalAlpha = ma;
       this.list.render(ui, lx - 55, 214, 110);
       ui.globalAlpha = 1;
-      drawHint(ui, 320, 346, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('确认', 'Confirm'))]]);
+      drawHint(ui, 320, 340, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('确认', 'Confirm'))]]);
     }
-    G.small.draw(ui, 'v0.9 · Early Access build', 4, 350, { color: 'K4' });
+    G.small.draw(ui, 'v0.9 · Early Access build', 6, 342, { color: 'K7' });
     for (const o of this.overlays) o.render(r);
   }
 }

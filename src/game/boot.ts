@@ -100,6 +100,12 @@ export async function boot() {
     ]));
     return;
   }
+  if (scene === 'widgets') {
+    // UI toolkit review sheet (?scene=widgets[&pad=1])
+    const { WidgetPreview } = await import('./scenes/widgetPreview');
+    G.scenes.set(new WidgetPreview());
+    return;
+  }
   if (scene === 'title') { Flow.title(); return; }
   if (scene === 'controls') {
     const { TitleScene } = await import('./scenes/title');

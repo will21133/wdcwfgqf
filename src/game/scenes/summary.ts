@@ -70,11 +70,11 @@ export class SummaryScene implements Scene {
     const icons: [import('../../engine/gfx/sprite').Sprite, string][] = [];
     for (const m of run.memories) { const d = MEMORIES[m.id]; if (d) icons.push([patronSigil(d.patron), d.id]); }
     for (const id of run.parts) { const p = PARTS_BY_ID[id]; if (p) icons.push([partLook(p).icon, id]); }
-    G.small.draw(ctx, tr(L('本局构筑', 'Build')), 330, 84, { color: 'K7' });
+    G.small.draw(ctx, tr(L('本局构筑', 'Build')), 330, 84, { color: 'K8' });
     icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, 106 + Math.floor(i / 8) * 22, 1, k); });
     const wi = WEAPON_INFO.find((x) => x.id === run.weapon);
     if (wi && this.t > 0.6) {
-      G.small.draw(ctx, tr(L('武器', 'Weapon')), 330, 160, { color: 'K7' });
+      G.small.draw(ctx, tr(L('武器', 'Weapon')), 330, 160, { color: 'K8' });
       drawScaled(ctx, wi.sprite, 342, 182, 1, k);
       G.font.draw(ctx, tr(wi.name), 360, 176, { color: 'B5' });
     }
@@ -83,7 +83,7 @@ export class SummaryScene implements Scene {
       shardIcon(ctx, 260, 214);
       const n = Math.round(this.shardsBanked * clamp((this.t - 1.2) / 0.8, 0, 1));
       G.font.draw(ctx, tr(L(`带回时之碎片  ${n}`, `Time Shards banked  ${n}`)), 274, 212, { color: 'V4' });
-      G.small.draw(ctx, tr(L('碎片会留在工坊，用来拧紧你的发条。', 'Shards stay in the workshop to wind your mainspring.')), 320, 236, { align: 'center', color: 'K6' });
+      G.small.draw(ctx, tr(L('碎片会留在工坊，用来拧紧你的发条。', 'Shards stay in the workshop to wind your mainspring.')), 320, 236, { align: 'center', color: 'K8' });
     }
     if (this.t > 1.5) drawHint(ctx, 320, 284, [['confirm', tr(L('回到工坊', 'Return to the workshop'))]]);
     ctx.globalAlpha = 1;

@@ -1,6 +1,13 @@
 // Pixel-perfect text: glyphs from the Fusion Pixel webfont are rasterised once,
 // alpha-thresholded to 1-bit, and cached. Rendered strings are cached too.
 // Supports inline colour markup:  "造成 {g:12} 点伤害"  →  12 in gold.
+//
+// Two output paths:
+//  · 1× contexts (offscreen bakes, world layers): blocks are drawn at their native size.
+//  · the device-resolution UI context (transform scale s ≠ 1): blocks are blitted at an
+//    integer multiple m = textMul(s) of the font pixel, aligned to the device grid, so
+//    glyphs stay razor sharp at any window size. Layout stays in 640×360 logical units:
+//    measure() returns logical widths (font px × m / s).
 
 import { col } from '../../art/palette';
 import { makeCanvas, Ctx } from './canvas';
@@ -21,47 +28,91 @@ const COLOR_TAGS: Record<string, string> = {
   y: 'G4', // lime — gearwork
 };
 
+/** CJK ideographs, kana, fullwidth forms and CJK punctuation */
+export const CJK_RE = /[⺀-鿿豈-﫿︰-﹏＀-￯]/;
+
+/**
+ * Integer device pixels per font pixel for a UI drawn at scale s (device px per logical px).
+ * round(s), stepped down when that would make text more than 12.5% larger than its logical box.
+ */
+export function textMul(s: number): number {
+  let m = Math.max(1, Math.round(s));
+  if (m > 1 && m / s > 1.125) m--;
+  return m;
+}
+
+/** logical px per font px on the UI layer this frame (m / s); set by the renderer */
+export const textScale = { k: 1, s: 1, m: 1 };
+
+const isDev = (() => { try { return !!(import.meta as any).env?.DEV; } catch { return false; } })();
+const warned = new Set<string>();
+
 export interface TextOpts {
   color?: string;
   align?: 'left' | 'center' | 'right';
   shadow?: string | false;
   outline?: string | false;
+  /** wrap width in logical px */
   wrap?: number;
+  /** line height in font px (default: the font's) */
   lineH?: number;
   alpha?: number;
   /** vertical alignment of the block relative to y */
   valign?: 'top' | 'middle' | 'bottom';
+  /** extra integer magnification (title text = FP12 × 2) */
+  scale?: number;
 }
 
 interface Run { text: string; color: string | null }
+interface Block { c: HTMLCanvasElement; w: number; lines: number }
+
+/** true when ctx carries a non-identity scale (the device-resolution UI layer) */
+export function ctxScale(ctx: Ctx): number {
+  const t = ctx.getTransform();
+  if (t.b !== 0 || t.c !== 0) return 1;
+  return Math.abs(t.a - 1) < 1e-4 ? 1 : t.a;
+}
 
 export class PixelFont {
   private glyphs = new Map<string, Glyph>();
-  private cache = new Map<string, HTMLCanvasElement>();
+  private cache = new Map<string, Block>();
   private gctx: Ctx;
   private gcan: HTMLCanvasElement;
   readonly ascent: number;
+  readonly descent: number;
+  /** height of a rasterised glyph cell: ascent + descent + 2 (keeps g/j/p/q/y and _ intact) */
+  readonly cellH: number;
   readonly lineH: number;
 
-  constructor(public family: string, public size: number, lineH?: number) {
+  constructor(public family: string, public size: number, lineH?: number, private opts: { latinOnly?: boolean; fallback?: () => PixelFont } = {}) {
     [this.gcan, this.gctx] = makeCanvas(size * 3, size * 3);
     this.gctx.font = `${size}px "${family}"`;
     const m = this.gctx.measureText('国Ag');
     this.ascent = Math.round(m.fontBoundingBoxAscent || size * 0.85);
+    this.descent = Math.round(m.fontBoundingBoxDescent || size * 0.25);
+    this.cellH = Math.ceil(this.ascent + this.descent) + 2;
+    if (this.gcan.height < this.cellH + 2) [this.gcan, this.gctx] = makeCanvas(size * 3, this.cellH + 2);
     this.lineH = lineH ?? size + 3;
+  }
+
+  /** latin-only fonts (tiny) hand CJK strings to their fallback and warn in dev builds */
+  private route(text: string): PixelFont | null {
+    if (!this.opts.latinOnly || !CJK_RE.test(text)) return null;
+    if (isDev && !warned.has(text)) { warned.add(text); console.warn('[text] CJK in tiny:', text.slice(0, 24)); }
+    return this.opts.fallback?.() ?? null;
   }
 
   glyph(ch: string): Glyph {
     let g = this.glyphs.get(ch);
     if (g) return g;
-    const ctx = this.gctx, S = this.size * 3;
-    ctx.clearRect(0, 0, S, S);
+    const ctx = this.gctx;
+    ctx.clearRect(0, 0, this.gcan.width, this.gcan.height);
     ctx.font = `${this.size}px "${this.family}"`;
     ctx.fillStyle = '#fff';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(ch, 1, this.ascent + 1);
     const adv = Math.max(1, Math.round(ctx.measureText(ch).width));
-    const w = adv + 2, h = this.size + 3;
+    const w = adv + 2, h = this.cellH;
     const id = ctx.getImageData(0, 0, w, h);
     const [c, cctx] = makeCanvas(w, h);
     const out = cctx.createImageData(w, h);
@@ -76,14 +127,23 @@ export class PixelFont {
     return g;
   }
 
-  /** Width of plain text (markup stripped) */
-  measure(text: string): number {
+  /** Width of plain text (markup stripped) in font pixels */
+  measureRaw(text: string): number {
+    const f = this.route(text);
+    if (f) return f.measureRaw(text);
     let w = 0;
     for (const r of parseRuns(text)) for (const ch of r.text) w += this.glyph(ch).adv;
     return w;
   }
 
-  /** Lay out text into lines of runs, with CJK-aware wrapping */
+  /** Width of plain text in logical (640×360) pixels on the UI layer */
+  measure(text: string): number {
+    const f = this.route(text);
+    if (f) return f.measure(text);
+    return this.measureRaw(text) * textScale.k;
+  }
+
+  /** Lay out text into lines of runs, with CJK-aware wrapping (wrap in font px) */
   layout(text: string, wrap?: number): Run[][] {
     const lines: Run[][] = [];
     for (const para of text.split('\n')) {
@@ -100,9 +160,11 @@ export class PixelFont {
       let lw = 0;
       const noLead = '，。、；：？！）》」』,.;:?!)%';
       for (const t of tokens) {
-        const tw = this.measure(t.text);
+        const tw = this.measureRaw(t.text);
         const isSpace = /^\s+$/.test(t.text);
         if (lw + tw > wrap && lw > 0 && !isSpace && !(noLead.includes(t.text[0]) && t.text.length === 1)) {
+          // drop a trailing space before breaking
+          if (line.length && /^\s+$/.test(line[line.length - 1].text)) line.pop();
           lines.push(line);
           line = [];
           lw = 0;
@@ -116,24 +178,31 @@ export class PixelFont {
     return lines;
   }
 
-  /** Render text block to a cached canvas */
-  private renderBlock(text: string, o: TextOpts): HTMLCanvasElement {
-    const key = `${text}\u0001${o.color}\u0001${o.shadow}\u0001${o.outline}\u0001${o.wrap}\u0001${o.align}\u0001${o.lineH}`;
-    let c = this.cache.get(key);
-    if (c) {
+  /** wrapped lines as markup strings (wrap in logical px on the UI layer) */
+  wrapLines(text: string, wrapLogical: number): string[] {
+    const f = this.route(text);
+    if (f) return f.wrapLines(text, wrapLogical);
+    return this.layout(text, wrapLogical / textScale.k).map((l) => l.map((r) => (r.color ? `{${r.color}:${r.text}}` : r.text)).join(''));
+  }
+
+  /** Render text block to a cached canvas (all units font px) */
+  private renderBlock(text: string, o: TextOpts, wrapRaw: number | undefined): Block {
+    const key = `${text}\u0001${o.color}\u0001${o.shadow}\u0001${o.outline}\u0001${wrapRaw}\u0001${o.align}\u0001${o.lineH}`;
+    const hit = this.cache.get(key);
+    if (hit) {
       // refresh LRU
       this.cache.delete(key);
-      this.cache.set(key, c);
-      return c;
+      this.cache.set(key, hit);
+      return hit;
     }
-    const lines = this.layout(text, o.wrap);
+    const lines = this.layout(text, wrapRaw);
     const lh = o.lineH ?? this.lineH;
-    const widths = lines.map((l) => l.reduce((s, r) => s + this.measure(r.text), 0));
-    const maxW = Math.max(1, o.wrap && o.align !== 'left' ? Math.max(...widths) : Math.max(...widths));
+    const widths = lines.map((l) => l.reduce((s, r) => s + this.measureRaw(r.text), 0));
+    const maxW = Math.max(1, ...widths);
     const pad = 2;
-    const W = maxW + pad * 2, H = lines.length * lh + pad * 2 + 2;
+    // the last line's glyph cell may reach below the line box (descenders)
+    const W = maxW + pad * 2, H = (lines.length - 1) * lh + Math.max(lh, this.cellH - 1) + pad * 2 + 1;
     const [cv, ctx] = makeCanvas(W, H);
-    // draw coloured glyphs
     const [tmp, tctx] = makeCanvas(W, H);
     const baseColor = col(o.color ?? 'K10');
     lines.forEach((line, li) => {
@@ -145,8 +214,6 @@ export class PixelFont {
         const color = r.color ? col(r.color) : baseColor;
         for (const ch of r.text) {
           const g = this.glyph(ch);
-          tctx.globalCompositeOperation = 'source-over';
-          // draw glyph into its own colour via a per-colour glyph cache
           tctx.drawImage(this.tinted(ch, g, color), x - 1, y - 1);
           x += g.adv;
         }
@@ -160,12 +227,13 @@ export class PixelFont {
       ctx.drawImage(sc, 0, 1);
     }
     ctx.drawImage(tmp, 0, 0);
-    this.cache.set(key, cv);
+    const b: Block = { c: cv, w: maxW, lines: lines.length };
+    this.cache.set(key, b);
     if (this.cache.size > 900) {
       const first = this.cache.keys().next().value!;
       this.cache.delete(first);
     }
-    return cv;
+    return b;
   }
 
   private tintCache = new Map<string, HTMLCanvasElement>();
@@ -193,33 +261,61 @@ export class PixelFont {
     return cv;
   }
 
-  /** Draw text. Returns the block's [width, height]. */
+  /** Draw text. Returns the block's [width, height] in the context's logical units. */
   draw(ctx: Ctx, text: string, x: number, y: number, o: TextOpts = {}): [number, number] {
     if (!text) return [0, 0];
-    const c = this.renderBlock(text, o);
+    const f = this.route(text);
+    if (f) return f.draw(ctx, text, x, y, o);
+    const s = ctxScale(ctx);
+    const mag = Math.max(1, Math.round(o.scale ?? 1));
+    // device px per font px, and logical px per font px
+    const m = (s === 1 ? 1 : textMul(s)) * mag;
+    const k = m / s;
+    const wrapRaw = o.wrap ? Math.max(1, Math.floor(o.wrap / k)) : undefined;
+    const blk = this.renderBlock(text, o, wrapRaw);
+    const c = blk.c;
     const pad = 2;
-    let dx = Math.round(x) - pad;
-    const innerW = c.width - pad * 2;
-    if (o.align === 'center') dx = Math.round(x - innerW / 2) - pad;
-    else if (o.align === 'right') dx = Math.round(x - innerW) - pad;
-    let dy = Math.round(y) - pad;
-    const innerH = c.height - pad * 2 - 2;
-    if (o.valign === 'middle') dy = Math.round(y - innerH / 2) - pad;
-    else if (o.valign === 'bottom') dy = Math.round(y - innerH) - pad;
+    const innerW = blk.w, innerH = blk.lines * (o.lineH ?? this.lineH);
+    const prevA = ctx.globalAlpha;
     if (o.alpha !== undefined && o.alpha < 1) {
-      if (o.alpha <= 0) return [innerW, innerH];
-      ctx.globalAlpha = o.alpha;
+      if (o.alpha <= 0) return [innerW * k, innerH * k];
+      ctx.globalAlpha = prevA * o.alpha;
+    }
+    if (s === 1 && mag === 1) {
+      let dx = Math.round(x) - pad;
+      if (o.align === 'center') dx = Math.round(x - innerW / 2) - pad;
+      else if (o.align === 'right') dx = Math.round(x - innerW) - pad;
+      let dy = Math.round(y) - pad;
+      if (o.valign === 'middle') dy = Math.round(y - innerH / 2) - pad;
+      else if (o.valign === 'bottom') dy = Math.round(y - innerH) - pad;
       ctx.drawImage(c, dx, dy);
-      ctx.globalAlpha = 1;
-    } else ctx.drawImage(c, dx, dy);
-    return [innerW, innerH];
+    } else {
+      // device-space blit at an integer multiple, snapped to the device pixel grid
+      const t = ctx.getTransform();
+      let X = t.e + t.a * x, Y = t.f + t.d * y;
+      const dW = innerW * m, dH = innerH * m;
+      if (o.align === 'center') X -= dW / 2;
+      else if (o.align === 'right') X -= dW;
+      if (o.valign === 'middle') Y -= dH / 2;
+      else if (o.valign === 'bottom') Y -= dH;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(c, Math.round(X) - pad * m, Math.round(Y) - pad * m, c.width * m, c.height * m);
+      ctx.restore();
+    }
+    ctx.globalAlpha = prevA;
+    return [innerW * k, innerH * k];
   }
 
-  /** measure a wrapped block */
+  /** measure a wrapped block in logical px (wrap in logical px) */
   blockSize(text: string, wrap?: number, lineH?: number): [number, number] {
-    const lines = this.layout(text, wrap);
-    const w = Math.max(0, ...lines.map((l) => l.reduce((s, r) => s + this.measure(r.text), 0)));
-    return [w, lines.length * (lineH ?? this.lineH)];
+    const f = this.route(text);
+    if (f) return f.blockSize(text, wrap, lineH);
+    const k = textScale.k;
+    const lines = this.layout(text, wrap ? Math.floor(wrap / k) : undefined);
+    const w = Math.max(0, ...lines.map((l) => l.reduce((s, r) => s + this.measureRaw(r.text), 0)));
+    return [w * k, lines.length * (lineH ?? this.lineH) * k];
   }
 }
 
@@ -241,7 +337,7 @@ export function stripMarkup(text: string) {
   return text.replace(/\{(\w+):([^{}]*)\}/g, '$2');
 }
 
-/** Chunky custom digit font (5x7 / 3x5) for damage numbers and counters. */
+/** Chunky custom digit font (5x7, and 3x5 for tiny corner badges) for numbers and counters. */
 const DIGITS_BIG: Record<string, string[]> = {
   '0': ['.###.', '##.##', '##.##', '##.##', '##.##', '##.##', '.###.'],
   '1': ['..##.', '.###.', '..##.', '..##.', '..##.', '..##.', '.####'],
@@ -253,9 +349,16 @@ const DIGITS_BIG: Record<string, string[]> = {
   '7': ['#####', '...##', '..##.', '..##.', '.##..', '.##..', '.##..'],
   '8': ['.###.', '##.##', '##.##', '.###.', '##.##', '##.##', '.###.'],
   '9': ['.###.', '##.##', '##.##', '.####', '...##', '...##', '.###.'],
-  '!': ['.##.', '.##.', '.##.', '.##.', '.##.', '....', '.##.'],
+  '!': ['##', '##', '##', '##', '##', '..', '##'],
   '+': ['.....', '..#..', '..#..', '#####', '..#..', '..#..', '.....'],
-  '-': ['.....', '.....', '.....', '####.', '.....', '.....', '.....'],
+  '-': ['....', '....', '....', '####', '....', '....', '....'],
+  '/': ['...##', '...##', '..##.', '..##.', '.##..', '##...', '##...'],
+  'x': ['.....', '.....', '##.##', '.###.', '.###.', '##.##', '.....'],
+  '%': ['##..#', '##.##', '...#.', '..##.', '.#...', '##.##', '#..##'],
+  '.': ['..', '..', '..', '..', '..', '##', '##'],
+  ':': ['..', '##', '##', '..', '##', '##', '..'],
+  's': ['....', '....', '.###', '##..', '.##.', '..##', '###.'],
+  ' ': ['..', '..', '..', '..', '..', '..', '..'],
 };
 const DIGITS_SMALL: Record<string, string[]> = {
   '0': ['###', '#.#', '#.#', '#.#', '###'], '1': ['.#.', '##.', '.#.', '.#.', '###'],
@@ -311,5 +414,33 @@ export class DigitFont {
     this.cache.set(key, cv);
     if (this.cache.size > 400) this.cache.delete(this.cache.keys().next().value!);
     return cv;
+  }
+
+  /** logical width of a rendered string on the UI layer */
+  measure(str: string): number { return this.render(str, 'K10', 'K0').width * textScale.k; }
+
+  /**
+   * Draw a number. On the UI layer it is blitted at the integer text multiple and snapped to
+   * the device grid. Returns its logical width.
+   */
+  draw(ctx: Ctx, str: string, x: number, y: number, o: { fill?: string; outline?: string; hi?: string; align?: 'left' | 'center' | 'right'; alpha?: number; pop?: number } = {}): number {
+    const img = this.render(str, o.fill ?? 'K10', o.outline ?? 'K0', o.hi);
+    const s = ctxScale(ctx);
+    const pop = Math.max(1, Math.round(o.pop ?? 1));
+    const m = (s === 1 ? 1 : textMul(s)) * pop;
+    const prevA = ctx.globalAlpha;
+    if (o.alpha !== undefined) ctx.globalAlpha = prevA * Math.max(0, Math.min(1, o.alpha));
+    const t = ctx.getTransform();
+    let X = t.e + t.a * x;
+    const W = img.width * m;
+    if (o.align === 'center') X -= W / 2;
+    else if (o.align === 'right') X -= W;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, Math.round(X), Math.round(t.f + t.d * y), W, img.height * m);
+    ctx.restore();
+    ctx.globalAlpha = prevA;
+    return W / t.a;
   }
 }

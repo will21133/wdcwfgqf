@@ -7,6 +7,7 @@ import { G, sfx } from '../G';
 import { tr, L, L10n } from '../i18n';
 import { profile, saveProfile, NODES, NodeDef, nodeLevel } from '../save';
 import { drawHint } from './prompts';
+import { Text } from './text';
 import { col } from '../../art/palette';
 import { gearFrames, BRASS_GEAR, IRON_GEAR } from '../../art/gear';
 import { Sprite, Sprite as SpriteCls } from '../../engine/gfx/sprite';
@@ -22,7 +23,7 @@ let GEAR_ON: Sprite[] | null = null, GEAR_OFF: Sprite[] | null = null;
 
 function shardCounter(ctx: CanvasRenderingContext2D, x: number, y: number) {
   shardIcon(ctx, x, y);
-  ctx.drawImage(G.digitsSmall.render(String(profile.shards), 'V4', 'K0'), x + 10, y + 1);
+  G.digits.draw(ctx, String(profile.shards), x + 10, y, { fill: 'V4' });
 }
 
 // ───────────────────────── Mainspring ─────────────────────────
@@ -33,7 +34,8 @@ export class MainspringOverlay implements Overlay {
   flash = 0;
   constructor() { GEAR_ON ??= gearFrames(9, 10, BRASS_GEAR, 4, 2); GEAR_OFF ??= gearFrames(9, 10, IRON_GEAR, 4, 2); sfx('uiOpen'); }
 
-  private pos(n: NodeDef) { return { x: 120 + n.col * 70, y: 96 + n.row * 52 }; }
+  // the weapon column (col 4) must stay clear of the detail panel at x = 400
+  private pos(n: NodeDef) { return { x: 96 + n.col * 64, y: 96 + n.row * 52 }; }
   private available(n: NodeDef) { return !n.requires || nodeLevel(n.requires) > 0; }
   private cost(n: NodeDef) { const lv = nodeLevel(n.id); return lv < n.costs.length ? n.costs[lv] : -1; }
 
@@ -80,7 +82,7 @@ export class MainspringOverlay implements Overlay {
     ctx.globalAlpha = 0.8; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
     panel(ctx, 24, 18, 592, 324);
     G.font.draw(ctx, tr(L('发条台', 'The Mainspring')), 40, 28, { color: 'B5' });
-    G.small.draw(ctx, tr(L('用时之碎片拧紧你的发条——这些强化永久有效。', 'Wind Time Shards into your spring — these upgrades are permanent.')), 40, 46, { color: 'K7' });
+    G.small.draw(ctx, tr(L('用时之碎片拧紧你的发条——这些强化永久有效。', 'Wind Time Shards into your spring — these upgrades are permanent.')), 40, 46, { color: 'K8' });
     shardCounter(ctx, 560, 30);
     // connections
     for (const n of NODES) {
@@ -92,7 +94,7 @@ export class MainspringOverlay implements Overlay {
       if (a.x === b.x) ctx.fillRect(a.x, y0, 1, Math.abs(a.y - b.y));
       else { ctx.fillRect(x0, b.y, Math.abs(a.x - b.x), 1); ctx.fillRect(a.x, y0, 1, Math.abs(a.y - b.y)); }
     }
-    G.small.draw(ctx, tr(L('武器', 'Weapons')), this.pos(NODES.find((n) => n.col === 4)!).x, 66, { align: 'center', color: 'K6' });
+    G.small.draw(ctx, tr(L('武器', 'Weapons')), this.pos(NODES.find((n) => n.col === 4)!).x, 66, { align: 'center', color: 'K7' });
     NODES.forEach((n, i) => {
       const p = this.pos(n);
       const lv = nodeLevel(n.id), max = n.costs.length;
@@ -105,9 +107,9 @@ export class MainspringOverlay implements Overlay {
       for (let k = 0; k < max; k++) rect(ctx, p.x - max * 2 + k * 4, p.y + 13, 3, 2, k < lv ? 'B5' : 'K3');
       ctx.globalAlpha = 1;
       if (i === this.sel) {
-        ctx.strokeStyle = col('B6');
-        ctx.lineWidth = 1;
-        ctx.strokeRect(p.x - 14.5, p.y - 14.5, 29, 29);
+        // selection frame (fillRects so it snaps to the device grid)
+        rect(ctx, p.x - 15, p.y - 15, 30, 1, 'B6'); rect(ctx, p.x - 15, p.y + 14, 30, 1, 'B6');
+        rect(ctx, p.x - 15, p.y - 14, 1, 28, 'B6'); rect(ctx, p.x + 14, p.y - 14, 1, 28, 'B6');
       }
     });
     // detail panel
@@ -115,14 +117,16 @@ export class MainspringOverlay implements Overlay {
     const lv = nodeLevel(n.id), c = this.cost(n);
     const x = 400, y = 74;
     panel(ctx, x, y, 200, 180, { fill: 'K2', rivets: false });
-    G.font.draw(ctx, tr(n.name), x + 10, y + 8, { color: lv > 0 ? 'B5' : 'K10', wrap: 180 });
-    G.small.draw(ctx, `${tr(L('等级', 'Level'))} ${lv}/${n.costs.length}`, x + 10, y + 26, { color: 'K7' });
-    G.font.draw(ctx, tr(n.desc(Math.max(1, Math.min(n.costs.length, lv + (c >= 0 ? 1 : 0))))), x + 10, y + 42, { color: 'K9', wrap: 180, lineH: 15 });
-    if (!this.available(n)) G.small.draw(ctx, tr(L('需要先解锁前置', 'Requires the previous node')), x + 10, y + 150, { color: 'R4' });
-    else if (c < 0) G.small.draw(ctx, tr(L('已满级', 'Maxed')), x + 10, y + 150, { color: 'B5' });
+    // name, level and description stack on measured heights so long names never collide
+    const nh = Text.draw(ctx, n.name, x + 10, y + 6, { color: lv > 0 ? 'B5' : 'K10', maxW: 180 }).h;
+    const ly = y + 6 + nh + 1;
+    Text.draw(ctx, `${tr(L('等级', 'Level'))} ${lv}/${n.costs.length}`, x + 10, ly, { size: 'small', color: 'K8' });
+    Text.draw(ctx, n.desc(Math.max(1, Math.min(n.costs.length, lv + (c >= 0 ? 1 : 0)))), x + 10, ly + Text.lineH('small') + 4, { color: 'K9', maxW: 180 });
+    if (!this.available(n)) Text.draw(ctx, L('需要先解锁前置', 'Requires the previous node'), x + 10, y + 155, { color: 'R4' });
+    else if (c < 0) Text.draw(ctx, L('已满级', 'Maxed'), x + 10, y + 155, { color: 'B5' });
     else {
-      shardIcon(ctx, x + 10, y + 148);
-      G.font.draw(ctx, `${c}`, x + 22, y + 146, { color: profile.shards >= c ? 'V4' : 'R4' });
+      shardIcon(ctx, x + 10, y + 160);
+      G.digits.draw(ctx, `${c}`, x + 22, y + 159, { fill: profile.shards >= c ? 'V4' : 'R4' });
     }
     if (this.flash > 0) { ctx.globalAlpha = this.flash; rect(ctx, x, y, 200, 180, 'B6'); ctx.globalAlpha = 1; }
     drawHint(ctx, 320, 318, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('拧紧', 'Wind'))], ['cancel', tr(L('返回', 'Back'))]]);
@@ -171,7 +175,7 @@ export class WeaponOverlay implements Overlay {
       ctx.globalAlpha = un ? 1 : 0.25;
       drawScaled(ctx, w.sprite, x, y - 4, 3);
       ctx.globalAlpha = 1;
-      G.small.draw(ctx, un ? tr(w.name) : '???', x, y + 28, { align: 'center', color: un ? (profile.weapon === w.id ? 'B5' : 'K9') : 'K5' });
+      G.small.draw(ctx, un ? tr(w.name) : '???', x, y + 28, { align: 'center', color: un ? (profile.weapon === w.id ? 'B5' : 'K9') : 'K7' });
       if (profile.weapon === w.id) G.small.draw(ctx, tr(L('装备中', 'Equipped')), x, y - 42, { align: 'center', color: 'G4' });
     });
     const w = WEAPON_INFO[this.sel];
@@ -191,7 +195,7 @@ function enemyIcon(def: { id: string; make: (x: number, y: number) => unknown })
     const S = 64;
     const [cv, ctx] = makeCanvas(S, S);
     const noop = () => {};
-    const fake = { w: ctx, u: ctx, g: ctx, ui2: ctx, lightAt: noop, glowAt: noop, visible: () => true, params: {} } as any;
+    const fake = { w: ctx, u: ctx, g: ctx, ui2: ctx, lightAt: noop, glowAt: noop, label: noop, worldUi: noop, visible: () => true, params: {} } as any;
     const e = def.make(S / 2, S - 6) as any;
     e.world = { time: 0, player: null, map: { solidAt: () => false, pitAt: () => false, los: () => true }, particles: { spawn: noop }, fx: {}, enemies: [], entities: [], bus: { on: noop, off: noop, emit: noop } };
     e.spawnT = 0; e.age = 0.5; e.flash = 0;
@@ -261,7 +265,7 @@ export class LedgerOverlay implements Overlay {
     this.tabs.forEach((t, i) => {
       const x = 180 + i * 80;
       if (i === this.tab) rect(ctx, x - 4, 26, 72, 16, 'K3');
-      G.font.draw(ctx, tr(t.name), x + 32, 28, { align: 'center', color: i === this.tab ? 'K10' : 'K6' });
+      G.font.draw(ctx, tr(t.name), x + 32, 28, { align: 'center', color: i === this.tab ? 'K10' : 'K7' });
     });
     const es = this.tabs[this.tab].entries();
     const seenN = es.filter((e) => e.seen).length;
@@ -272,12 +276,12 @@ export class LedgerOverlay implements Overlay {
       if (i === this.sel) rect(ctx, x - 16, y - 14, 32, 30, 'K3');
       if (e.seen && e.icon) drawScaled(ctx, e.icon, x, y, 1);
       else if (e.seen) { rect(ctx, x - 6, y - 6, 12, 12, 'K4'); G.small.draw(ctx, e.name.slice(0, 1), x, y - 4, { align: 'center', color: e.color }); }
-      else G.small.draw(ctx, '?', x, y - 4, { align: 'center', color: 'K5' });
+      else G.small.draw(ctx, '?', x, y - 4, { align: 'center', color: 'K7' });
     });
     const e = es[Math.min(this.sel, es.length - 1)];
     rect(ctx, 40, 262, 560, 1, 'B1');
     if (e) {
-      G.font.draw(ctx, e.seen ? e.name : '???', 48, 270, { color: e.seen ? e.color : 'K5' });
+      G.font.draw(ctx, e.seen ? e.name : '???', 48, 270, { color: e.seen ? e.color : 'K7' });
       G.font.draw(ctx, e.seen ? e.desc : tr(L('尚未发现。', 'Not yet discovered.')), 48, 288, { color: 'K8', wrap: 540, lineH: 14 });
     }
     drawHint(ctx, 320, 326, [['nav', tr(L('选择', 'Select'))], ['special', tr(L('切换页', 'Tab'))], ['cancel', tr(L('返回', 'Back'))]]);

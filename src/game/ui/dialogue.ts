@@ -8,6 +8,7 @@ import { tr, L10n } from '../i18n';
 import { panel, rect } from './draw';
 import { clamp, ease } from '../../engine/math';
 import { drawButton } from './prompts';
+import { promptW } from './widgets';
 
 export interface DLine { name: L10n; portrait: Sprite; portraitTalk?: Sprite; text: L10n; color: string; right?: boolean }
 
@@ -54,7 +55,7 @@ export class DialogueOverlay implements Overlay {
     ctx.fillStyle = '#0b0a14';
     ctx.fillRect(0, 0, 640, 360);
     ctx.globalAlpha = k;
-    const h = 82, y = 360 - h - 10 + Math.round((1 - k) * 30);
+    const h = 88, y = 360 - h - 8 + Math.round((1 - k) * 30);
     panel(ctx, 20, y, 600, h, { fill: 'K1' });
     const px = line.right ? 560 : 80;
     // portrait frame
@@ -65,10 +66,10 @@ export class DialogueOverlay implements Overlay {
     const portrait = talking && line.portraitTalk ? line.portraitTalk : line.portrait;
     drawScaled(ctx, portrait, px, y + 2 - Math.round(portrait.h), 2);
     const tx = line.right ? 40 : 140;
-    G.font.draw(ctx, tr(line.name), tx, y + 10, { color: line.color });
-    rect(ctx, tx, y + 26, 300, 1, 'B1');
-    G.font.draw(ctx, text.slice(0, shown), tx, y + 32, { color: 'K10', wrap: 440, lineH: 16 });
-    if (shown >= text.length && Math.floor(this.t * 3) % 2 === 0) drawButton(ctx, 590, y + h - 18, 'confirm');
+    G.font.draw(ctx, tr(line.name), tx, y + 7, { color: line.color });
+    rect(ctx, tx, y + 25, 300, 1, 'B1');
+    G.font.draw(ctx, text.slice(0, shown), tx, y + 29, { color: 'K10', wrap: 440, lineH: 16 });
+    if (shown >= text.length && Math.floor(this.t * 3) % 2 === 0) drawButton(ctx, 600 - promptW('confirm'), y + h - 19, 'confirm');
     ctx.globalAlpha = 1;
     void clamp;
   }
