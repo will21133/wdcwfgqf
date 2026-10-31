@@ -10,6 +10,7 @@ import { RoomVisual, renderRoom } from './roomRender';
 import { Theme } from '../../art/themes';
 import { FX } from './fx';
 import { frand } from '../../engine/rng';
+import { mix } from '../../art/palette';
 import { VIEW_W } from '../../engine/gfx/post';
 import type { Run } from '../run';
 import type { Player } from '../entities/player';
@@ -40,6 +41,10 @@ export class World {
   frozen = false;
   stats: WorldStats = { damage: 0, kills: 0, rewinds: 0, paradoxes: 0, hitsTaken: 0 };
   run: Run | null = null;
+  /** 0..1 extra darkness (boss mechanics) */
+  darkness = 0;
+  /** 0..1 time-stop strength (final boss): world desaturates */
+  timeStop = 0;
   private dustT = 0;
   private toAdd: Entity[] = [];
   /** BFS distance field toward the player (for enemy navigation) */
@@ -160,10 +165,9 @@ export class World {
       if (e instanceof Actor && !e.dead) this.physics(e, sdt, false);
       else if (!(e instanceof Actor) && !e.dead) { e.x += e.vx * sdt; e.y += e.vy * sdt; }
     }
-    if (!this.frozen) {
-      this.separate();
-      this.combat.update(sdt);
-    }
+    if (!this.frozen) this.separate();
+    // hitboxes still resolve during a time stop (echoes keep fighting)
+    this.combat.update(sdt);
     this.particles.update(sdt);
     this.fx.update(sdt);
     this.ambient(sdt);
@@ -313,7 +317,7 @@ export class World {
 
   render(r: Renderer) {
     const v = this.cam.view();
-    r.ambient = this.theme.ambient;
+    r.ambient = this.darkness > 0.01 ? mix(this.theme.ambient, '#06050c', this.darkness) : this.theme.ambient;
     r.begin(v.x, v.y, this.theme.clear);
     const w = r.w;
     w.drawImage(this.vis.floor, 0, 0);

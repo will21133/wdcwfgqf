@@ -94,8 +94,8 @@ export abstract class Boss extends Enemy {
   renderUnlit(_r: Renderer) {}
 
   /** expanding shockwave ring along the ground — dodge by dashing through it */
-  shockRing(x: number, y: number, maxR: number, dmg: number, speed = 150, color = 'O3') {
-    this.world.add(new GroundRing(x, y, maxR, dmg, speed, color, this));
+  shockRing(x: number, y: number, maxR: number, dmg: number, speed = 150, color = 'O3', fixed = false) {
+    this.world.add(new GroundRing(x, y, maxR, dmg, speed, color, this, fixed));
   }
 }
 

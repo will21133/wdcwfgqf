@@ -16,6 +16,7 @@ import { planWaves, Wave, findEnemy } from '../world/director';
 import { RNG } from '../../engine/rng';
 import { damp, clamp, ease } from '../../engine/math';
 import { Dummy } from '../entities/enemies/gearworks';
+import { setupTutorial } from '../rooms/tutorial';
 import { BIOMES } from '../../art/biomes';
 import { Overlay, ChoiceOverlay, Toast } from '../ui/overlay';
 import { PauseMenu } from '../ui/pause';
@@ -113,8 +114,12 @@ export class GameScene implements Scene, RoomHost {
         this.titleCard = { title: tr(b.bossName), sub: tr(b.bossTitle), t: -0.2 };
       } else this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind);
     } else if (kind === 'tutorial') {
-      const sp = map.spawnable[Math.floor(map.spawnable.length / 2)];
-      w.add(new Dummy(sp.tx * TS + 8, sp.ty * TS + 8));
+      const c = this.center();
+      w.add(new Dummy(c.x, c.y - 30));
+      setupTutorial(w);
+      // a couple of coglings to practise on once you're ready
+      this.waves = [{ defs: [findEnemy('cogling')!, findEnemy('cogling')!].filter(Boolean) }];
+      this.waveDelay = 6;
     } else if (kind === 'shop') { run.floorState.shop = true; setupShop(this); }
     else if (kind === 'rest') setupRest(this);
     else if (kind === 'event') setupEvent(this);
@@ -368,6 +373,7 @@ export class GameScene implements Scene, RoomHost {
     pp.flash = Math.max(0, pp.flash - dt * 4);
     pp.rewind = damp(pp.rewind, p.rewindFx, 18, dt);
     pp.ca = pp.rewind * 2.2 + pp.hurt * 1.5;
+    pp.timestop = damp(pp.timestop, this.world.timeStop, 10, dt);
   }
 
   render(r: Renderer) {
