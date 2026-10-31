@@ -232,6 +232,32 @@ class Fireplace extends Entity {
   }
 }
 
+/** Overwind lever: unlocked by winning; raises difficulty and shard rewards */
+class OverwindLever extends Interactable {
+  t = 0;
+  constructor(x: number, y: number) { super(); this.x = x; this.y = y; this.range = 22; }
+  prompt() { return tr(L(`超频：${profile.overwind} / ${profile.maxOverwind}`, `Overwind: ${profile.overwind} / ${profile.maxOverwind}`)); }
+  interact() {
+    profile.overwind = (profile.overwind + 1) % (profile.maxOverwind + 1);
+    saveProfile();
+    sfx(profile.overwind ? 'cogWind' : 'uiBack');
+    this.world.fx.banner(this.x, this.y - 44, profile.overwind
+      ? tr(L(`敌人生命 +${15 * profile.overwind}%，伤害 +${10 * profile.overwind}%，碎片 +${20 * profile.overwind}%`, `Enemy HP +${15 * profile.overwind}%, damage +${10 * profile.overwind}%, shards +${20 * profile.overwind}%`))
+      : tr(L('超频关闭', 'Overwind off')), profile.overwind ? 'R4' : 'K8', 2);
+  }
+  update(dt: number) { this.t += dt; super.update(dt); }
+  render(r: Renderer) {
+    const ctx = r.w, x = Math.round(this.x), y = Math.round(this.y);
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 7, y - 10, 14, 10);
+    ctx.fillStyle = col('K4'); ctx.fillRect(x - 6, y - 9, 12, 8);
+    const a = -Math.PI / 2 - 0.9 + (profile.overwind / Math.max(1, profile.maxOverwind)) * 1.8;
+    ctx.strokeStyle = col('K0'); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + Math.cos(a) * 12, y - 6 + Math.sin(a) * 12); ctx.stroke();
+    ctx.strokeStyle = col('B4'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + Math.cos(a) * 12, y - 6 + Math.sin(a) * 12); ctx.stroke();
+    ctx.fillStyle = col('R3'); ctx.fillRect(Math.round(x + Math.cos(a) * 12) - 1, Math.round(y - 6 + Math.sin(a) * 12) - 1, 3, 3);
+    r.lightAt(x, y - 6, 30, profile.overwind ? 'R3' : 'B4', 0.4);
+  }
+}
+
 export interface HubHooks { startRun(): void; title(): void }
 
 export class HubScene implements Scene {
@@ -285,6 +311,7 @@ export class HubScene implements Scene {
     w.add(new Station(c.x - 150, c.y + 10, WEAPON_RACK, () => tr(L('武器架', 'Weapon Rack')), () => this.overlays.push(new WeaponOverlay())));
     w.add(new Station(c.x + 150, c.y + 14, LEDGER_STAND, () => tr(L('账簿', 'Ledger')), () => this.overlays.push(new LedgerOverlay())));
     w.add(new Cat(c.x - 20, c.y + 40));
+    if (profile.maxOverwind > 0) w.add(new OverwindLever(c.x + 40, c.y - 40));
     const top = map.exits[0] ? (map.exits[0].ty + 1) * TS : 64;
     w.add(new GrandClock(c.x - 200, top + 26));
     w.add(new GrandClock(c.x + 200, top + 26));

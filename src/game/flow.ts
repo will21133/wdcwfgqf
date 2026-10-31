@@ -61,7 +61,7 @@ export const Flow = {
 
   endRun(run: Run, kind: RunEndKind) {
     // bank shards (a fraction is lost on abandon)
-    const banked = kind === 'quit' ? Math.floor(run.shards * 0.5) : run.shards;
+    const banked = Math.round((kind === 'quit' ? Math.floor(run.shards * 0.5) : run.shards) * (1 + 0.2 * run.overwind));
     profile.shards += banked;
     profile.totalShards += banked;
     if (kind === 'death') profile.deaths++;

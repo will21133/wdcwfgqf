@@ -52,18 +52,20 @@ export class Door extends Entity {
       ctx.fillRect(x0 + 2, y0 + i, 28, 1);
     }
     ctx.globalAlpha = 1;
-    // arch pillars
+    // arch pillars, coloured by the floor's stonework
+    const th = this.world.theme;
+    const lip = th.wallLip, trim = th.capTrim;
     for (const px of [x0 - 2, x0 + 28]) {
       ctx.fillStyle = col('K0'); ctx.fillRect(px, y0 - 3, 6, 35);
-      ctx.fillStyle = col('K5'); ctx.fillRect(px + 1, y0 - 2, 4, 34);
-      ctx.fillStyle = col('K6'); ctx.fillRect(px + 1, y0 - 2, 1, 34);
-      ctx.fillStyle = col('K3'); ctx.fillRect(px + 4, y0 - 2, 1, 34);
-      ctx.fillStyle = col('B3'); ctx.fillRect(px + 1, y0 + 8, 4, 1); ctx.fillRect(px + 1, y0 + 24, 4, 1);
+      ctx.fillStyle = col(lip[1]); ctx.fillRect(px + 1, y0 - 2, 4, 34);
+      ctx.fillStyle = col(lip[2]); ctx.fillRect(px + 1, y0 - 2, 1, 34);
+      ctx.fillStyle = col(lip[0]); ctx.fillRect(px + 4, y0 - 2, 1, 34);
+      ctx.fillStyle = col(trim); ctx.fillRect(px + 1, y0 + 8, 4, 1); ctx.fillRect(px + 1, y0 + 24, 4, 1);
     }
     // lintel with keystone
     ctx.fillStyle = col('K0'); ctx.fillRect(x0 - 3, y0 - 6, 38, 6);
-    ctx.fillStyle = col('K5'); ctx.fillRect(x0 - 2, y0 - 5, 36, 4);
-    ctx.fillStyle = col('K7'); ctx.fillRect(x0 - 2, y0 - 5, 36, 1);
+    ctx.fillStyle = col(lip[1]); ctx.fillRect(x0 - 2, y0 - 5, 36, 4);
+    ctx.fillStyle = col(lip[2]); ctx.fillRect(x0 - 2, y0 - 5, 36, 1);
     ctx.fillStyle = col('B4'); ctx.fillRect(x0 + 13, y0 - 6, 6, 6);
     ctx.fillStyle = col('B6'); ctx.fillRect(x0 + 14, y0 - 5, 4, 1);
     // gate (slides up when opening)

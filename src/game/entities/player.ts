@@ -416,7 +416,7 @@ export class Player extends Actor implements Wielder {
       sfx('clank');
       return 0;
     }
-    let amt = Math.max(1, Math.round(info.amount * (1 - m.armor)));
+    let amt = Math.max(1, Math.round(info.amount * (1 - m.armor) * (1 + 0.1 * this.run.overwind)));
     if (info.fixed) this.fixedTaken += amt;
     this.hp -= amt;
     this.flash = 0.12;

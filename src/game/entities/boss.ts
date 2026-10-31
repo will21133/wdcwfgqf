@@ -32,6 +32,7 @@ export abstract class Boss extends Enemy {
   }
 
   get inIntro() { return this.introT > 0; }
+  added() { super.added(); this.shownHp = this.hp; }
 
   update(dt: number) {
     this.shownHp += (this.hp - this.shownHp) * Math.min(1, dt * 6);

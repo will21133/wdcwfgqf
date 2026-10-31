@@ -43,6 +43,8 @@ export abstract class Enemy extends Actor {
   get spawnK() { return clamp(1 - this.spawnT / this.spawnDur, 0, 1); }
 
   added() {
+    const ow = this.world.run?.overwind ?? 0;
+    if (ow > 0 && !(this as any).owApplied) { (this as any).owApplied = true; this.maxHp = Math.round(this.maxHp * (1 + 0.15 * ow)); this.hp = this.maxHp; }
     this.spawnDur = Math.max(0.01, this.spawnT);
     sfx('spawn', { vol: 0.5, pan: this.world.pan(this.x) });
   }
