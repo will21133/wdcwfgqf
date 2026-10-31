@@ -1,0 +1,19 @@
+[
+  {"t":0,"move":[640,300]},
+  {"t":100,"down":"KeyW"},
+  {"t":900,"up":"KeyW"},
+  {"t":1000,"shot":"a_enter"},
+  {"t":2400,"shot":"b_spawn"},
+  {"t":2500,"mdown":0},{"t":2560,"mup":0},
+  {"t":2700,"mdown":0},{"t":2760,"mup":0},
+  {"t":2900,"mdown":0},{"t":2960,"mup":0},
+  {"t":3000,"shot":"c_attack"},
+  {"t":3200,"down":"KeyD"},{"t":3700,"up":"KeyD"},
+  {"t":3750,"press":"Space"},
+  {"t":3800,"shot":"d_dash"},
+  {"t":4500,"press":"KeyQ"},
+  {"t":4650,"shot":"e_rewind"},
+  {"t":5200,"shot":"f_echo"},
+  {"t":7000,"shot":"g_later"},
+  {"t":7100,"eval":"({hp: window.__G?.r ? 1 : 0})"}
+]

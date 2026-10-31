@@ -49,6 +49,29 @@ export class Sprite {
     return c;
   }
   get white() { return this.tint('#ffffff'); }
+
+  private recolors = new Map<string, Sprite>();
+  /** luminance-mapped palette swap (keeps detail), e.g. echoes in the cyan ramp */
+  recolor(ramp: string[]): Sprite {
+    const key = ramp.join(',');
+    let s = this.recolors.get(key);
+    if (!s) {
+      const [cv, ctx] = makeCanvas(this.w, this.h);
+      ctx.drawImage(this.img, 0, 0);
+      const id = ctx.getImageData(0, 0, this.w, this.h);
+      const cols = ramp.map((k) => hexToRgb(col(k)));
+      for (let i = 0; i < id.data.length; i += 4) {
+        if (!id.data[i + 3]) continue;
+        const l = (id.data[i] * 0.3 + id.data[i + 1] * 0.55 + id.data[i + 2] * 0.15) / 255;
+        const c = cols[Math.min(cols.length - 1, Math.floor(Math.pow(l, 0.8) * cols.length))];
+        id.data[i] = c[0]; id.data[i + 1] = c[1]; id.data[i + 2] = c[2];
+      }
+      ctx.putImageData(id, 0, 0);
+      s = new Sprite(cv, this.ox, this.oy);
+      this.recolors.set(key, s);
+    }
+    return s;
+  }
 }
 
 export function spriteFromDef(def: SpriteDef): Sprite {

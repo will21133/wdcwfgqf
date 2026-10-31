@@ -72,7 +72,8 @@ void main(){
   c = mix(c, vec3(g*0.85, g*0.9, g*1.1), uTimestop);
   vec4 u = texture(uUnlit, uv);
   c = mix(c, u.rgb, u.a);
-  c += texture(uGlow, uv).rgb;
+  vec4 gl = texture(uGlow, uv);
+  c += gl.rgb * gl.a;
   // rewind: desaturate toward cyan-tinted mono
   float gg = luma(c);
   c = mix(c, vec3(gg*0.75, gg*1.0, gg*1.15), uRewind*0.75);
@@ -146,7 +147,7 @@ void main(){
   c *= 1.0 - uRewind * 0.18 * step(1.0, mod(v.y, 3.0));
   c += vec3(0.1, 0.55, 0.7) * uRewind * smoothstep(0.15, 0.55, length(q)) * 0.5;
   // hurt vignette
-  c = mix(c, vec3(0.75, 0.05, 0.12), uHurt * smoothstep(0.2, 0.62, length(q)) * 0.85);
+  c = mix(c, vec3(0.62, 0.04, 0.1), uHurt * smoothstep(0.32, 0.72, length(q)) * 0.55);
   c = mix(c, vec3(1.0), uFlash);
   c += (hash(v + fract(uTime) * 91.0) - 0.5) * uGrain;
   c *= 1.0 - uFade;
