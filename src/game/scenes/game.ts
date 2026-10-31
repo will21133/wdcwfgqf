@@ -368,6 +368,12 @@ export class GameScene implements Scene, RoomHost {
     }
   }
 
+  /** pause when the window loses focus (alt-tab, overlay) */
+  autoPause() {
+    if (G.debug.has('bot')) return;
+    if (this.world?.player && this.world.player.hp > 0 && !this.overlays.some((o) => o.blocks)) this.overlays.push(new PauseMenu(this));
+  }
+
   /** failsafe: an enemy nobody has touched for 40s gets pulled back to reachable ground */
   private stuckT = new Map<number, number>();
   private unstick(dt: number) {

@@ -31,6 +31,8 @@ async function main() {
   screen.focus();
 
   (window as any).__G = G;
+  window.addEventListener('blur', () => (G.scenes.current as any)?.autoPause?.());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) (G.scenes.current as any)?.autoPause?.(); });
   await boot();
   document.getElementById('boot')?.remove();
 
