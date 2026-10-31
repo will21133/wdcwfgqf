@@ -5,6 +5,8 @@ import { rect, hourglass, gearIcon, coinIcon, shardIcon } from './draw';
 import { damp } from '../../engine/math';
 import { col } from '../../art/palette';
 import { tr } from '../i18n';
+import { MEMORIES } from '../progression/memories';
+import { patronSigil, partIcon, SLOT_GLYPH } from '../../art/sprites/icons';
 
 export class HUD {
   hpShown = -1;
@@ -98,6 +100,34 @@ export class HUD {
       ctx.drawImage(simg, 640 - 17 - simg.width, 22);
     }
     ctx.globalAlpha = 1;
+
+    // ── build: memory slots (bottom-left) ──
+    {
+      const slots = ['attack', 'special', 'dash', 'rewind', 'echo'];
+      const y0 = 360 - 26;
+      slots.forEach((sl, i) => {
+        const x = 10 + i * 22;
+        const om = run.memories.find((m) => MEMORIES[m.id]?.slot === sl);
+        rect(ctx, x - 1, y0 - 1, 20, 20, 'K0');
+        rect(ctx, x, y0, 18, 18, om ? 'K2' : 'K1');
+        if (om) {
+          const d = MEMORIES[om.id];
+          ctx.drawImage(patronSigil(d.patron).img, x, y0);
+          rect(ctx, x, y0 + 17, 18, 1, ['B3', 'U3', 'V3', 'O2'][om.rarity]);
+        } else {
+          const g = SLOT_GLYPH[sl];
+          ctx.fillStyle = col('K3');
+          g.forEach((row, j) => { for (let k = 0; k < row.length; k++) if (row[k] !== '.') ctx.fillRect(x + 5 + k, y0 + 5 + j, 1, 1); });
+        }
+      });
+      const extra = run.memories.filter((m) => !slots.includes(MEMORIES[m.id]?.slot)).length;
+      if (extra) ctx.drawImage(G.digitsSmall.render('+' + extra, 'K8', 'K0'), 10 + 5 * 22, y0 + 6);
+      if (run.parts.length) {
+        const px = 10 + 5 * 22 + (extra ? 18 : 2);
+        ctx.drawImage(partIcon('gear').img, px, y0 + 1);
+        ctx.drawImage(G.digitsSmall.render(String(run.parts.length), 'B5', 'K0'), px + 17, y0 + 6);
+      }
+    }
 
     // ── boss bar ──
     if (this.boss) {

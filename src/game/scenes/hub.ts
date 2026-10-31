@@ -109,6 +109,100 @@ class GrandClock extends Entity {
   }
 }
 
+/** wall shelf crowded with little clocks, jars and gears */
+class WallShelf extends Entity {
+  items: { kind: number; x: number; c: string }[] = [];
+  t = frand(0, 9);
+  constructor(x: number, y: number, seed: number) {
+    super();
+    this.x = x; this.y = y; this.sortBias = TS + 4;
+    let px = -22;
+    let k = seed;
+    while (px < 20) {
+      k = (k * 9301 + 49297) % 233280;
+      const kind = k % 4;
+      this.items.push({ kind, x: px, c: ['B4', 'R2', 'T3', 'K8', 'U3'][k % 5] });
+      px += kind === 0 ? 9 : kind === 1 ? 6 : 7;
+    }
+  }
+  update(dt: number) { this.t += dt; }
+  render(r: Renderer) {
+    const ctx = r.w, x = Math.round(this.x), y = Math.round(this.y);
+    for (const it of this.items) {
+      const ix = x + it.x;
+      if (it.kind === 0) { // little clock
+        ctx.fillStyle = col('K0'); ctx.fillRect(ix - 1, y - 9, 9, 9);
+        ctx.fillStyle = col('B3'); ctx.fillRect(ix, y - 8, 7, 7);
+        ctx.fillStyle = col('K10'); ctx.fillRect(ix + 1, y - 7, 5, 5);
+        const a = this.t * (1 + (ix & 3));
+        ctx.fillStyle = col('K1'); ctx.fillRect(ix + 3, y - 5, 1, 1); ctx.fillRect(ix + 3 + Math.round(Math.cos(a) * 2), y - 5 + Math.round(Math.sin(a) * 2), 1, 1);
+      } else if (it.kind === 1) { // jar
+        ctx.fillStyle = col('K0'); ctx.fillRect(ix - 1, y - 8, 6, 8);
+        ctx.fillStyle = col(it.c); ctx.fillRect(ix, y - 6, 4, 6);
+        ctx.fillStyle = col('K9'); ctx.fillRect(ix, y - 7, 4, 1); ctx.fillRect(ix, y - 6, 1, 3);
+      } else if (it.kind === 2) { // gear on a stand
+        ctx.fillStyle = col('K0'); ctx.fillRect(ix - 1, y - 8, 7, 8);
+        ctx.fillStyle = col('B4'); ctx.fillRect(ix, y - 7, 5, 5);
+        ctx.fillStyle = col('B2'); ctx.fillRect(ix + 2, y - 5, 1, 1); ctx.fillRect(ix + 2, y - 2, 1, 2);
+      } else { // books
+        for (let b = 0; b < 3; b++) { ctx.fillStyle = col('K0'); ctx.fillRect(ix + b * 2 - 1, y - 9 + (b & 1), 3, 9 - (b & 1)); ctx.fillStyle = col(['R2', 'U2', 'G2'][b]); ctx.fillRect(ix + b * 2, y - 8 + (b & 1), 1, 8 - (b & 1)); }
+      }
+    }
+    // the plank
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 25, y, 50, 4);
+    ctx.fillStyle = col('B2'); ctx.fillRect(x - 24, y, 48, 2);
+    ctx.fillStyle = col('B3'); ctx.fillRect(x - 24, y, 48, 1);
+    ctx.fillStyle = col('B1'); ctx.fillRect(x - 20, y + 2, 2, 3); ctx.fillRect(x + 18, y + 2, 2, 3);
+  }
+}
+
+/** a cluttered desk with a half-assembled clock and a lamp */
+class Desk extends Entity {
+  t = 0;
+  constructor(x: number, y: number) { super(); this.x = x; this.y = y; }
+  update(dt: number) { this.t += dt; }
+  renderGround(r: Renderer) { r.w.fillStyle = 'rgba(11,10,20,0.4)'; r.w.fillRect(Math.round(this.x) - 18, Math.round(this.y) - 1, 36, 3); }
+  render(r: Renderer) {
+    const ctx = r.w, x = Math.round(this.x), y = Math.round(this.y);
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 19, y - 16, 38, 17);
+    ctx.fillStyle = col('B2'); ctx.fillRect(x - 18, y - 15, 36, 4);
+    ctx.fillStyle = col('B3'); ctx.fillRect(x - 18, y - 15, 36, 1);
+    ctx.fillStyle = col('B1'); ctx.fillRect(x - 17, y - 11, 3, 11); ctx.fillRect(x + 14, y - 11, 3, 11);
+    // open clock on the desk
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 9, y - 23, 12, 9);
+    ctx.fillStyle = col('B4'); ctx.fillRect(x - 8, y - 22, 10, 7);
+    ctx.fillStyle = col('B6'); ctx.fillRect(x - 6, y - 20, 2, 2); ctx.fillRect(x - 2, y - 19, 3, 3);
+    // desk lamp
+    ctx.fillStyle = col('K0'); ctx.fillRect(x + 6, y - 28, 7, 13);
+    ctx.fillStyle = col('T2'); ctx.fillRect(x + 7, y - 27, 5, 3);
+    ctx.fillStyle = col('K5'); ctx.fillRect(x + 9, y - 24, 1, 9);
+    ctx.fillStyle = col('O4'); ctx.fillRect(x + 8, y - 24, 3, 1);
+    r.lightAt(x + 9, y - 20, 60, 'O3', 0.55);
+    // scattered screws
+    ctx.fillStyle = col('K8'); ctx.fillRect(x - 14, y - 14, 1, 1); ctx.fillRect(x + 2, y - 13, 1, 1);
+  }
+}
+
+class Plant extends Entity {
+  t = frand(0, 9);
+  constructor(x: number, y: number) { super(); this.x = x; this.y = y; }
+  update(dt: number) { this.t += dt; }
+  render(r: Renderer) {
+    const ctx = r.w, x = Math.round(this.x), y = Math.round(this.y);
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 5, y - 7, 10, 7);
+    ctx.fillStyle = col('R1'); ctx.fillRect(x - 4, y - 6, 8, 6);
+    ctx.fillStyle = col('R2'); ctx.fillRect(x - 4, y - 6, 8, 1);
+    const sway = Math.round(Math.sin(this.t * 1.2));
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + (i - 2.5) * 0.45;
+      for (let k = 2; k < 10 - Math.abs(i - 2.5); k++) {
+        ctx.fillStyle = col(k > 6 ? 'G3' : 'G2');
+        ctx.fillRect(x + Math.round(Math.cos(a) * k) + (k > 5 ? sway : 0), y - 7 + Math.round(Math.sin(a) * k), 1, 1);
+      }
+    }
+  }
+}
+
 class Fireplace extends Entity {
   t = 0;
   constructor(x: number, y: number) { super(); this.x = x; this.y = y; this.sortBias = TS + 5; }
@@ -118,10 +212,15 @@ class Fireplace extends Entity {
   }
   render(r: Renderer) {
     const ctx = r.w, x = Math.round(this.x), y = Math.round(this.y);
-    ctx.fillStyle = col('K0'); ctx.fillRect(x - 15, y - 22, 30, 22);
-    ctx.fillStyle = col('K5'); ctx.fillRect(x - 14, y - 21, 28, 3);
-    ctx.fillStyle = col('K4'); ctx.fillRect(x - 14, y - 18, 4, 18); ctx.fillRect(x + 10, y - 18, 4, 18);
-    ctx.fillStyle = col('K1'); ctx.fillRect(x - 10, y - 18, 20, 18);
+    // stone surround and mantel
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 20, y - 30, 40, 31);
+    for (let j = 0; j < 30; j += 5) for (let i = 0; i < 38; i += 8) { ctx.fillStyle = col(((i + j) >> 2) & 1 ? 'K5' : 'K4'); ctx.fillRect(x - 19 + i + ((j / 5) & 1) * 4, y - 29 + j, 7, 4); }
+    ctx.fillStyle = col('B2'); ctx.fillRect(x - 22, y - 32, 44, 4);
+    ctx.fillStyle = col('B4'); ctx.fillRect(x - 22, y - 32, 44, 1);
+    // candles on the mantel
+    for (const cx of [x - 16, x + 15]) { ctx.fillStyle = col('K10'); ctx.fillRect(cx, y - 37, 2, 5); ctx.fillStyle = col(Math.sin(this.t * 13 + cx) > 0 ? 'O4' : 'O3'); ctx.fillRect(cx, y - 39, 2, 2); r.lightAt(cx, y - 38, 26, 'O3', 0.4); }
+    ctx.fillStyle = col('K0'); ctx.fillRect(x - 12, y - 20, 24, 20);
+    ctx.fillStyle = col('K1'); ctx.fillRect(x - 11, y - 19, 22, 19);
     const f = 0.85 + Math.sin(this.t * 11) * 0.08 + Math.sin(this.t * 23) * 0.05;
     for (let i = 0; i < 6; i++) {
       const h = Math.round((6 + Math.sin(this.t * 7 + i * 1.7) * 3) * f);
@@ -190,6 +289,12 @@ export class HubScene implements Scene {
     w.add(new GrandClock(c.x - 200, top + 26));
     w.add(new GrandClock(c.x + 200, top + 26));
     w.add(new Fireplace(c.x - 110, top - 4));
+    // shelves along the back wall, a desk beside Ines, plants in the corners
+    for (const sx of [c.x - 190, c.x - 40, c.x + 90, c.x + 170]) w.add(new WallShelf(sx, top - 14, Math.round(sx)));
+    w.add(new Desk(c.x - 92, c.y - 24));
+    w.add(new Plant(c.x - 210, c.y + 70));
+    w.add(new Plant(c.x + 214, c.y + 64));
+    w.add(new Plant(c.x + 40, top + 10));
     for (const e of map.exits) {
       w.add(new Door(e, { icon: ICONS.boss, label: tr(L('钟塔', 'The Tower')), color: 'B5' }, () => this.depart()));
     }
@@ -217,7 +322,7 @@ export class HubScene implements Scene {
       if (!o.update(dt)) this.overlays.pop();
       return;
     }
-    if (G.input.pressed('pause')) { this.overlays.push(new PauseMenu({ run: this.run, overlays: this.overlays, onQuit: () => this.hooks.title(), bankStats: () => {} })); return; }
+    if (G.input.pressed('pause')) { this.overlays.push(new PauseMenu({ run: this.run, overlays: this.overlays, onQuit: () => this.hooks.title(), bankStats: () => {}, inHub: true })); return; }
     w.update(dt);
     // keep the player topped up in the workshop
     p.hp = p.maxHp; this.run.charges = this.run.mods.rewindCharges;

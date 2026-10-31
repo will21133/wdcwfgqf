@@ -17,7 +17,7 @@ import type { Run } from '../run';
 import type { Sprite } from '../../engine/gfx/sprite';
 import { rumble } from '../../engine/rumble';
 
-interface PauseHost { run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void }
+interface PauseHost { run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void; inHub?: boolean }
 
 export function settingsItems(onBack: () => void): MenuItem[] {
   const set = <K extends keyof typeof settings>(k: K) => (v: (typeof settings)[K]) => { settings[k] = v; saveSettings(); };
@@ -130,7 +130,7 @@ export class PauseMenu implements Overlay {
       { label: () => tr(UI.resume), act: () => (this.closing = true) },
       { label: () => tr(L('本局构筑', 'Your Build')), act: () => host.overlays.push(new RunInfoPanel(host.run)) },
       { label: () => tr(UI.settings), act: () => host.overlays.push(new SettingsPanel()) },
-      { label: () => (this.confirmQuit ? tr(L('确定放弃？（再按一次）', 'Really abandon? (press again)')) : tr(UI.abandon)), act: () => {
+      { label: () => (this.confirmQuit ? tr(L('确定？（再按一次）', 'Are you sure? (press again)')) : tr(host.inHub ? UI.quit : UI.abandon)), act: () => {
         if (!this.confirmQuit) { this.confirmQuit = true; return; }
         this.closing = true;
         G.audio.muffle(false);
