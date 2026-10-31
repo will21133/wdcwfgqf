@@ -37,6 +37,8 @@ export async function boot() {
   setupAudio();
   loadSettings();
   loadProfile();
+  const lang = G.debug.get('lang');
+  if (lang === 'zh' || lang === 'en') { const { i18n } = await import('./i18n'); i18n.lang = lang; }
   const scene = G.debug.get('scene');
   if (scene === 'room') {
     G.scenes.set(new RoomPreview(Number(G.debug.get('seed') ?? 1), Number(G.debug.get('biome') ?? 0)));
