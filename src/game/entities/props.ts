@@ -43,7 +43,8 @@ export class WallGear extends Entity {
   update(dt: number) { this.rot += dt * (this.big ? 2 : -5); }
   render(r: Renderer) {
     const fr = this.big ? BIG! : SMALL!;
-    drawSprite(r.w, fr[Math.floor(this.rot) % fr.length], this.x, this.y);
+    const n = fr.length;
+    drawSprite(r.w, fr[((Math.floor(this.rot) % n) + n) % n], this.x, this.y);
   }
 }
 
