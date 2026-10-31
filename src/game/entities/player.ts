@@ -123,6 +123,7 @@ export class Player extends Actor implements Wielder {
     }
 
     if (this.autoWalk > 0) this.autoWalk -= dt;
+    this.collides = this.autoWalk <= 0;
     const mv = this.autoWalk > 0 ? { x: 0, y: -1 } : this.locked ? { x: 0, y: 0 } : inp.move();
     // low-HP clockwork heartbeat
     if (this.hp > 0 && this.hp < this.maxHp * 0.25) {
