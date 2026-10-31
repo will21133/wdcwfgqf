@@ -28,6 +28,9 @@ import { damp } from '../../engine/math';
 import { ICONS } from '../../art/sprites/icons';
 import { shardIcon } from '../ui/draw';
 import { Text } from '../ui/text';
+import { devices } from '../../engine/devices';
+import type { PlayerInput } from '../../engine/input';
+import { ensurePlayers, slotColor, ROMAN } from '../players';
 
 export const HUB_THEME: Theme = {
   id: 99, key: 'workshop', name: { zh: '钟匠工坊', en: "The Clockmaker's Workshop" },
@@ -326,8 +329,10 @@ export class HubScene implements Scene {
     for (const e of map.exits) {
       w.add(new Door(e, { icon: ICONS.boss, label: tr(L('钟塔', 'The Tower')), color: 'B5' }, () => this.depart()));
     }
-    const p = new Player(c.x, c.y + 60);
-    w.add(p);
+    // seated players stand in a row below the bench (solo: exactly the 1.0 spot)
+    const seats = ensurePlayers();
+    seats.forEach((inp, i) => w.add(new Player(c.x + (seats.length > 1 ? (i - (seats.length - 1) / 2) * 22 : 0), c.y + 60, inp)));
+    this.clocks = [c.x - 200, c.x + 200].map((x) => ({ x, y: top + 26 }));
     w.cam.snap(c.x, c.y);
     w.flushAdds();
     for (const d of w.entities) if (d instanceof Door) d.unlock();
@@ -338,8 +343,40 @@ export class HubScene implements Scene {
   }
 
   private depart() {
-    this.world.player!.locked = true;
+    for (const p of this.world.players) p.locked = true;
     this.hooks.startRun();
+  }
+
+  /** the two grandfather clocks a newly joined hand steps out of */
+  private clocks: { x: number; y: number }[] = [];
+
+  /**
+   * Hot join (GDD2 §5.1), minimal F2a version: a free pad pressing A / Start, or Enter on a free
+   * keyboard, seats a new hand who steps out of a grandfather clock. F2c adds the clock-door
+   * animation, the HUD pod, leaving (hold View / Esc) and the title's join panel.
+   */
+  private hotJoin() {
+    const id = devices.joinPressed({ split: false });
+    if (!id) return;
+    const slot = devices.freeSlot();
+    if (slot < 0) return;
+    const inp = devices.claim(id, slot);
+    for (const a of ['confirm', 'dash', 'pause', 'attack'] as const) inp.consume(a);
+    this.spawnJoined(inp);
+  }
+
+  private spawnJoined(inp: PlayerInput) {
+    const w = this.world;
+    // II and IV step out of the left clock, III out of the right one (IV a step further in)
+    const left = inp.slot % 2 === 1;
+    const k = this.clocks[left ? 0 : 1] ?? { x: w.map.pw / 2, y: w.map.ph / 2 };
+    const p = w.add(new Player(k.x + (inp.slot >= 3 ? 20 : 0) * (left ? 1 : -1), k.y + 14, inp));
+    w.flushAdds();
+    p.invuln = 0.6;
+    w.fx.ring(p.x, p.y - 8, 3, 26, 0.45, slotColor(inp.slot), 2);
+    w.fx.burst(p.x, p.y - 10, 18, ['W', slotColor(inp.slot)], 120, 0.45);
+    w.fx.banner(p.x, p.y - 34, tr(L(`第${['一', '二', '三', '四'][inp.slot]}根指针醒了`, `Hand ${ROMAN[inp.slot]} wakes`)), slotColor(inp.slot), 1.8);
+    sfx('cogWind');
   }
 
   private talkIn = -1;
@@ -356,12 +393,19 @@ export class HubScene implements Scene {
       return;
     }
     if (G.input.pressed('pause')) { this.overlays.push(new PauseMenu({ run: this.run, overlays: this.overlays, onQuit: () => this.hooks.title(), bankStats: () => {}, inHub: true })); return; }
+    this.hotJoin();
     w.update(dt);
-    // keep the player topped up in the workshop
-    p.hp = p.maxHp; this.run.charges = this.run.mods.rewindCharges;
-    w.cam.follow(p.x, p.y - 10, dt, 6);
+    // keep everyone topped up in the workshop
+    for (const q of w.players) q.hp = q.maxHp;
+    this.run.charges = this.run.mods.rewindCharges;
+    let fx = p.rewindFx;
+    if (w.playerCount > 1) {
+      let cx = 0, cy = 0;
+      for (const q of w.players) { cx += q.x; cy += q.y; fx = Math.max(fx, q.rewindFx); }
+      w.cam.follow(cx / w.playerCount, cy / w.playerCount - 10, dt, 6);
+    } else w.cam.follow(p.x, p.y - 10, dt, 6);
     const pp = G.r.params;
-    pp.rewind = damp(pp.rewind, p.rewindFx, 18, dt);
+    pp.rewind = damp(pp.rewind, fx, 18, dt);
     pp.ca = pp.rewind * 2.2;
   }
 

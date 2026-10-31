@@ -80,3 +80,10 @@ src/
 - QA 句柄：`window.__reg`（注册表）、`__save`（存档模块，`__save.profile`）、`__hints`。`tools/shot.cjs` 脚本步骤支持 `setStorage / removeStorage / reload / eval`。
 - 文字大小 125%：`textScale.boost` 让文字倍率在 ≤150% 的前提下升一级整数倍（窗口太小时不变）；`Text.k` 是本帧文字相对布局的大小，`MenuList.rh` 等固定行高按 `Text.lineH` 增长；奖励卡按实测文字加宽（3 张时最多 200）、加高、下移，实在放不下时先去掉页眉引言，再把描述 / "将替换"降到 10px。
 - 字体子集：`tools/subset-fonts.py` 写 `build/fonts/*.woff2` 和 `.stamp`；缺 fontTools 时删除旧子集；`vite.config.ts` 只在 `.stamp` 比所有源文件都新时使用子集，否则打完整字体并警告。
+
+### 输入、设备与玩家槽位（F2a，PLAN2 §1.3）
+- `engine/input.ts`：`raw`（键盘/鼠标 + 按 `gp.index` 的每个手柄，边沿锁存到本 tick 结束）、`PlayerInput`（每个槽位一个：`down/pressed/released/consume/heldFor/move/aim/nav/rumble`，`slot device kind lastDevice bindings bot?`）、`input`（= `G.input`，1.0 API 的菜单聚合：所有已加入设备的 OR，无人加入时 = 全部设备）。三套键盘表 `KB.kbm / kbL / kbR`（GDD2 §2.1–2.2；`settings.bindings` / `settings.bindingsKb` 分别重绑），手柄表 `PAD_BUTTONS`（LB 回溯 / RB 分岔，`settings.padSwap` 交换）。新动作 `fork tabL tabR`。
+- `engine/devices.ts`：`devices`（= `G.devices`）管理槽位：`claim / release / joinPressed / ensureSolo / onDisconnect / onJoin / onSequence / offSequence / recentCodes`。**单人规则**：只有一名真人时他的 `PlayerInput.merged = true`，读取所有键盘、鼠标与手柄（与 1.0 完全一样）；他最后实际用的设备（`raw.lastPhys`，鼠标移动不算）属于他，其他设备按 A/Start/Enter 即可加入；第二名真人加入时他固定到自己正在用的设备。还没碰过任何设备时，第一下按键属于他（不会加入新玩家）。
+- `engine/rumble.ts`：`rumblePad(index,…)`、`rumbleAll(…)`（已加入玩家的手柄；单人 = 全部）；玩家自己的震动用 `p.input.rumble(…)`，命中等归属效果用 `players.rumbleOwner(owner,…)`。`window.__rumbles[index]` 记录每个手柄收到的效果数。
+- `game/players.ts`：`SLOT_COLOR SLOT_SHAPE ROMAN SLOT_SCARF SLOT_RAMP drawSlotBadge ensurePlayers rumbleOwner initPlayersFromUrl`。`art/sprites/tick.ts` 的 `buildTick(pal?, variant?)` 按 (variant, pal) 缓存帧；`Player` 由 `tickFramesFor(slot, hand)` 取带槽位围巾色的帧，多人时脚下画槽位色像素环、头顶 3px 画形状徽记、内圈小灯染槽位色。
+- 调试：`?bot=1`（槽 I 为机器人，1.0）、`?bot=1&players=N`（N 个机器人）、`?players=N`（你 + N−1 个机器人）、`?devices=kbm,pad0,kbL,…`（按顺序入座；`players` 可再补机器人）。带 `players`/`devices` 时与 `seed` 一样直接进局；`?scene=hub&players=N` 在工坊入座。工坊热加入（最小版）：空闲手柄按 A/Start 或空闲键盘按 Enter，新表针从落地钟前出现（F2c 补钟门动画、铭牌、离开与标题加入面板）。测试：`node tools/padtest4.cjs "scene=hub"`（4 个虚拟手柄）。

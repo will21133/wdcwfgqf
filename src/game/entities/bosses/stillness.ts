@@ -14,7 +14,7 @@ import { angleTo, clamp, ease, TAU, bayer } from '../../../engine/math';
 import { sfx, G } from '../../G';
 import { L, tr } from '../../i18n';
 import { col } from '../../../art/palette';
-import { rumble } from '../../../engine/rumble';
+import { rumbleAll } from '../../../engine/rumble';
 import type { DamageInfo } from '../../systems/combat';
 import { findEnemy } from '../../world/director';
 
@@ -168,7 +168,7 @@ export class Stillness extends Boss {
       this.setState('letgo');
       this.world.fx.banner(this.x, this.y - 100, tr(L('有些事，无法撤销。', 'Some things cannot be undone.')), 'V4', 2.4);
       sfx('waveStart');
-      rumble(0.8, 0.5, 600);
+      rumbleAll(0.8, 0.5, 600);
     }
   }
 
@@ -273,7 +273,7 @@ export class Stillness extends Boss {
           for (const e of this.world.player?.echoes ?? []) (e as any).ignoreFreeze = true;
           sfx('stasisBreak');
           G.audio.muffle(true, 500);
-          rumble(0.3, 0.9, 400);
+          rumbleAll(0.3, 0.9, 400);
         }
         if (this.stopT >= 0) {
           this.stopT += dt;
@@ -309,7 +309,7 @@ export class Stillness extends Boss {
       this.world.fx.burst(this.x, this.y - 50, 50, ['C4', 'C3', 'K10'], 220, 0.8);
       this.world.shake(0.6);
       sfx('paradox');
-      rumble(1, 0.7, 400);
+      rumbleAll(1, 0.7, 400);
       this.setState('shattered');
     } else {
       // the gathered second explodes outward
@@ -320,7 +320,7 @@ export class Stillness extends Boss {
       this.shockRing(this.x, this.y, 220, 14, 170, 'V4', true);
       this.world.shake(0.7);
       sfx('slam');
-      rumble(0.9, 0.9, 400);
+      rumbleAll(0.9, 0.9, 400);
       this.setState('drift');
     }
   }

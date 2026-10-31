@@ -1,7 +1,8 @@
 // Interactables (press E) and reward pickups that appear after clearing a room.
 import { Entity } from './entity';
 import type { Renderer } from '../../engine/gfx/renderer';
-import { G, sfx } from '../G';
+import { sfx } from '../G';
+import type { Player } from './player';
 import { tr, L10n } from '../i18n';
 import { drawSprite, Sprite } from '../../engine/gfx/sprite';
 import { drawPromptLabel } from '../ui/widgets';
@@ -12,14 +13,25 @@ import { ICONS } from '../../art/sprites/icons';
 export abstract class Interactable extends Entity {
   range = 20;
   near = false;
+  /** the closest player in range (their device draws the prompt and presses the button) */
+  nearBy: Player | null = null;
+  /** who pressed interact last (events / shops attribute the choice to them, GDD2 §5.8) */
+  user: Player | null = null;
   enabled = true;
   abstract prompt(): string;
   abstract interact(): void;
   update(_dt: number) {
-    const p = this.world.player;
-    this.near = !!p && this.enabled && p.hp > 0 && !p.locked && Math.hypot(p.x - this.x, p.y - this.y) < this.range;
-    if (this.near && G.input.pressed('interact')) {
-      G.input.consume('interact');
+    let best: Player | null = null, bd = this.range;
+    if (this.enabled) for (const p of this.world.players) {
+      if (p.hp <= 0 || p.locked) continue;
+      const d = Math.hypot(p.x - this.x, p.y - this.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    this.nearBy = best;
+    this.near = !!best;
+    if (best && best.input.pressed('interact')) {
+      best.input.consume('interact');
+      this.user = best;
       this.interact();
     }
   }
@@ -27,7 +39,8 @@ export abstract class Interactable extends Entity {
     if (!this.near) return;
     const text = this.prompt();
     const x = this.x, y = this.y - this.promptY();
-    r.worldUi((ctx, toUi) => { const p = toUi(x, y); drawPromptLabel(ctx, 'interact', text, p.x, p.y); });
+    const who = this.nearBy?.input ?? null;
+    r.worldUi((ctx, toUi) => { const p = toUi(x, y); drawPromptLabel(ctx, 'interact', text, p.x, p.y, { who }); });
   }
   promptY() { return 34; }
 }
@@ -47,8 +60,8 @@ export class RewardOrb extends Entity {
   }
   update(dt: number) {
     this.t += dt;
-    const p = this.world.player;
-    if (!this.taken && this.t > 0.6 && p && p.hp > 0 && Math.hypot(p.x - this.x, p.y - this.y) < 14) {
+    const p = this.t > 0.6 ? this.world.players.find((q) => q.hp > 0 && Math.hypot(q.x - this.x, q.y - this.y) < 14) : undefined;
+    if (!this.taken && p) {
       this.taken = true;
       this.kill();
       this.world.fx.burst(this.x, this.y - 12, 26, ['W', this.color], 160, 0.5);

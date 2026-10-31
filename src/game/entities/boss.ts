@@ -6,7 +6,7 @@ import type { L10n } from '../i18n';
 import { sfx } from '../G';
 import { frand } from '../../engine/rng';
 import { TAU } from '../../engine/math';
-import { rumble } from '../../engine/rumble';
+import { rumbleAll } from '../../engine/rumble';
 
 export abstract class Boss extends Enemy {
   abstract bossName: L10n;
@@ -61,7 +61,7 @@ export abstract class Boss extends Enemy {
     w.slowmo(0.2, 1.6);
     w.shake(0.6);
     sfx('deathBig');
-    rumble(1, 1, 900);
+    rumbleAll(1, 1, 900);
     // remove enemy hitboxes and bullets
     w.combat.hitboxes = w.combat.hitboxes.filter((h) => h.team !== 'enemy');
     for (const e of w.entities) if ((e as any).team === 'enemy' && e !== this && !(e as any).isBoss) { if ((e as any).hp !== undefined) (e as any).hurt?.({ amount: 9999, kind: 'aoe', pierceInvuln: true }); else if ((e as any).pop) (e as any).pop(false); }
@@ -87,7 +87,7 @@ export abstract class Boss extends Enemy {
       w.shake(1);
       w.hitstop(0.18);
       sfx('paradox');
-      rumble(1, 1, 600);
+      rumbleAll(1, 1, 600);
       this.onDeath(this.lastHit ?? { amount: 0, kind: 'aoe' });
     }
   }

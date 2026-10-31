@@ -12,7 +12,7 @@ import { angleTo, clamp, ease, TAU } from '../../../engine/math';
 import { sfx } from '../../G';
 import { L } from '../../i18n';
 import { col } from '../../../art/palette';
-import { rumble } from '../../../engine/rumble';
+import { rumbleAll } from '../../../engine/rumble';
 
 let ART: ForemanArt | null = null;
 
@@ -42,7 +42,7 @@ export class Foreman extends Boss {
   updateIntro() {
     // stomps forward and roars (whistle)
     this.bob = Math.sin(this.age * 6) * 1;
-    if (this.introT < 1.2 && this.introT + 1 / 60 >= 1.2) { sfx('waveStart'); this.world.shake(0.4); rumble(0.6, 0.4, 300); this.world.fx.smoke(this.x - 14, this.y - 52, 6, ['K9', 'K8', 'K7']); this.world.fx.smoke(this.x + 14, this.y - 52, 6, ['K9', 'K8', 'K7']); }
+    if (this.introT < 1.2 && this.introT + 1 / 60 >= 1.2) { sfx('waveStart'); this.world.shake(0.4); rumbleAll(0.6, 0.4, 300); this.world.fx.smoke(this.x - 14, this.y - 52, 6, ['K9', 'K8', 'K7']); this.world.fx.smoke(this.x + 14, this.y - 52, 6, ['K9', 'K8', 'K7']); }
   }
 
   onPhase(p: number) {
@@ -55,7 +55,7 @@ export class Foreman extends Boss {
       this.world.hitstop(0.15);
       sfx('slam');
       sfx('steam');
-      rumble(1, 0.8, 500);
+      rumbleAll(1, 0.8, 500);
       this.speed = 38;
       this.queue = [];
     }
@@ -116,7 +116,7 @@ export class Foreman extends Boss {
           this.world.fx.scorch(this.slamX, this.slamY, 16);
           this.world.shake(0.55);
           sfx('slam', { pan: this.world.pan(this.slamX) });
-          rumble(0.7, 0.5, 200);
+          rumbleAll(0.7, 0.5, 200);
         }
         this.attacking = this.stateT > 0.75 && this.stateT < 0.95;
         void k;
@@ -152,7 +152,7 @@ export class Foreman extends Boss {
           if (this.stateT < dt * 1.5) sfx('steamWind', { pan: this.world.pan(this.x) });
         } else {
           this.attacking = true;
-          if (this.stateT < 0.8 + dt * 1.5) { sfx('steam'); rumble(0.3, 0.3, 300); }
+          if (this.stateT < 0.8 + dt * 1.5) { sfx('steam'); rumbleAll(0.3, 0.3, 300); }
           const sp = this.phase ? 230 : 200;
           const hit = this.moveDir(this.atkA, sp, dt);
           this.world.fx.smoke(this.x - Math.cos(this.atkA) * 10, this.y - 30, 1, ['K9', 'K8']);
@@ -161,7 +161,7 @@ export class Foreman extends Boss {
               this.world.shake(0.7);
               this.world.hitstop(0.1);
               sfx('slam', { pan: this.world.pan(this.x) });
-              rumble(0.8, 0.6, 300);
+              rumbleAll(0.8, 0.6, 300);
               this.world.fx.hitSparks(this.x + Math.cos(this.atkA) * 18, this.y - 20, this.atkA + Math.PI, 'crit', 40);
               // debris rain from the ceiling
               for (let i = 0; i < (this.phase ? 6 : 4); i++) {

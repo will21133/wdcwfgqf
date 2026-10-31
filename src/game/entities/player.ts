@@ -16,11 +16,15 @@ import { frand } from '../../engine/rng';
 import type { DamageInfo } from '../systems/combat';
 import { VIEW_W, VIEW_H } from '../../engine/gfx/post';
 import { col } from '../../art/palette';
-import { rumble } from '../../engine/rumble';
 import { settings } from '../settings';
+import type { PlayerInput } from '../../engine/input';
+import { ensurePlayers, slotColor, SLOT_SCARF, SLOT_RAMP, drawSlotBadge } from '../players';
+import { handDef, type HandDef } from '../progression/hands';
+import type { ColorKey } from '../ui/text';
 
 let FRAMES: TickFrames | null = null;
 let KEYS: Sprite[] = [];
+/** slot I's frames (1.0 look; echoes and story scenes use these) */
 export function tickFrames() {
   if (!FRAMES) {
     FRAMES = buildTick();
@@ -28,13 +32,30 @@ export function tickFrames() {
   }
   return FRAMES;
 }
+/** a slot's frames: the scarf takes the slot colour (GDD2 §5.2); cached per palette in tick.ts */
+export function tickFramesFor(slot: number, hand?: HandDef): TickFrames {
+  tickFrames();
+  if (!slot && !hand?.palette && !hand?.variant) return FRAMES!;
+  return buildTick({ ...(hand?.palette ?? {}), ...SLOT_SCARF[((slot % 4) + 4) % 4] }, hand?.variant);
+}
 export function keySprites() { tickFrames(); return KEYS; }
 
 export const enum Anim { Idle, Run, Dash, Hurt, Attack }
 
+/** right half of the 8×3.5 px ground ring (mirrored when drawn) */
+const RING: [number, number][] = [[0, -4], [1, -4], [2, -4], [3, -4], [4, -3], [5, -3], [6, -2], [7, -1], [7, 0], [7, 1], [6, 2], [5, 3], [4, 3], [3, 4], [2, 4], [1, 4], [0, 4]];
+
 export interface PlayerPoseSnapshot { dir: Dir; flip: boolean; anim: Anim; animT: number; pose: Pose }
 
 export class Player extends Actor implements Wielder {
+  /** player slot 0..3 (I..IV) */
+  slot: number;
+  /** this player's own device (PLAN2 §1.3); never read G.input for gameplay */
+  input: PlayerInput;
+  /** slot colour (scarf, badge, ring) */
+  color: ColorKey;
+  hand: HandDef;
+  private frames: TickFrames;
   isEcho = false;
   dmgScale = 1;
   ignoreFreeze = false;
@@ -75,8 +96,14 @@ export class Player extends Actor implements Wielder {
   autoWalk = 0;
   private beatT = 0;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, input?: PlayerInput) {
     super();
+    this.input = input ?? ensurePlayers()[0];
+    this.slot = this.input.slot;
+    this.color = slotColor(this.slot);
+    this.hand = handDef('tick');
+    this.frames = tickFramesFor(this.slot, this.hand);
+    this.scarfA.ramp = this.scarfB.ramp = SLOT_RAMP[this.slot % 4];
     this.x = x; this.y = y;
     this.team = 'player';
     this.r = 4;
@@ -94,9 +121,12 @@ export class Player extends Actor implements Wielder {
   get mods() { return this.world.run!.mods; }
 
   added() {
-    this.world.player = this;
+    const L = this.world.players;
+    if (!L.includes(this)) { L.push(this); L.sort((a, b) => a.slot - b.slot); }
     this.weapon = makeWeapon(this.run.weapon);
-    this.hp = this.run.hp;
+    // slot I carries the run's HP (1.0); other slots keep theirs in run.slotHp until F2b's Loadout
+    const kept = this.slot === 0 ? this.run.hp : this.run.slotHp[this.slot];
+    this.hp = kept === undefined ? this.mods.maxHp : kept > 0 ? kept : Math.round(this.mods.maxHp * 0.25);
     this.maxHp = this.mods.maxHp;
     this.dashCharges = this.mods.dashCharges;
     this.recorder.setWindow(this.mods.rewindWindow);
@@ -104,7 +134,7 @@ export class Player extends Actor implements Wielder {
 
   // ───────────────────────── update ─────────────────────────
   update(dt: number) {
-    const inp = G.input;
+    const inp = this.input;
     const m = this.mods;
     this.maxHp = m.maxHp;
     this.animT += dt;
@@ -137,7 +167,9 @@ export class Player extends Actor implements Wielder {
     const attackPressed = !this.locked && inp.pressed('attack');
     const specialPressed = !this.locked && inp.pressed('special');
     const dashPressed = !this.locked && inp.pressed('dash');
-    const rewindPressed = !this.locked && inp.pressed('rewind');
+    // F2a stopgap until F3 implements fork: the fork button (RB / R / I) rewinds too, so a 1.0
+    // pad player's RB still rewinds (GDD2 §2.1 moved fork onto RB)
+    const rewindPressed = !this.locked && (inp.pressed('rewind') || inp.pressed('fork'));
 
     if (rewindPressed) this.tryRewind();
     if (this.rewinding) return;
@@ -184,7 +216,7 @@ export class Player extends Actor implements Wielder {
 
     // facing
     const moving = Math.hypot(this.vx, this.vy) > 12;
-    if (this.weapon.busy || G.input.mouseAim || G.input.padAimX || G.input.padAimY) this.setFacing(this.aim);
+    if (this.weapon.busy || inp.facesAim()) this.setFacing(this.aim);
     else if (moving) this.setFacing(Math.atan2(this.vy, this.vx));
 
     // anim
@@ -224,31 +256,33 @@ export class Player extends Actor implements Wielder {
     this.syncRun();
   }
 
-  private syncRun() { this.run.hp = this.hp; }
+  /** write this player's HP back to the run (slot I = run.hp, as in 1.0) */
+  syncRun() {
+    if (this.slot === 0) this.run.hp = this.hp;
+    this.run.slotHp[this.slot] = this.hp;
+  }
 
   private updateAim(mv: { x: number; y: number }) {
-    const inp = G.input;
-    if (inp.bot) { if (inp.bot.aimX || inp.bot.aimY) this.aim = Math.atan2(inp.bot.aimY, inp.bot.aimX); return; }
-    if (inp.mouseAim) {
-      const v = this.world.cam.view();
-      const fx = Math.floor(v.x), fy = Math.floor(v.y);
-      this.aim = angleTo(this.x - fx, this.y - 8 - fy, inp.mx, inp.my);
-    } else if (Math.hypot(inp.padAimX, inp.padAimY) > 0.3) {
-      this.aim = Math.atan2(inp.padAimY, inp.padAimX);
-    } else {
-      let base = this.aim;
-      if (mv.x || mv.y) base = Math.atan2(mv.y, mv.x);
-      // soft aim assist toward the nearest enemy within a cone
-      let best: number | null = null, bd = settings.aimAssist ? 150 : 0;
-      for (const e of this.world.enemies) {
-        if (e.dead) continue;
-        const d = Math.hypot(e.x - this.x, e.y - this.y);
-        if (d > bd) continue;
-        const a = angleTo(this.x, this.y, e.x, e.y);
-        if (Math.abs(angleDiff(base, a)) < 0.9) { bd = d; best = a; }
-      }
-      this.aim = best ?? base;
+    const inp = this.input;
+    const v = this.world.cam.view();
+    const a = inp.aim(this.x - Math.floor(v.x), this.y - 8 - Math.floor(v.y));
+    if (inp.kind === 'bot') { if (a.x || a.y) this.aim = Math.atan2(a.y, a.x); return; }
+    if (a.kind === 'mouse' || a.kind === 'stick') { this.aim = Math.atan2(a.y, a.x); return; }
+    let base = this.aim;
+    if (mv.x || mv.y) base = Math.atan2(mv.y, mv.x);
+    // soft aim assist toward the nearest enemy within a cone; split-keyboard players have no mouse
+    // or stick, so theirs is always on and snaps inside a 60° fan (GDD2 §2.2)
+    const kb = inp.kind === 'kb';
+    const cone = kb ? Math.PI / 6 : 0.9;
+    let best: number | null = null, bd = settings.aimAssist || kb ? 150 : 0;
+    for (const e of this.world.enemies) {
+      if (e.dead) continue;
+      const d = Math.hypot(e.x - this.x, e.y - this.y);
+      if (d > bd) continue;
+      const ea = angleTo(this.x, this.y, e.x, e.y);
+      if (Math.abs(angleDiff(base, ea)) < cone) { bd = d; best = ea; }
     }
+    this.aim = best ?? base;
   }
 
   setFacing(a: number) {
@@ -276,7 +310,7 @@ export class Player extends Actor implements Wielder {
     this.recorder.event({ type: 'dash', dx, dy });
     this.world.fx.dust(this.x, this.y, 4, Math.atan2(dy, dx));
     sfx('dash', { pan: this.world.pan(this.x) });
-    rumble(0, 0.25, 60);
+    this.input.rumble(0, 0.25, 60);
     this.world.bus.emit('dash', { owner: this, dx, dy, echo: false });
     // perfect dodge check: enemy projectile/hitbox nearby
     if (this.world.enemies.some((e) => (e as any).attacking && Math.hypot(e.x - this.x, e.y - this.y) < 40)) {
@@ -322,7 +356,7 @@ export class Player extends Actor implements Wielder {
     this.dashT = 0; this.lungeT = 0; this.vx = this.vy = 0;
     this.world.stats.rewinds++;
     sfx('rewind');
-    rumble(0.1, 0.5, 400);
+    this.input.rumble(0.1, 0.5, 400);
     G.audio.muffle(true, 1400);
     G.audio.duck(0.3, 0.6);
   }
@@ -383,7 +417,7 @@ export class Player extends Actor implements Wielder {
     this.world.fx.burst(this.x, this.y - 8, 14, ['C4', 'C3', 'C2'], 120, 0.4);
     this.world.shake(0.2);
     sfx('rewindEnd');
-    rumble(0.45, 0.3, 140);
+    this.input.rumble(0.45, 0.3, 140);
     G.audio.muffle(false);
     this.world.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored });
     this.world.bus.emit('echoSpawn', { echo });
@@ -406,7 +440,7 @@ export class Player extends Actor implements Wielder {
     w.stats.paradoxes++;
     if (settings.flashes) G.r.params.flash = 0.35;
     sfx('paradox');
-    rumble(1, 0.8, 260);
+    this.input.rumble(1, 0.8, 260);
     G.audio.duck(0.4, 0.7);
     w.bus.emit('paradox', { x, y, echo: e });
     if (!m.paradoxKeepsEcho) e.shatter(true);
@@ -446,7 +480,7 @@ export class Player extends Actor implements Wielder {
     w.stats.hitsTaken++;
     G.r.params.hurt = 1;
     sfx('hurt');
-    rumble(0.55, 0.8, 180);
+    this.input.rumble(0.55, 0.8, 180);
     w.bus.emit('damaged', { info, dealt: amt });
     if (this.hp <= 0) {
       if (this.run.autoRewindLeft > 0 && this.recorder.length > 10) {
@@ -487,7 +521,7 @@ export class Player extends Actor implements Wielder {
 
   // ───────────────────────── render ─────────────────────────
   currentSprite(): Sprite {
-    const F = tickFrames();
+    const F = this.frames;
     switch (this.anim) {
       case Anim.Run: return F.run[this.dir][Math.floor(this.animT * 12) % 6];
       case Anim.Dash: return F.dash[this.dir];
@@ -499,7 +533,7 @@ export class Player extends Actor implements Wielder {
   }
 
   private updateScarf(dt: number) {
-    const F = tickFrames();
+    const F = this.frames;
     const n = F.neck[this.dir];
     const fx = this.flip ? -1 : 1;
     const ax = this.x + n.x * fx, ay = this.y + n.y + (this.anim === Anim.Run ? 0 : 0);
@@ -517,6 +551,14 @@ export class Player extends Actor implements Wielder {
     ctx.beginPath();
     ctx.ellipse(Math.round(this.x), Math.round(this.y), 6, 2.5, 0, 0, TAU);
     ctx.fill();
+    // co-op: a pixel ring in the slot colour under each hand (GDD2 §5.2)
+    if (this.world.playerCount > 1 && this.hp > 0) {
+      const cx = Math.round(this.x), cy = Math.round(this.y);
+      ctx.globalAlpha = 0.75;
+      ctx.fillStyle = col(this.color);
+      for (const [dx, dy] of RING) { ctx.fillRect(cx + dx, cy + dy, 1, 1); ctx.fillRect(cx - dx - 1, cy + dy, 1, 1); }
+      ctx.globalAlpha = 1;
+    }
   }
 
   render(r: Renderer) {
@@ -529,7 +571,7 @@ export class Player extends Actor implements Wielder {
       return;
     }
     const blink = this.invuln > 0 && this.hurtT <= 0 && !this.rewinding && this.dashT <= 0 && Math.floor(this.world.time * 20) % 2 === 0;
-    const F = tickFrames();
+    const F = this.frames;
     const pose = this.weapon.pose(this.aim);
     const hand = F.hand[this.dir];
     const fx = this.flip ? -1 : 1;
@@ -555,12 +597,16 @@ export class Player extends Actor implements Wielder {
     // heart-lamp: the player always carries a little warm light
     const pl = this.world.theme.playerLight ?? 1;
     r.lightAt(this.x, this.y - 8, 70, 'O3', 0.55 * pl);
-    r.lightAt(this.x, this.y - 8, 26, 'K10', 0.25 * pl);
+    // co-op: the small inner glow takes the slot colour, so each hand carries its own tint
+    if (this.world.playerCount > 1) r.lightAt(this.x, this.y - 8, 30, this.color, 0.35 * pl);
+    else r.lightAt(this.x, this.y - 8, 26, 'K10', 0.25 * pl);
   }
 
   renderUnlit(r: Renderer) {
     // aim reticle (mouse) is drawn by HUD; here: future path of echoes
     for (const e of this.echoes) if (!e.dead) e.renderPath(r);
+    // co-op: shape badge 3 px above the crown so colour-blind players can tell the hands apart
+    if (this.world.playerCount > 1 && this.hp > 0 && this.falling <= 0) drawSlotBadge(r.u, this.slot, Math.round(this.x), Math.round(this.y) - 25);
     // low-HP heartbeat outline
     if (this.hp > 0 && this.hp / this.maxHp < 0.25 && Math.floor(this.world.time * 3) % 2 === 0) {
       const spr = this.currentSprite();
@@ -570,7 +616,7 @@ export class Player extends Actor implements Wielder {
 
   private renderDead(r: Renderer) {
     // scattered parts handled by death fx; draw collapsed head
-    const F = tickFrames();
+    const F = this.frames;
     drawSprite(r.w, F.hurt.down, this.x, this.y + 2, { sy: 0.6, alpha: Math.max(0, 1 - this.deadT * 0.5) });
   }
 
@@ -579,5 +625,5 @@ export class Player extends Actor implements Wielder {
     const v = this.world.cam.view();
     return [clamp(this.x - Math.floor(v.x), 0, VIEW_W), clamp(this.y - Math.floor(v.y), 0, VIEW_H)];
   }
-  get colorKey() { return col('R3'); }
+  get colorKey() { return col(this.color); }
 }

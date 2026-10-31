@@ -160,7 +160,7 @@ function drawArms(pb: PixelBuf, dir: Dir, phase: number, moving: boolean, bodyY:
   pb.set(rx, ly + 2, glove);
 }
 
-function compose(dir: Dir, opts: { phase: number; moving: boolean; bodyBob: number; headBob: number; head: string[]; lean?: number; squashX?: number }): Sprite {
+function compose(dir: Dir, opts: { phase: number; moving: boolean; bodyBob: number; headBob: number; head: string[]; lean?: number; squashX?: number }, pal: Record<string, string>): Sprite {
   const pb = new PixelBuf(W, H);
   const bodyY = PY - 9 + opts.bodyBob; // body top
   const lean = opts.lean ?? 0;
@@ -168,14 +168,27 @@ function compose(dir: Dir, opts: { phase: number; moving: boolean; bodyBob: numb
   // draw order: back arm/legs, body, head
   drawLegs(pb, dir, opts.phase, opts.moving, bodyY);
   if (dir === 'up') drawArms(pb, dir, opts.phase, opts.moving, bodyY);
-  blit(pb, body, PAL, PX - 5 + lean, bodyY);
+  blit(pb, body, pal, PX - 5 + lean, bodyY);
   if (dir !== 'up') drawArms(pb, dir, opts.phase, opts.moving, bodyY);
   const headY = bodyY - 10 + opts.headBob;
-  blit(pb, opts.head, PAL, PX - 5 + lean + (dir === 'side' ? 0 : 0), headY);
+  blit(pb, opts.head, pal, PX - 5 + lean + (dir === 'side' ? 0 : 0), headY);
   return spriteFromBuf(pb, PX, PY, 'K0');
 }
 
-export function buildTick(): TickFrames {
+const CACHE = new Map<string, TickFrames>();
+
+/**
+ * Tick's frames. `pal` overrides palette letters (the scarf is S/s/z/Z: each player slot gets its
+ * own colour, GDD2 §5.2); `variant` is reserved for alternative bodies (P5). Frames are cached
+ * per (variant, pal), so every caller with the same look shares one set.
+ */
+export function buildTick(pal?: Partial<Record<string, string>>, variant?: string): TickFrames {
+  const over = pal ? Object.entries(pal).filter(([, v]) => !!v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)) : [];
+  const key = `${variant ?? ''}|${over.map(([k, v]) => `${k}=${v}`).join(',')}`;
+  const hit = CACHE.get(key);
+  if (hit) return hit;
+  const P: Record<string, string> = { ...PAL };
+  for (const [k, v] of over) P[k] = v as string;
   const dirs: Dir[] = ['down', 'up', 'side'];
   const headOf = (d: Dir) => (d === 'down' ? HEAD_DOWN : d === 'up' ? HEAD_UP : HEAD_SIDE);
   const out: TickFrames = {
@@ -186,15 +199,16 @@ export function buildTick(): TickFrames {
   for (const d of dirs) {
     const bob = [0, 0, 1, 1];
     const hb = [0, 0, 0, 1];
-    out.idle[d] = bob.map((b, i) => compose(d, { phase: 0, moving: false, bodyBob: b, headBob: hb[i], head: headOf(d) }));
-    out.blink[d] = compose(d, { phase: 0, moving: false, bodyBob: 0, headBob: 0, head: d === 'down' ? HEAD_DOWN_BLINK : d === 'side' ? HEAD_SIDE_BLINK : HEAD_UP });
+    out.idle[d] = bob.map((b, i) => compose(d, { phase: 0, moving: false, bodyBob: b, headBob: hb[i], head: headOf(d) }, P));
+    out.blink[d] = compose(d, { phase: 0, moving: false, bodyBob: 0, headBob: 0, head: d === 'down' ? HEAD_DOWN_BLINK : d === 'side' ? HEAD_SIDE_BLINK : HEAD_UP }, P);
     const rb = [0, -1, -1, 0, -1, -1];
     out.run[d] = rb.map((b, i) =>
-      compose(d, { phase: i / 6, moving: true, bodyBob: b, headBob: i % 3 === 0 ? 1 : 0, head: headOf(d), lean: d === 'side' ? 1 : 0 }),
+      compose(d, { phase: i / 6, moving: true, bodyBob: b, headBob: i % 3 === 0 ? 1 : 0, head: headOf(d), lean: d === 'side' ? 1 : 0 }, P),
     );
-    out.dash[d] = compose(d, { phase: 0.25, moving: true, bodyBob: 1, headBob: 1, head: headOf(d), lean: d === 'side' ? 1 : 0 });
-    out.hurt[d] = compose(d, { phase: 0, moving: false, bodyBob: 1, headBob: 2, head: d === 'down' ? HEAD_DOWN_HURT : d === 'side' ? HEAD_SIDE_HURT : HEAD_UP_HURT });
+    out.dash[d] = compose(d, { phase: 0.25, moving: true, bodyBob: 1, headBob: 1, head: headOf(d), lean: d === 'side' ? 1 : 0 }, P);
+    out.hurt[d] = compose(d, { phase: 0, moving: false, bodyBob: 1, headBob: 2, head: d === 'down' ? HEAD_DOWN_HURT : d === 'side' ? HEAD_SIDE_HURT : HEAD_UP_HURT }, P);
   }
+  CACHE.set(key, out);
   return out;
 }
 

@@ -2,7 +2,8 @@
 import type { Renderer } from '../engine/gfx/renderer';
 import type { PixelFont, DigitFont } from '../engine/gfx/font';
 import { SceneManager } from '../engine/scene';
-import { input } from '../engine/input';
+import { input, type PlayerInput } from '../engine/input';
+import { devices } from '../engine/devices';
 import { audio } from '../engine/audio/audio';
 import type { Music } from '../engine/audio/music';
 
@@ -19,7 +20,12 @@ export const G = {
   /** 3×5 digits: reserved for tiny corner badges only (GDD2 §12.1); nothing uses them yet */
   digitsSmall: null as unknown as DigitFont,
   scenes: new SceneManager(),
+  /** menu aggregate (1.0 API): every joined device, or every device while nobody has joined */
   input,
+  /** which device drives which player slot (PLAN2 §1.3) */
+  devices,
+  /** joined players' inputs, in slot order */
+  get players(): PlayerInput[] { return devices.players; },
   audio,
   music: null as unknown as Music,
   time: 0,

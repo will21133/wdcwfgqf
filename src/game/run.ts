@@ -79,7 +79,10 @@ export class Run {
   seed: number;
   floor = 0;
   roomIndex = 0;
+  /** slot I's HP (1.0) */
   hp: number;
+  /** F2a stopgap: HP of every slot between rooms (index 0 mirrors hp); F2b replaces it with Loadout.hp */
+  slotHp: number[] = [];
   brass = 0;
   shards = 0;
   sand = 0;

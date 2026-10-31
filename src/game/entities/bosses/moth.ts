@@ -11,7 +11,7 @@ import { frand } from '../../../engine/rng';
 import { angleTo, clamp, ease, TAU, fbm2 } from '../../../engine/math';
 import { sfx } from '../../G';
 import { L, tr } from '../../i18n';
-import { rumble } from '../../../engine/rumble';
+import { rumbleAll } from '../../../engine/rumble';
 import { findEnemy } from '../../world/director';
 
 interface MothArt { wings: Sprite[]; body: Sprite; bodyAngry: Sprite }
@@ -106,7 +106,7 @@ export class LanternMoth extends Boss {
   onPhase() {
     this.setState('snuff');
     sfx('waveStart');
-    rumble(0.6, 0.4, 400);
+    rumbleAll(0.6, 0.4, 400);
   }
 
   private next(): string {
@@ -189,7 +189,7 @@ export class LanternMoth extends Boss {
             this.world.fx.dust(this.x, this.y, 16);
             this.world.shake(0.6);
             sfx('slam');
-            rumble(0.8, 0.6, 250);
+            rumbleAll(0.8, 0.6, 250);
           }
           if (this.stateT > 3.2) { this.homeX = clamp(this.x, 120, this.world.map.pw - 120); this.homeY = clamp(this.y - 30, 90, this.world.map.ph - 140); this.setState('drift'); }
         }

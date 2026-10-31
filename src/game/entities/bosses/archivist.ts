@@ -14,7 +14,7 @@ import { angleTo, clamp, ease, TAU } from '../../../engine/math';
 import { sfx } from '../../G';
 import { L, tr } from '../../i18n';
 import { col } from '../../../art/palette';
-import { rumble } from '../../../engine/rumble';
+import { rumbleAll } from '../../../engine/rumble';
 import type { DamageInfo } from '../../systems/combat';
 import { findEnemy } from '../../world/director';
 
@@ -170,7 +170,7 @@ export class Archivist extends Boss {
       this.world.fx.banner(this.x, this.y - 84, tr(L('修订失败！', 'Revision failed!')), 'C3', 1.2);
       this.world.fx.burst(this.x, this.y - 50, 30, ['C4', 'C3', 'S4'], 160, 0.6);
       sfx('stasisBreak');
-      rumble(0.5, 0.5, 200);
+      rumbleAll(0.5, 0.5, 200);
       this.revT = 6;
     }
   }

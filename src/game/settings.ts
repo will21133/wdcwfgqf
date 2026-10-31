@@ -2,7 +2,7 @@
 import { G } from './G';
 import { i18n, Lang } from './i18n';
 import { rumbleSettings } from '../engine/rumble';
-import { DEFAULT_BINDINGS, Action } from '../engine/input';
+import { KB, KB_DEFAULTS, ACTIONS, padLayout, Action, KbProfile } from '../engine/input';
 import { textScale } from '../engine/gfx/font';
 
 export interface Settings {
@@ -13,7 +13,12 @@ export interface Settings {
   rumbleStrength: number;
   pixelPerfect: boolean;
   flashes: boolean;
+  /** keyboard + mouse rebinds (1.0 key) */
   bindings: Partial<Record<Action, string[]>>;
+  /** split-keyboard rebinds, per half (GDD2 §2.2: every device rebinds on its own) */
+  bindingsKb: Partial<Record<'kbL' | 'kbR', Partial<Record<Action, string[]>>>>;
+  /** pads: LB fork / RB rewind instead of the default LB rewind / RB fork */
+  padSwap: boolean;
   aimAssist: boolean;
   /** damage numbers over enemies */
   showDamage: boolean;
@@ -33,7 +38,7 @@ const KEY = 'secondhand.settings.v1';
 
 export const settings: Settings = {
   master: 0.8, music: 0.7, sfx: 0.85, shake: 1, lang: 'zh', rumble: true, rumbleStrength: 1,
-  pixelPerfect: false, flashes: true, bindings: {}, aimAssist: true, showDamage: true,
+  pixelPerfect: false, flashes: true, bindings: {}, bindingsKb: {}, padSwap: false, aimAssist: true, showDamage: true,
   textSize: 100, hudLabels: 'auto', rewindMode: 'both', flashLimit: false, termHints: 'auto',
 };
 
@@ -74,6 +79,15 @@ function sanitize() {
   if (settings.rewindMode !== 'both' && settings.rewindMode !== 'tap') settings.rewindMode = 'both';
   settings.flashLimit = !!settings.flashLimit;
   settings.showDamage = settings.showDamage !== false;
+  if (!settings.bindingsKb || typeof settings.bindingsKb !== 'object') settings.bindingsKb = {};
+  if (!settings.bindings || typeof settings.bindings !== 'object') settings.bindings = {};
+  settings.padSwap = !!settings.padSwap;
+}
+
+/** the saved rebinds of one keyboard layout (writable: the controls panel edits it) */
+export function profileBindings(p: KbProfile): Partial<Record<Action, string[]>> {
+  if (p === 'kbm') return settings.bindings;
+  return (settings.bindingsKb[p] ??= {});
 }
 
 export function saveSettings() {
@@ -93,5 +107,10 @@ export function applySettings() {
   rumbleSettings.strength = settings.rumbleStrength;
   if (G.r) G.r.params.pixelPerfect = settings.pixelPerfect;
   textScale.boost = settings.textSize === 125;
-  for (const k of Object.keys(DEFAULT_BINDINGS) as Action[]) G.input.bindings[k] = settings.bindings[k]?.slice() ?? DEFAULT_BINDINGS[k].slice();
+  // every keyboard layout: saved rebinds over the defaults (G.input.bindings is KB.kbm)
+  for (const p of ['kbm', 'kbL', 'kbR'] as KbProfile[]) {
+    const saved = p === 'kbm' ? settings.bindings : settings.bindingsKb[p] ?? {};
+    for (const k of ACTIONS) KB[p][k] = saved[k]?.slice() ?? KB_DEFAULTS[p][k].slice();
+  }
+  padLayout.swapBumpers = settings.padSwap;
 }

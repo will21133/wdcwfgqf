@@ -3,6 +3,8 @@ import { col } from '../../art/palette';
 
 export class Scarf {
   px: number[] = []; py: number[] = []; ox: number[] = []; oy: number[] = [];
+  /** [near the neck, middle, tip] — slot colour in co-op (players.ts SLOT_RAMP) */
+  ramp: readonly [string, string, string] = ['R4', 'R3', 'R2'];
   constructor(public n = 7, public seg = 2.2) {
     for (let i = 0; i < n; i++) { this.px.push(0); this.py.push(i * seg); this.ox.push(0); this.oy.push(i * seg); }
   }
@@ -39,7 +41,7 @@ export class Scarf {
     if (!tint) for (const [x, y] of pts) ctx.fillRect(x - 1, y - 1, 3, 3);
     for (let i = 0; i < n; i++) {
       const [x, y] = pts[i];
-      ctx.fillStyle = col(tint ?? (i < 2 ? 'R4' : i < n - 2 ? 'R3' : 'R2'));
+      ctx.fillStyle = col(tint ?? (i < 2 ? this.ramp[0] : i < n - 2 ? this.ramp[1] : this.ramp[2]));
       ctx.fillRect(x, y, i < n - 1 ? 2 : 1, i < n - 1 ? 2 : 1);
       if (i > 0) {
         // fill gaps between points

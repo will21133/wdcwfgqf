@@ -1,18 +1,20 @@
-// QA autopilot (?bot=1): plays the real game to catch crashes and gather pacing data.
-import { G } from '../G';
+// QA autopilot (?bot=1, ?players=N): plays the real game to catch crashes and gather pacing data.
+// One brain per bot-driven slot; each writes its own PlayerInput.bot every tick (PLAN2 §1.3).
 import type { GameScene } from '../scenes/game';
-import type { Action } from '../../engine/input';
+import type { Action, BotInput } from '../../engine/input';
+import type { Player } from '../entities/player';
 import { angleTo } from '../../engine/math';
 import { RewardOrb, Chest, Interactable } from '../entities/interact';
 import { Door } from '../entities/door';
 
-export interface BotInput { move: { x: number; y: number }; aimX: number; aimY: number; held: Set<Action>; pressed: Set<Action> }
+export type { BotInput };
 
 export const botLog: string[] = [];
 (window as any).__botLog = botLog;
-let lastRoom = '';
-let roomT = 0;
-let tapT = 0;
+
+interface Brain { lastRoom: string; roomT: number; tapT: number; scene: GameScene | null }
+const brains: Brain[] = [];
+const brainOf = (slot: number): Brain => (brains[slot] ??= { lastRoom: '', roomT: 0, tapT: 0, scene: null });
 
 /** BFS over walkable tiles from the player's tile to the goal tile; returns the next waypoint */
 function pathStep(s: GameScene, px: number, py: number, gx: number, gy: number): { x: number; y: number } | null {
@@ -42,18 +44,22 @@ function pathStep(s: GameScene, px: number, py: number, gx: number, gy: number):
   return { x: (next % W) * 16 + 8, y: ((next / W) | 0) * 16 + 8 };
 }
 
-export function botStep(s: GameScene, dt: number) {
-  const inp = G.input;
+/** one tick of thinking for the bot that drives player `p` */
+export function botStep(s: GameScene, p: Player, dt: number) {
   const b: BotInput = { move: { x: 0, y: 0 }, aimX: 0, aimY: 0, held: new Set(), pressed: new Set() };
-  inp.bot = b;
+  p.input.bot = b;
   const w = s.world;
-  const p = w.player;
-  if (!p) return;
+  const br = brainOf(p.slot);
   const key = `${s.run.floor}:${s.run.roomIndex}:${s.opt.kind}`;
-  if (key !== lastRoom) { botLog.push(`[room] ${key} t=${Math.round(s.run.time)}s hp=${Math.round(p.hp)}`); lastRoom = key; roomT = 0; }
-  roomT += dt;
-  tapT -= dt;
-  const tap = (a: Action) => { if (tapT <= 0) { b.pressed.add(a); tapT = 0.35; } };
+  if (key !== br.lastRoom || br.scene !== s) {
+    // the room log is the 1.0 format; it comes from the first bot only so co-op runs read the same
+    if (p === w.players.find((q) => q.input.kind === 'bot')) botLog.push(`[room] ${key} t=${Math.round(s.run.time)}s hp=${Math.round(p.hp)}${w.playerCount > 1 ? ` players=${w.playerCount}` : ''}`);
+    br.lastRoom = key; br.roomT = 0; br.scene = s;
+  }
+  br.roomT += dt;
+  br.tapT -= dt;
+  const roomT = br.roomT;
+  const tap = (a: Action) => { if (br.tapT <= 0) { b.pressed.add(a); br.tapT = 0.35; } };
   // overlays / death: confirm
   if (s.overlays.some((o) => o.blocks) || p.hp <= 0) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
   const go = (x: number, y: number) => {
@@ -69,12 +75,14 @@ export function botStep(s: GameScene, dt: number) {
     const a = angleTo(p.x, p.y, tgt.x, tgt.y);
     b.aimX = Math.cos(a); b.aimY = Math.sin(a);
     const range = s.run.weapon === 'bow' || s.run.weapon === 'chakram' ? 90 : 26;
+    // co-op bots circle on their own side so four of them don't stack on one spot
+    const side = p.slot % 2 ? -1 : 1;
     if (bd > range) go(tgt.x, tgt.y);
-    else b.move = { x: -Math.sin(a) * 0.6, y: Math.cos(a) * 0.6 };
+    else b.move = { x: -Math.sin(a) * 0.6 * side, y: Math.cos(a) * 0.6 * side };
     if (bd < range + 20) { b.pressed.add('attack'); b.held.add('attack'); }
     if (Math.random() < 0.01) b.pressed.add('special');
     const danger = enemies.some((e) => (e as any).attacking && Math.hypot(e.x - p.x, e.y - p.y) < 50);
-    if (danger && Math.random() < 0.3) { b.pressed.add('dash'); b.move = { x: -Math.sin(a), y: Math.cos(a) }; }
+    if (danger && Math.random() < 0.3) { b.pressed.add('dash'); b.move = { x: -Math.sin(a) * side, y: Math.cos(a) * side }; }
     if (p.hp < p.maxHp * 0.6 && s.run.charges > 0 && Math.random() < 0.05) b.pressed.add('rewind');
     return;
   }

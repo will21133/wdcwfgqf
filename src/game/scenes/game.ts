@@ -33,7 +33,8 @@ import { Pickup } from '../entities/pickup';
 import { RoomHost, setupShop, setupRest, setupEvent, setupVault, setPartLookup } from '../rooms/special';
 import { tr, L, L10n, UI } from '../i18n';
 import { ICONS, patronSigil } from '../../art/sprites/icons';
-import { rumble } from '../../engine/rumble';
+import { rumbleAll } from '../../engine/rumble';
+import { ensurePlayers } from '../players';
 import { makeBoss } from '../world/bosses';
 import { markSeen } from '../save';
 import { WEAPON_INFO } from '../ui/metaPanels';
@@ -44,7 +45,6 @@ import { Text } from '../ui/text';
 import { col } from '../../art/palette';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
-const BOT = G.debug.has('bot');
 
 // Ines's notes wait while a boss fight is on (GDD2 §9.8 rule 2)
 hintsHooks.busy = () => {
@@ -94,9 +94,15 @@ export class GameScene implements Scene, RoomHost {
     BIOMES[th.id]?.decorate?.(w, map, new RNG(this.seed + 99));
     const ex = map.entry ? (map.entry.tx + 1) * TS : map.pw / 2;
     const ey = map.entry ? map.entry.ty * TS - 10 : map.ph / 2;
-    const p = new Player(ex, ey + 18);
-    p.autoWalk = 0.32;
-    w.add(p);
+    // every seated player walks in through the entry door (solo: exactly the 1.0 spot)
+    const seats = ensurePlayers();
+    const ps = seats.map((inp, i) => {
+      const ox = seats.length > 1 ? (i % 2 ? 9 : -9) : 0, oy = i >= 2 ? 11 : 0;
+      const pl = new Player(ex + ox, ey + 18 + oy, inp);
+      pl.autoWalk = 0.32;
+      return w.add(pl);
+    });
+    const p = ps[0];
     w.cam.snap(ex, ey - 40);
     map.exits.forEach((e, i) => {
       const o = this.options[i];
@@ -107,7 +113,7 @@ export class GameScene implements Scene, RoomHost {
     run.registerHooks(w, p);
     w.bus.on('spawn', (e) => { const k = (e.e as any).codexId; if (k) markSeen((e.e as any).isBoss ? 'bosses' : 'enemies', k); }, this);
     run.shieldReady = run.mods.firstHitShield > 0;
-    run.onCharge = () => { sfx('charge'); rumble(0.12, 0.25, 90); };
+    run.onCharge = () => { sfx('charge'); this.world.player?.input.rumble(0.12, 0.25, 90); };
     const dbgSpawn = G.debug.get('spawn');
     const kind = this.opt.kind;
     if (dbgSpawn && run.roomIndex === 0 && run.floor === Number(G.debug.get('floor') ?? 0)) {
@@ -122,7 +128,7 @@ export class GameScene implements Scene, RoomHost {
         this.boss = w.add(b);
         this.waves = [];
         this.cleared = false;
-        p.locked = true;
+        for (const pl of ps) pl.locked = true;
         this.titleCard = { title: tr(b.bossName), sub: tr(b.bossTitle), t: -0.2 };
       } else this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind);
     } else if (kind === 'tutorial') {
@@ -162,7 +168,7 @@ export class GameScene implements Scene, RoomHost {
     const ov = new ChoiceOverlay(choices, header, (c) => {
       const p = this.world.player!;
       this.world.fx.banner(p.x, p.y - 36, tr(c.title), c.color, 1.4);
-      rumble(0.2, 0.2, 100);
+      p.input.rumble(0.2, 0.2, 100);
       if (MEMORIES[c.id]) markSeen('memories', c.id);
       after?.();
     }, regen ? () => { if (run.rerolls <= 0) return null; run.rerolls--; return regen(); } : undefined);
@@ -260,7 +266,7 @@ export class GameScene implements Scene, RoomHost {
     w.fx.banner(w.player!.x, w.player!.y - 40, tr(UI.cleared), 'B5', 1.6);
     w.bus.emit('roomClear', {});
     w.slowmo(0.35, 0.35);
-    rumble(0.2, 0.3, 120);
+    rumbleAll(0.2, 0.3, 120);
     const c = this.center();
     const o = this.opt;
     if (o.kind === 'elite') for (let i = 0; i < 3 + run.floor; i++) w.add(new Pickup(c.x, c.y, 'shard', 1));
@@ -304,9 +310,7 @@ export class GameScene implements Scene, RoomHost {
 
   private leave(o: RoomOption | null) {
     const run = this.run;
-    const p = this.world.player!;
-    p.locked = true;
-    run.hp = p.hp;
+    for (const pl of this.world.players) { pl.locked = true; pl.syncRun(); }
     this.bankStats();
     if (this.opt.kind === 'boss' || !o) {
       if (run.floor >= FLOORS - 1) { this.onVictory?.(run); return; }
@@ -330,7 +334,8 @@ export class GameScene implements Scene, RoomHost {
   }
 
   update(dt: number) {
-    if (BOT) botStep(this, dt);
+    // QA autopilot / AI hands: every bot-driven slot thinks before anything reads input
+    for (const pl of this.world.players) if (pl.input.kind === 'bot') botStep(this, pl, dt);
     this.t += dt;
     const w = this.world;
     const p = w.player!;
@@ -353,7 +358,7 @@ export class GameScene implements Scene, RoomHost {
     if (this.boss) {
       // intro: camera on the boss, player waits
       if (this.boss.inIntro) { w.cam.follow(this.boss.x, this.boss.y - 30, dt, 4); this.hud.update(dt, w); this.postFx(dt, p); return; }
-      if (p.locked && !this.cleared) p.locked = false;
+      if (!this.cleared) for (const pl of w.players) if (pl.locked) pl.locked = false;
       if (this.boss.phase !== this.bossPhase) { this.bossPhase = this.boss.phase; Hints.hold(4); }
       if (!this.cleared && this.boss.dead) { this.cleared = true; this.onClear(); }
       G.music.layer('boss', this.boss.phase > 0 && !this.boss.dead ? 1 : 0, this.boss.dead ? 4 : 2);
@@ -367,14 +372,22 @@ export class GameScene implements Scene, RoomHost {
     }
     const combat = !this.cleared && w.aliveEnemies.length > 0;
     G.music.layer('combat', combat ? 1 : 0, combat ? 0.8 : 3);
-    const aiming = G.input.mouseAim || Math.hypot(G.input.padAimX, G.input.padAimY) > 0.3;
-    const look = aiming ? 0.36 : 0;
-    w.cam.follow(p.x + Math.cos(p.aim) * 40 * look, p.y - 10 + Math.sin(p.aim) * 30 * look, dt, 7);
+    if (w.playerCount > 1) {
+      // co-op: the camera holds the midpoint of everyone standing, no aim look-ahead (GDD2 §5.3;
+      // F2b adds the tether and off-screen arrows)
+      const ls = w.alive().length ? w.alive() : w.players;
+      let cx = 0, cy = 0;
+      for (const pl of ls) { cx += pl.x; cy += pl.y; }
+      w.cam.follow(cx / ls.length, cy / ls.length - 10, dt, 7);
+    } else {
+      const look = p.input.aiming() ? 0.36 : 0;
+      w.cam.follow(p.x + Math.cos(p.aim) * 40 * look, p.y - 10 + Math.sin(p.aim) * 30 * look, dt, 7);
+    }
     this.hud.update(dt, w);
     this.postFx(dt, p);
     if (p.hp <= 0) {
       this.deathT += dt;
-      if (this.deathT < dt * 1.5) { w.slowmo(0.25, 1.2); rumble(0.9, 1, 500); G.music.stop(2); }
+      if (this.deathT < dt * 1.5) { w.slowmo(0.25, 1.2); rumbleAll(0.9, 1, 500); G.music.stop(2); }
       if (this.deathT > 2.4 && (G.input.pressed('confirm') || G.input.pressed('attack'))) {
         this.run.hp = 0;
         this.bankStats();
@@ -411,7 +424,9 @@ export class GameScene implements Scene, RoomHost {
     const pp = G.r.params;
     pp.hurt = Math.max(0, pp.hurt - dt * 2.2);
     pp.flash = Math.max(0, pp.flash - dt * 4);
-    pp.rewind = damp(pp.rewind, p.rewindFx, 18, dt);
+    let fx = p.rewindFx;
+    for (const pl of this.world.players) fx = Math.max(fx, pl.rewindFx);
+    pp.rewind = damp(pp.rewind, fx, 18, dt);
     pp.ca = pp.rewind * 2.2 + pp.hurt * 1.5;
     pp.timestop = damp(pp.timestop, this.world.timeStop, 10, dt);
   }

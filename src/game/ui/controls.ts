@@ -1,36 +1,49 @@
-// Controls panel: keyboard/mouse rebinding + Xbox controller reference.
+// Controls panel: per-device keyboard rebinding (keyboard + mouse, left half, right half; GDD2 §2.1–2.2)
+// + Xbox controller reference with the bumper swap. A pad button (or Esc) cancels a rebind.
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Overlay } from './overlay';
 import { panel, rect } from './draw';
 import { G, sfx } from '../G';
 import { tr, L, L10n } from '../i18n';
-import { REBINDABLE, DEFAULT_BINDINGS, keyLabel, Action } from '../../engine/input';
-import { settings, saveSettings } from '../settings';
+import { REBINDABLE, KB, keyLabel, Action, KbProfile, padLayout } from '../../engine/input';
+import { settings, saveSettings, profileBindings } from '../settings';
 import { drawHint } from './prompts';
-import { drawPadGlyph, drawKeycap, keycapW, promptH, PadGlyph } from './widgets';
+import { drawPadGlyph, drawKeycap, keycapW, promptH, promptW, drawPrompt, PadGlyph } from './widgets';
 import { Text } from './text';
 import { col } from '../../art/palette';
 
 const NAMES: Record<string, L10n> = {
   up: L('上', 'Up'), down: L('下', 'Down'), left: L('左', 'Left'), right: L('右', 'Right'),
   attack: L('攻击', 'Attack'), special: L('特技', 'Special'), dash: L('冲刺', 'Dash'), rewind: L('回溯', 'Rewind'),
-  interact: L('交互', 'Interact'), info: L('构筑信息', 'Build info'),
+  fork: L('分岔', 'Fork'), interact: L('交互', 'Interact'), info: L('构筑信息', 'Build info'),
 };
 
-const PAD_ROWS: [PadGlyph, L10n][] = [
-  ['A', L('冲刺 / 确认', 'Dash / Confirm')],
-  ['B', L('交互 / 返回', 'Interact / Back')],
-  ['X', L('攻击', 'Attack')],
-  ['Y', L('特技', 'Special')],
-  ['RB', L('回溯', 'Rewind')],
-  ['LB', L('回溯', 'Rewind')],
-  ['RT', L('攻击', 'Attack')],
-  ['LT', L('特技', 'Special')],
-  ['LS', L('移动', 'Move')],
-  ['RS', L('瞄准', 'Aim')],
-  ['MENU', L('暂停', 'Pause')],
-  ['VIEW', L('构筑信息', 'Build info')],
-];
+const PROFILES: KbProfile[] = ['kbm', 'kbL', 'kbR'];
+const PROFILE_NAME: Record<KbProfile, L10n> = {
+  kbm: L('键盘 + 鼠标', 'Keyboard + mouse'),
+  kbL: L('左半键盘（双人）', 'Left half (shared)'),
+  kbR: L('右半键盘（双人）', 'Right half (shared)'),
+};
+
+function padRows(): [PadGlyph, L10n][] {
+  const rw = L('回溯', 'Rewind'), fk = L('分岔', 'Fork');
+  return [
+    ['A', L('冲刺 / 确认', 'Dash / Confirm')],
+    ['B', L('交互 / 返回', 'Interact / Back')],
+    ['X', L('攻击', 'Attack')],
+    ['Y', L('特技', 'Special')],
+    ['LB', padLayout.swapBumpers ? fk : rw],
+    ['RB', padLayout.swapBumpers ? rw : fk],
+    ['RT', L('攻击', 'Attack')],
+    ['LT', L('特技', 'Special')],
+    ['LS', L('移动', 'Move')],
+    ['RS', L('瞄准', 'Aim')],
+    ['MENU', L('暂停', 'Pause')],
+    ['VIEW', L('构筑信息', 'Build info')],
+  ];
+}
+
+type Row = Action | 'swap' | 'reset' | 'back';
 
 export class ControlsPanel implements Overlay {
   blocks = true;
@@ -39,7 +52,14 @@ export class ControlsPanel implements Overlay {
   sel = 0;
   capture = false;
   t = 0;
-  private rows = [...REBINDABLE, 'reset' as const, 'back' as const];
+  /** which keyboard layout the rows show and rebind */
+  prof: KbProfile = 'kbm';
+  private rows: Row[] = [...REBINDABLE, 'swap', 'reset', 'back'];
+
+  private switchProfile(d: number) {
+    this.prof = PROFILES[(PROFILES.indexOf(this.prof) + d + PROFILES.length) % PROFILES.length];
+    sfx('uiMove');
+  }
 
   update(dt: number) {
     this.t += dt;
@@ -47,39 +67,62 @@ export class ControlsPanel implements Overlay {
     if (this.capture) {
       const code = inp.lastPressedCode;
       if (code && this.t > 0.15) {
+        // the split halves have no mouse: ignore clicks and keep listening
+        if (this.prof !== 'kbm' && code.startsWith('Mouse')) { inp.lastPressedCode = null; return true; }
         const a = this.rows[this.sel] as Action;
-        if (code !== 'Escape') {
-          const cur = G.input.bindings[a];
+        if (code !== 'Escape' && !code.startsWith('Pad')) {
+          const cur = KB[this.prof][a];
           const next = [code, ...cur.filter((c) => c !== code)].slice(0, 2);
-          settings.bindings[a] = next;
+          profileBindings(this.prof)[a] = next;
           saveSettings();
           sfx('uiSelect');
-        } else sfx('uiBack');
+        } else sfx('uiBack'); // Esc, or any button on a controller, cancels
         this.capture = false;
         inp.lastPressedCode = null;
       }
       return true;
     }
     if (inp.pressed('cancel') || inp.pressed('pause')) { inp.consume('pause'); sfx('uiBack'); return false; }
+    // layout tabs: Q / E, LB / RB (checked before confirm: E also confirms on the keyboard)
+    if (inp.pressed('tabL') || inp.pressed('tabR')) {
+      this.switchProfile(inp.pressed('tabL') ? -1 : 1);
+      inp.consume('tabL'); inp.consume('tabR'); inp.consume('confirm');
+      return true;
+    }
     const nav = inp.nav(dt);
     if (nav.y) { this.sel = (this.sel + nav.y + this.rows.length) % this.rows.length; sfx('uiMove'); }
     if (inp.mouseAim) for (let i = 0; i < this.rows.length; i++) if (inp.mx > 70 && inp.mx < 330 && inp.my >= this.rowsTop - 2 + i * this.rh && inp.my < this.rowsTop - 2 + (i + 1) * this.rh && this.sel !== i) { this.sel = i; sfx('uiMove'); }
-    if (inp.pressed('confirm') || (inp.pressed('attack') && inp.mouseAim)) {
+    // clicking the layout header steps through the layouts
+    const click = inp.pressed('attack') && inp.mouseAim;
+    if (click && inp.my >= this.tabY - 2 && inp.my < this.tabY + this.tabH + 2 && inp.mx > 64 && inp.mx < 336) {
+      this.switchProfile(inp.mx < 200 ? -1 : 1);
+      return true;
+    }
+    if (this.rows[this.sel] === 'swap' && nav.x) this.toggleSwap();
+    if (inp.pressed('confirm') || click) {
       const r = this.rows[this.sel];
       if (r === 'back') { sfx('uiBack'); return false; }
-      if (r === 'reset') { settings.bindings = {}; saveSettings(); sfx('uiSelect'); return true; }
+      if (r === 'reset') { if (this.prof === 'kbm') settings.bindings = {}; else settings.bindingsKb[this.prof] = {}; saveSettings(); sfx('uiSelect'); return true; }
+      if (r === 'swap') { this.toggleSwap(); return true; }
       this.capture = true;
       this.t = 0;
       inp.lastPressedCode = null;
       sfx('uiOpen');
     }
-    void DEFAULT_BINDINGS;
     return true;
   }
 
-  /** row grid from the last render (mouse hit-testing uses it) */
+  private toggleSwap() {
+    settings.padSwap = !settings.padSwap;
+    saveSettings();
+    sfx('uiSelect');
+  }
+
+  /** row grid and layout header from the last render (mouse hit-testing uses them) */
   private rowsTop = 72;
   private rh = 18;
+  private tabY = 50;
+  private tabH = 13;
 
   render(r: Renderer) {
     const ctx = r.ui2;
@@ -92,14 +135,23 @@ export class ControlsPanel implements Overlay {
     panel(ctx, 40, pTop, 560, pBot - pTop);
     Text.draw(ctx, L('按键设置', 'Controls'), 320, pTop + 10, { align: 'center', color: 'B5' });
     const headerY = Math.round(pTop + 10 + lb + (big ? 3 : 6));
-    Text.draw(ctx, L('键盘 / 鼠标', 'Keyboard / Mouse'), 70, headerY, { size: 'small', color: 'K8' });
-    Text.draw(ctx, L('Xbox 手柄', 'Xbox controller'), 380, headerY, { size: 'small', color: 'K8' });
     const ph = promptH();
+    // keyboard layout tabs: [Q] ‹ name › [E]
+    const tabH = Math.max(ph, Math.ceil(Text.inkH('small')) + 2);
+    this.tabY = headerY - 2; this.tabH = tabH;
+    const tcy = this.tabY + tabH / 2;
+    drawPrompt(ctx, 'tabL', 70, Math.round(tcy - ph / 2));
+    const rw = promptW('tabR');
+    drawPrompt(ctx, 'tabR', 330 - rw, Math.round(tcy - ph / 2));
+    Text.draw(ctx, PROFILE_NAME[this.prof], 200, tcy, { size: 'small', align: 'center', color: 'B5', valign: 'middle' });
+    Text.draw(ctx, L('Xbox 手柄', 'Xbox controller'), 380, tcy, { size: 'small', color: 'K8', valign: 'middle' });
     const hintY = pBot - 17 - (ph - 13);
-    const n = Math.max(this.rows.length, PAD_ROWS.length);
-    const rowsTop = Math.round(headerY + ls + (big ? 4 : 6));
+    const PAD = padRows();
+    const n = Math.max(this.rows.length, PAD.length);
+    const rowsTop = Math.round(this.tabY + tabH + (big ? 6 : 8));
     const rh = Math.max(Math.ceil(Text.inkH('body')) + 3, Math.min(18 + Math.max(0, Math.round(lb - 15)), Math.floor((hintY - 8 - rowsTop) / n)));
     this.rowsTop = rowsTop; this.rh = rh;
+    const B = KB[this.prof];
     this.rows.forEach((row, i) => {
       const y = rowsTop + i * rh;
       const cy = y - 3 + (rh - 2) / 2;
@@ -109,8 +161,13 @@ export class ControlsPanel implements Overlay {
         Text.draw(ctx, row === 'reset' ? L('恢复默认', 'Reset to defaults') : L('返回', 'Back'), 74, cy, { color: sel ? 'K10' : 'K8', valign: 'middle' });
         return;
       }
+      if (row === 'swap') {
+        Text.draw(ctx, L('手柄 LB / RB 互换', 'Swap pad LB / RB'), 74, cy, { color: sel ? 'K10' : 'K8', valign: 'middle' });
+        Text.draw(ctx, settings.padSwap ? L('开', 'On') : L('关', 'Off'), 330, cy, { align: 'right', color: settings.padSwap ? 'B5' : 'K7', valign: 'middle' });
+        return;
+      }
       Text.draw(ctx, NAMES[row], 74, cy, { color: sel ? 'K10' : 'K8', valign: 'middle' });
-      const b = G.input.bindings[row];
+      const b = B[row];
       if (sel && this.capture) {
         Text.draw(ctx, L('请按下新按键…（ESC 取消）', 'Press a key... (ESC cancels)'), 330, cy, { size: 'small', align: 'right', color: Math.floor(this.t * 4) % 2 ? 'B5' : 'B3', valign: 'middle' });
       } else {
@@ -124,13 +181,13 @@ export class ControlsPanel implements Overlay {
       }
     });
     // Xbox reference
-    PAD_ROWS.forEach(([b, name], i) => {
+    PAD.forEach(([b, name], i) => {
       const cy = rowsTop + i * rh - 3 + (rh - 2) / 2;
       drawPadGlyph(ctx, b, 380 + Math.floor((19 - (b === 'LB' || b === 'RB' ? 19 : b === 'LT' || b === 'RT' ? 15 : 13)) / 2), Math.round(cy - 6.5));
       Text.draw(ctx, name, 406, cy, { color: 'K8', valign: 'middle' });
     });
-    const note = L('手柄可在任何时候直接使用，会自动切换按键提示。', 'Pick up a controller anytime — prompts switch automatically.');
-    const noteY = rowsTop + PAD_ROWS.length * rh - 3;
+    const note = L('每个手柄各控制一名玩家；单人时手柄与键鼠可随时切换。', 'Each controller drives its own player; solo, switch between pad and keyboard anytime.');
+    const noteY = rowsTop + PAD.length * rh - 3;
     if (noteY + Text.measureWrapped(note, 'small', 205).h <= hintY - 4) Text.draw(ctx, note, 380, noteY, { size: 'small', color: 'K8', maxW: 205 });
     drawHint(ctx, 320, hintY, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('重新绑定', 'Rebind'))], ['cancel', tr(L('返回', 'Back'))]]);
   }

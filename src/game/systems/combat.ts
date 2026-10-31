@@ -4,7 +4,7 @@ import { angleDiff, clamp, TAU } from '../../engine/math';
 import { frand } from '../../engine/rng';
 import { sfx } from '../G';
 import { settings } from '../settings';
-import { rumble } from '../../engine/rumble';
+import { rumbleOwner } from '../players';
 const G_sfx = sfx;
 
 export type DmgKind = 'melee' | 'proj' | 'aoe' | 'dot' | 'paradox' | 'contact' | 'fall' | 'status';
@@ -292,7 +292,7 @@ export class Combat {
       const hs = info.hitstop ?? (big ? 0.075 : info.echo ? 0.02 : 0.045);
       w.hitstop(hs);
       w.shake(big ? 0.28 : info.echo ? 0.06 : 0.12);
-      if (!info.echo) rumble(big ? 0.35 : 0.12, big ? 0.5 : 0.25, big ? 90 : 50);
+      if (!info.echo) rumbleOwner(info.owner, big ? 0.35 : 0.12, big ? 0.5 : 0.25, big ? 90 : 50);
       sfx(big ? 'hitCrit' : info.echo ? 'hitEcho' : 'hit', { vol: 0.8, pan: w.pan(t.x) });
     }
   }

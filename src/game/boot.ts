@@ -22,6 +22,7 @@ import { loadSettings } from './settings';
 import { loadProfile } from './save';
 import { Flow } from './flow';
 import { registerDebugRoute, runDebugRoutes } from './debugRoutes';
+import { initPlayersFromUrl } from './players';
 
 function setupAudio() {
   registerSfx(G.audio);
@@ -137,8 +138,10 @@ export async function boot() {
   const lang = G.debug.get('lang');
   if (lang === 'zh' || lang === 'en') { const { i18n } = await import('./i18n'); i18n.lang = lang; }
   registerBuiltinRoutes();
+  // ?bot=1 / ?players=N / ?devices=…: seat players and bots before any scene spawns them
+  initPlayersFromUrl(G.debug);
   if (await runDebugRoutes(G.debug)) return;
-  const direct = ['seed', 'room', 'floor', 'spawn', 'offer', 'god'].some((k) => G.debug.has(k));
+  const direct = ['seed', 'room', 'floor', 'spawn', 'offer', 'god', 'players', 'devices'].some((k) => G.debug.has(k));
   if (!direct) { Flow.title(); return; }
   // debug: straight into a run
   const seed = Number(G.debug.get('seed') ?? (Math.random() * 1e9) | 0);

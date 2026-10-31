@@ -22,7 +22,16 @@ export class World {
   enemies: Actor[] = [];
   playerTeam: Actor[] = [];
   breakables: Actor[] = [];
-  player: Player | null = null;
+  /** every player in the room, in slot order (PLAN2 §1.4) */
+  players: Player[] = [];
+  /** compat (1.0 code): the first living player, else the first player */
+  get player(): Player | null {
+    for (const p of this.players) if (p.hp > 0) return p;
+    return this.players[0] ?? null;
+  }
+  get playerCount(): number { return this.players.length; }
+  /** players still standing */
+  alive(): Player[] { return this.players.filter((p) => p.hp > 0); }
   particles = new Particles();
   combat: Combat;
   bus = new Bus();
@@ -179,6 +188,7 @@ export class World {
       this.enemies = this.enemies.filter((e) => !e.dead);
       this.playerTeam = this.playerTeam.filter((e) => !e.dead);
       this.breakables = this.breakables.filter((e) => !e.dead);
+      if (this.players.some((p) => p.dead)) this.players = this.players.filter((p) => !p.dead);
     }
     this.flushAdds();
   }

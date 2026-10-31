@@ -4,7 +4,7 @@
 // device grid on the high-resolution UI layer.
 import { G } from '../G';
 import { tr, L, L10n } from '../i18n';
-import { keyLabel, Action } from '../../engine/input';
+import { keyLabel, Action, padLayout } from '../../engine/input';
 import { rect, panel } from './draw';
 import { Text, TextSize, ColorKey } from './text';
 import { artMul, ctxTransform } from '../../engine/gfx/font';
@@ -203,29 +203,40 @@ function drawMouse(ctx: CanvasRenderingContext2D, label: string, x: number, y: n
 }
 
 // ───────────────────────── prompts ─────────────────────────
-/** anything that knows which device a player last used (F2's PlayerInput satisfies this) */
-export interface PromptDevice { lastDevice?: string }
+/**
+ * anything that knows which device a player last used and, for keyboards, which key table they
+ * play with (F2's PlayerInput satisfies this; split-keyboard players get their own keys)
+ */
+export interface PromptDevice { lastDevice?: string; bindings?: Partial<Record<Action, readonly string[]>> }
 
 const PAD_FOR: Partial<Record<Action | 'nav', PadGlyph>> = {
-  confirm: 'A', dash: 'A', cancel: 'B', interact: 'B', attack: 'X', special: 'Y', rewind: 'RB',
+  confirm: 'A', dash: 'A', cancel: 'B', interact: 'B', attack: 'X', special: 'Y', rewind: 'LB', fork: 'RB',
+  tabL: 'LB', tabR: 'RB',
   pause: 'MENU', info: 'VIEW', nav: 'DPAD', up: 'DPAD', down: 'DPAD', left: 'DPAD', right: 'DPAD',
 };
+/** GDD2 §2.1: LB rewind / RB fork, swapped by the controls setting */
+function padFor(a: Action | 'nav'): PadGlyph {
+  if (padLayout.swapBumpers && (a === 'rewind' || a === 'fork')) return a === 'rewind' ? 'RB' : 'LB';
+  return PAD_FOR[a] ?? 'A';
+}
 
 const usesPad = (who?: PromptDevice | null) => (who?.lastDevice ?? G.input.lastDevice) === 'pad';
 
-function keyFor(a: Action | 'nav'): string {
-  return a === 'nav' ? '↕↔' : keyLabel(G.input.bindings[a][0]);
+function keyFor(a: Action | 'nav', who?: PromptDevice | null): string {
+  if (a === 'nav') return '↕↔';
+  const table = who?.bindings ?? G.input.bindings;
+  return keyLabel(table[a]?.[0] ?? '');
 }
 
 /** width a prompt icon will take */
 export function promptW(a: Action | 'nav', who?: PromptDevice | null): number {
-  return usesPad(who) ? padGlyphW(PAD_FOR[a] ?? 'A') : keycapW(keyFor(a));
+  return usesPad(who) ? padGlyphW(padFor(a)) : keycapW(keyFor(a, who));
 }
 
 /** Device-aware button icon, top-left at (x, y), 13 px tall. Returns its width. */
 export function drawPrompt(ctx: CanvasRenderingContext2D, action: Action | 'nav', x: number, y: number, who?: PromptDevice | null): number {
-  if (usesPad(who)) return drawPadGlyph(ctx, PAD_FOR[action] ?? 'A', x, y + Math.round((promptH() - PROMPT_H) / 2));
-  return drawKeycap(ctx, keyFor(action), x, y);
+  if (usesPad(who)) return drawPadGlyph(ctx, padFor(action), x, y + Math.round((promptH() - PROMPT_H) / 2));
+  return drawKeycap(ctx, keyFor(action, who), x, y);
 }
 
 /**

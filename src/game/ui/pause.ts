@@ -16,7 +16,7 @@ import { patronSigil, ICONS } from '../../art/sprites/icons';
 import { partLook } from '../progression/rewards';
 import type { Run } from '../run';
 import type { Sprite } from '../../engine/gfx/sprite';
-import { rumble } from '../../engine/rumble';
+import { rumbleAll } from '../../engine/rumble';
 import { ControlsPanel } from './controls';
 
 interface PauseHost { run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void; inHub?: boolean }
@@ -73,8 +73,8 @@ export function settingsItems(onBack: () => void, openControls?: () => void): Me
       hint: () => tr(L('轻按：回到旧影。按住：拖动磁带，选择回到哪一刻。仅轻按：按住也当作轻按。', 'Tap: return to your Shadow. Hold: scrub the tape to pick the moment. Tap only: holding counts as a tap.')),
     }]),
     { label: () => tr(L('瞄准辅助（手柄）', 'Aim assist (gamepad)')), kind: 'toggle', get: () => settings.aimAssist, set: set('aimAssist') },
-    { label: () => tr(L('手柄震动', 'Controller rumble')), kind: 'toggle', get: () => settings.rumble, set: (v: boolean) => { set('rumble')(v); if (v) rumble(0.6, 0.6, 200); } },
-    { label: () => tr(L('震动强度', 'Rumble strength')), kind: 'slider', get: () => settings.rumbleStrength, set: (v: number) => { set('rumbleStrength')(v); rumble(0.6, 0.6, 150); }, disabled: () => !settings.rumble },
+    { label: () => tr(L('手柄震动', 'Controller rumble')), kind: 'toggle', get: () => settings.rumble, set: (v: boolean) => { set('rumble')(v); if (v) rumbleAll(0.6, 0.6, 200); } },
+    { label: () => tr(L('震动强度', 'Rumble strength')), kind: 'slider', get: () => settings.rumbleStrength, set: (v: number) => { set('rumbleStrength')(v); rumbleAll(0.6, 0.6, 150); }, disabled: () => !settings.rumble },
     { label: () => tr(L('按键设置', 'Controls')), act: () => openControls?.() },
     { label: () => tr(L('返回', 'Back')), act: onBack },
   ];
