@@ -73,6 +73,7 @@ export abstract class Enemy extends Actor {
     }
     if (this.squash > 0) this.squash = Math.max(0, this.squash - dt * 3);
     this.stateT += dt;
+    this.vx = this.vy = 0;
     if (this.st.stun > 0 || this.hitstun > 0) { this.attacking = false; this.onStagger(dt); return; }
     this.think(dt);
   }
@@ -210,17 +211,17 @@ export abstract class Enemy extends Actor {
     ctx.globalAlpha = 0.22 + k * 0.2;
     ctx.fillStyle = col(color);
     ctx.beginPath();
-    ctx.ellipse(Math.round(x), Math.round(y), rad, rad * 0.62, 0, 0, TAU);
+    ctx.ellipse(Math.round(x), Math.round(y), rad, rad, 0, 0, TAU);
     ctx.fill();
     ctx.globalAlpha = 0.85;
     ctx.strokeStyle = col(color);
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(Math.round(x), Math.round(y), rad * k, rad * 0.62 * k, 0, 0, TAU);
+    ctx.ellipse(Math.round(x), Math.round(y), rad * k, rad * k, 0, 0, TAU);
     ctx.stroke();
     if (k > 0.85 && Math.floor(this.world.time * 30) % 2 === 0) {
       ctx.globalAlpha = 0.35; ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.ellipse(Math.round(x), Math.round(y), rad, rad * 0.62, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(Math.round(x), Math.round(y), rad, rad, 0, 0, TAU); ctx.fill();
     }
     ctx.globalAlpha = 1;
   }

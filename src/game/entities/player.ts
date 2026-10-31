@@ -553,8 +553,9 @@ export class Player extends Actor implements Wielder {
       this.scarfA.draw(ctx);
     }
     // heart-lamp: the player always carries a little warm light
-    r.lightAt(this.x, this.y - 8, 70, 'O3', 0.55);
-    r.lightAt(this.x, this.y - 8, 26, 'K10', 0.25);
+    const pl = this.world.theme.playerLight ?? 1;
+    r.lightAt(this.x, this.y - 8, 70, 'O3', 0.55 * pl);
+    r.lightAt(this.x, this.y - 8, 26, 'K10', 0.25 * pl);
   }
 
   renderUnlit(r: Renderer) {

@@ -27,6 +27,8 @@ export interface Theme {
   lampLight: string;
   dust: string;
   music: string;
+  /** strength of Tick's heart-lamp on this floor (bright floors want less) */
+  playerLight?: number;
 }
 
 export const THEMES: Theme[] = [
@@ -73,16 +75,17 @@ export const THEMES: Theme[] = [
     lamp: 'O3', lampLight: 'O2', dust: 'S3', music: 'archive',
   },
   {
+    // night on the summit: cool moonlit blues, marble greys, brass; violet only in the stars
     id: 3, key: 'clockface',
     name: { zh: '钟面', en: 'The Clockface' },
-    ambient: '#3a3060', clear: '#05040c',
-    grade: { tint: [1.0, 0.97, 1.06], lift: [0.03, 0.0, 0.06], sat: 1.0, contrast: 1.06 },
-    slab: ['K3', 'K5', 'K7', 'K8', 'K9'], seam: 'K2',
-    grime: ['V0', 'V1', 'U1'], grimeAmount: 0.3,
-    plate: ['B2', 'B3', 'B4', 'B5'], plateAmount: 0.1,
-    wallBrick: ['K3', 'K4', 'K5', 'K6'], wallMortar: 'K1', wallLip: ['K7', 'K8', 'K9'],
-    cap: ['K0', 'U0', 'K1'], capTrim: 'B4',
-    pitWater: ['K0', 'U0', 'V0', 'U1', 'V2'], pitFace: ['K5', 'K4', 'K3', 'K1'],
-    lamp: 'V4', lampLight: 'V3', dust: 'V4', music: 'clockface',
+    ambient: '#444a68', clear: '#0a0f24',
+    grade: { tint: [0.97, 0.99, 1.05], lift: [0.0, 0.01, 0.035], sat: 0.9, contrast: 1.07 },
+    slab: ['K5', 'K6', 'K7', 'K8', 'K9'], seam: 'K5',
+    grime: ['U1', 'U2', 'K6'], grimeAmount: 0.15,
+    plate: ['B1', 'B2', 'B3', 'B4'], plateAmount: 0.08,
+    wallBrick: ['K5', 'K6', 'K7', 'K8'], wallMortar: 'K4', wallLip: ['K8', 'K9', 'K10'],
+    cap: ['K6', 'K8', 'K9'], capTrim: 'B4',
+    pitWater: ['U0', 'U1', 'U3', 'U4', 'K10'], pitFace: ['K7', 'K5', 'K3', 'K1'],
+    lamp: 'K10', lampLight: 'U4', dust: 'U4', music: 'clockface', playerLight: 0.6,
   },
 ];
