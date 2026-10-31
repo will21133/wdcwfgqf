@@ -48,6 +48,20 @@ export async function boot() {
     ]));
     return;
   }
+  if (scene === 'art_clockface') {
+    // floor-4 team preview: ?scene=art_clockface[&page=2]
+    const c = await import('../art/sprites/clockface');
+    const k = c.buildMinuteKnight(), l = c.buildHourLancer(), s = c.buildStarShard(), e = c.buildExecutioner();
+    const page2 = G.debug.get('page') === '2';
+    G.scenes.set(new ArtPreview(page2 ? [
+      { name: 'pendulum executioner: idle walk windup swing lift slam / blade', sprites: [...e.idle, ...e.walk, e.windup, e.swing, e.lift, e.slam, c.buildPendulumBlade()], zoom: 3 },
+    ] : [
+      { name: 'minute knight: idle walk windup swing guard stagger / blade', sprites: [...k.idle, ...k.walk, k.windup, k.swing, k.guard, k.stagger, c.MINUTE_BLADE], zoom: 3 },
+      { name: 'hour lancer: idle walk plant charge stun / lance', sprites: [...l.idle, ...l.walk, l.plant, l.charge, l.stun, c.HOUR_LANCE], zoom: 3 },
+      { name: 'star shard spin / hot', sprites: [...s.spin, ...s.hot], zoom: 3 },
+    ], 'K5'));
+    return;
+  }
   if (scene === 'art') {
     const t = buildTick();
     G.scenes.set(new ArtPreview([
