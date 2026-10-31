@@ -53,6 +53,12 @@ export async function boot() {
     ]));
     return;
   }
+  if (scene === 'art_conservatory') {
+    // Floor 2 team: enemy + decor sprite review (?scene=art_conservatory[&page=1])
+    const c = await import('../art/sprites/conservatory');
+    G.scenes.set(new ArtPreview(c.previewGroups(Number(G.debug.get('page') ?? 0))));
+    return;
+  }
   if (scene === 'art') {
     const t = buildTick();
     G.scenes.set(new ArtPreview([
