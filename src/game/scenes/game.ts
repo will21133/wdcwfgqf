@@ -15,6 +15,8 @@ import { planWaves, Wave } from '../world/director';
 import { RNG } from '../../engine/rng';
 import { damp } from '../../engine/math';
 import { Dummy } from '../entities/enemies/gearworks';
+import { BIOMES } from '../../art/biomes';
+import { findEnemy } from '../world/director';
 
 export interface RoomSpec { kind: RoomKind; seed: number; exits: number }
 
@@ -48,6 +50,7 @@ export class GameScene implements Scene {
       else if (p.type === 'wallgear') w.add(new WallGear(p.tx, p.ty, !!p.data?.big));
       else if (p.type === 'crate' || p.type === 'barrel') w.add(new Breakable(p.tx, p.ty, p.type));
     }
+    BIOMES[th.id]?.decorate?.(w, map, new RNG(this.spec.seed + 99));
     // player at entry
     const ex = map.entry ? (map.entry.tx + 1) * TS : map.pw / 2;
     const ey = map.entry ? map.entry.ty * TS - 10 : map.ph / 2;
@@ -59,7 +62,12 @@ export class GameScene implements Scene {
       const d = new Door(e, { icon: null, label: '', color: 'B4' }, (door) => this.leave(door));
       this.doors.push(w.add(d));
     }
-    if (this.spec.kind === 'combat' || this.spec.kind === 'elite') {
+    const dbgSpawn = G.debug.get('spawn');
+    if (dbgSpawn) {
+      // debug: ?spawn=id[,id...]  spawns those enemies as a single wave
+      const defs = dbgSpawn.split(',').map((id) => findEnemy(id)).filter((d) => !!d) as any[];
+      this.waves = [{ defs }];
+    } else if (this.spec.kind === 'combat' || this.spec.kind === 'elite') {
       this.waves = planWaves(this.rng, run.floor, run.roomIndex, this.spec.kind === 'elite');
     } else if (this.spec.kind === 'tutorial') {
       const sp = map.spawnable[Math.floor(map.spawnable.length / 2)];

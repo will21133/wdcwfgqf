@@ -7,6 +7,8 @@ import { bayer, fbm2, hash2, clamp } from '../../engine/math';
 import { rgb } from '../../art/blit';
 import { Theme } from '../../art/themes';
 import { RoomMap, T, TS } from './room';
+import type { PaintCtx } from '../../art/biomes/types';
+import { BIOMES } from '../../art/biomes';
 
 export interface WallStrip { ty: number; canvas: HTMLCanvasElement; y: number; sortY: number }
 export interface RoomVisual { floor: HTMLCanvasElement; walls: WallStrip[]; heights: Uint8Array }
@@ -16,7 +18,7 @@ export const WALL_H = 32;
 const LOW_H = 8;
 const STRIP_TOP = WALL_H; // strip starts this far above the cell top
 
-const isOpen = (t: T) => t === T.FLOOR || t === T.PIT || t === T.BLOCK;
+export const isOpen = (t: T) => t === T.FLOOR || t === T.PIT || t === T.BLOCK;
 
 /** visual height of a wall cell (32 tall, 8 for cut-away south boundary walls) */
 export function wallHeight(m: RoomMap, tx: number, ty: number): number {
@@ -30,13 +32,25 @@ export function wallHeight(m: RoomMap, tx: number, ty: number): number {
 
 export function renderRoom(m: RoomMap, th: Theme, seed: number): RoomVisual {
   const rng = new RNG(seed);
+  const biome = BIOMES[th.id] ?? {};
   const pw = m.pw, ph = m.ph;
   const heights = new Uint8Array(m.w * m.h);
   for (let ty = 0; ty < m.h; ty++) for (let tx = 0; tx < m.w; tx++) heights[ty * m.w + tx] = wallHeight(m, tx, ty);
+  // distance to wall above (ambient occlusion) per pixel column
+  const aoTop = new Int16Array(pw * ph).fill(99);
+  for (let x = 0; x < pw; x++) {
+    let d = 99;
+    for (let y = 0; y < ph; y++) {
+      if (wallish(m, x >> 4, y >> 4)) d = 0; else d++;
+      aoTop[y * pw + x] = d;
+    }
+  }
+  const c: PaintCtx = { m, th, rng, seed, aoTop, wallish: (x, y) => wallish(m, x, y) };
   const floor = new PixelBuf(pw, ph);
-  paintFloor(floor, m, th, rng, seed);
-  paintPits(floor, m, th, seed);
+  (biome.paintFloor ?? defaultFloor)(floor, c);
+  (biome.paintPits ?? defaultPits)(floor, c);
   paintFloorProps(floor, m, th, rng);
+  biome.paintDressing?.(floor, c);
   const walls: WallStrip[] = [];
   for (let ty = 0; ty < m.h; ty++) {
     const strip = new PixelBuf(pw, STRIP_TOP + TS);
@@ -48,11 +62,10 @@ export function renderRoom(m: RoomMap, th: Theme, seed: number): RoomVisual {
       if (!wallVisible(m, tx, ty)) continue;
       any = true;
       const H = heights[ty * m.w + tx];
-      // cap: 16x16 drawn H pixels above the footprint
-      paintCap(strip, m, th, tx, ty, STRIP_TOP - H, seed, H);
+      (biome.paintCap ?? defaultCap)(strip, c, tx, ty, STRIP_TOP - H);
       const s = m.get(tx, ty + 1);
       const faceVisible = isOpen(s) || s === T.VOID;
-      if (faceVisible) paintFace(strip, m, th, tx, ty, STRIP_TOP + TS - H, H, seed, s === T.VOID);
+      if (faceVisible) (biome.paintFace ?? defaultFace)(strip, c, tx, ty, STRIP_TOP + TS - H, H, s === T.VOID);
     }
     if (any) walls.push({ ty, canvas: strip.toCanvas(), y: ty * TS - STRIP_TOP, sortY: (ty + 1) * TS });
   }
@@ -64,19 +77,20 @@ function wallVisible(m: RoomMap, tx: number, ty: number) {
   return false;
 }
 
-const wallish = (m: RoomMap, tx: number, ty: number) => {
+export const wallish = (m: RoomMap, tx: number, ty: number) => {
   const t = m.get(tx, ty);
   return t === T.WALL || t === T.VOID || t === T.DOOR;
 };
 
-function darken(c: RGB, k: number): RGB {
+export function darken(c: RGB, k: number): RGB {
   const tr = 11, tg = 10, tb = 20;
   return [Math.round(c[0] + (tr - c[0]) * k), Math.round(c[1] + (tg - c[1]) * k), Math.round(c[2] + (tb - c[2]) * k)];
 }
 
 // ─────────────────────────── floor ───────────────────────────
 
-function paintFloor(pb: PixelBuf, m: RoomMap, th: Theme, rng: RNG, seed: number) {
+export function defaultFloor(pb: PixelBuf, c: PaintCtx) {
+  const { m, th, rng, seed, aoTop } = c;
   const slab = th.slab.map(rgb), grime = th.grime.map(rgb), plate = th.plate.map(rgb), seam = rgb(th.seam);
   const pw = m.pw, ph = m.ph;
   // slab layout per tile row (brick-offset flagstones)
@@ -106,15 +120,6 @@ function paintFloor(pb: PixelBuf, m: RoomMap, th: Theme, rng: RNG, seed: number)
   const ringCx = Math.floor(pw / 2), ringCy = Math.floor((m.ph) / 2) + 8;
   const ringR = m.w > 28 ? 40 : 0;
 
-  // distance to wall above (ambient occlusion) per column
-  const aoTop = new Int16Array(pw * ph).fill(99);
-  for (let x = 0; x < pw; x++) {
-    let d = 99;
-    for (let y = 0; y < ph; y++) {
-      if (wallish(m, x >> 4, y >> 4)) d = 0; else d++;
-      aoTop[y * pw + x] = d;
-    }
-  }
   // cracks (short random walks)
   const crack = new Uint8Array(pw * ph);
   const nCracks = Math.floor((m.w * m.h) / 10);
@@ -195,7 +200,8 @@ function paintFloor(pb: PixelBuf, m: RoomMap, th: Theme, rng: RNG, seed: number)
 
 // ─────────────────────────── pits ───────────────────────────
 
-function paintPits(pb: PixelBuf, m: RoomMap, th: Theme, seed: number) {
+export function defaultPits(pb: PixelBuf, c: PaintCtx) {
+  const { m, th, seed } = c;
   const water = th.pitWater.map(rgb), face = th.pitFace.map(rgb);
   const rim = rgb(th.slab[th.slab.length - 1]);
   for (let ty = 0; ty < m.h; ty++)
@@ -275,7 +281,8 @@ function paintFloorProps(pb: PixelBuf, m: RoomMap, th: Theme, rng: RNG) {
 
 // ─────────────────────────── walls ───────────────────────────
 
-function paintCap(pb: PixelBuf, m: RoomMap, th: Theme, tx: number, ty: number, oy: number, seed: number, H: number) {
+export function defaultCap(pb: PixelBuf, cx: PaintCtx, tx: number, ty: number, oy: number) {
+  const { m, th, seed } = cx;
   const cap = th.cap.map(rgb), trim = rgb(th.capTrim), trimHi = rgb(th.wallLip[1]);
   const ox = tx * TS;
   const nN = wallish(m, tx, ty - 1), nS = wallish(m, tx, ty + 1), nW = wallish(m, tx - 1, ty), nE = wallish(m, tx + 1, ty);
@@ -305,10 +312,10 @@ function paintCap(pb: PixelBuf, m: RoomMap, th: Theme, tx: number, ty: number, o
       if (vE && px === 15) c = cap[0];
       pb.set(x, oy + py, c);
     }
-  void H;
 }
 
-function paintFace(pb: PixelBuf, m: RoomMap, th: Theme, tx: number, ty: number, oy: number, H: number, seed: number, exterior: boolean) {
+export function defaultFace(pb: PixelBuf, cx: PaintCtx, tx: number, ty: number, oy: number, H: number, exterior: boolean) {
+  const { m, th, seed } = cx;
   const brick = th.wallBrick.map(rgb), mortar = rgb(th.wallMortar), lip = th.wallLip.map(rgb);
   const ox = tx * TS;
   const feat = m.props.find((p) => p.tx === tx && p.ty === ty && (p.type === 'pipe' || p.type === 'window'));

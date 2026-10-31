@@ -1,34 +1,29 @@
 // Encounter director: builds wave plans from a point budget per floor/room.
 import type { RNG } from '../../engine/rng';
-import type { Enemy } from '../entities/enemy';
-import { Cogling, Sentry, Spitter, Mite, Brute } from '../entities/enemies/gearworks';
+import type { EnemyDef } from './enemyDef';
+import { ROSTER as F1 } from '../entities/enemies/gearworks';
+import { ROSTER as F2 } from '../entities/enemies/conservatory';
+import { ROSTER as F3 } from '../entities/enemies/archive';
+import { ROSTER as F4 } from '../entities/enemies/clockface';
+export type { EnemyDef };
 
-export interface EnemyDef {
-  id: string;
-  cost: number;
-  /** spawn a group of this many */
-  group?: number;
-  make: (x: number, y: number) => Enemy;
-  elite?: boolean;
-  /** minimum room index on the floor where it may appear */
-  minRoom?: number;
-  weight?: number;
+/** per floor; an empty roster falls back to the previous floor's (during development) */
+export const ROSTERS: EnemyDef[][] = [F1, F2, F3, F4];
+
+export function rosterFor(floor: number): EnemyDef[] {
+  for (let f = Math.min(floor, ROSTERS.length - 1); f >= 0; f--) if (ROSTERS[f].length) return ROSTERS[f];
+  return ROSTERS[0];
 }
 
-export const ROSTERS: EnemyDef[][] = [
-  [
-    { id: 'cogling', cost: 2, make: (x, y) => new Cogling(x, y), weight: 3 },
-    { id: 'mite', cost: 1, group: 3, make: (x, y) => new Mite(x, y), weight: 2 },
-    { id: 'sentry', cost: 3, make: (x, y) => new Sentry(x, y), weight: 3, minRoom: 1 },
-    { id: 'spitter', cost: 3, make: (x, y) => new Spitter(x, y), weight: 2.5, minRoom: 1 },
-    { id: 'brute', cost: 14, make: (x, y) => new Brute(x, y), elite: true },
-  ],
-];
+export function findEnemy(id: string): EnemyDef | undefined {
+  for (const r of ROSTERS) for (const d of r) if (d.id === id) return d;
+  return undefined;
+}
 
 export interface Wave { defs: EnemyDef[] }
 
 export function planWaves(rng: RNG, floor: number, roomIdx: number, elite: boolean, overwind = 0): Wave[] {
-  const roster = ROSTERS[Math.min(floor, ROSTERS.length - 1)];
+  const roster = rosterFor(floor);
   const normal = roster.filter((d) => !d.elite && (d.minRoom ?? 0) <= roomIdx);
   const elites = roster.filter((d) => d.elite);
   const budget = 7 + floor * 5 + roomIdx * 1.6 + overwind * 2;

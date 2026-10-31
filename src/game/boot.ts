@@ -55,5 +55,8 @@ export async function boot() {
   // default: straight into a run (title / hub come later in the boot flow)
   const seed = Number(G.debug.get('seed') ?? (Math.random() * 1e9) | 0);
   const kind = (G.debug.get('room') as any) ?? 'combat';
-  G.scenes.set(new GameScene(new Run(seed), { kind, seed, exits: 3 }));
+  const run = new Run(seed);
+  run.floor = Number(G.debug.get('floor') ?? 0);
+  if (G.debug.get('god')) run.mods.maxHp = run.hp = 9999;
+  G.scenes.set(new GameScene(run, { kind, seed, exits: 3 }));
 }

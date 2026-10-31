@@ -392,4 +392,11 @@ export class Dummy extends Enemy {
   }
 }
 
-export const GEARWORKS_ROSTER = { Cogling, Sentry, Spitter, Mite, Brute };
+import type { EnemyDef } from '../../world/enemyDef';
+export const ROSTER: EnemyDef[] = [
+  { id: 'cogling', cost: 2, make: (x, y) => new Cogling(x, y), weight: 3 },
+  { id: 'mite', cost: 1, group: 3, make: (x, y) => new Mite(x, y), weight: 2 },
+  { id: 'sentry', cost: 3, make: (x, y) => new Sentry(x, y), weight: 3, minRoom: 1 },
+  { id: 'spitter', cost: 3, make: (x, y) => new Spitter(x, y), weight: 2.5, minRoom: 1 },
+  { id: 'brute', cost: 14, make: (x, y) => new Brute(x, y), elite: true },
+];
