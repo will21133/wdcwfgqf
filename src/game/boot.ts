@@ -3,6 +3,9 @@ import { ArtPreview } from './scenes/artPreview';
 import { buildTick } from '../art/sprites/tick';
 import { RoomPreview } from './scenes/roomPreview';
 import { registerSfx } from '../audio/sfx';
+import { registerConservatorySfx } from '../audio/sfx_conservatory';
+import { registerArchiveSfx } from '../audio/sfx_archive';
+import { registerClockfaceSfx } from '../audio/sfx_clockface';
 import { Music } from '../engine/audio/music';
 import { INSTRUMENTS } from '../audio/instruments';
 import { SONGS } from '../audio/songs';
@@ -11,6 +14,9 @@ import { Run } from './run';
 
 function setupAudio() {
   registerSfx(G.audio);
+  registerConservatorySfx(G.audio);
+  registerArchiveSfx(G.audio);
+  registerClockfaceSfx(G.audio);
   G.music = new Music(G.audio, INSTRUMENTS);
   for (const [k, s] of Object.entries(SONGS)) G.music.define(k, s);
   const unlock = () => {

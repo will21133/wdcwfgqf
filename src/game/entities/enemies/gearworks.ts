@@ -394,9 +394,29 @@ export class Dummy extends Enemy {
 
 import type { EnemyDef } from '../../world/enemyDef';
 export const ROSTER: EnemyDef[] = [
-  { id: 'cogling', cost: 2, make: (x, y) => new Cogling(x, y), weight: 3 },
-  { id: 'mite', cost: 1, group: 3, make: (x, y) => new Mite(x, y), weight: 2 },
-  { id: 'sentry', cost: 3, make: (x, y) => new Sentry(x, y), weight: 3, minRoom: 1 },
-  { id: 'spitter', cost: 3, make: (x, y) => new Spitter(x, y), weight: 2.5, minRoom: 1 },
-  { id: 'brute', cost: 14, make: (x, y) => new Brute(x, y), elite: true },
+  {
+    id: 'cogling', cost: 2, make: (x, y) => new Cogling(x, y), weight: 3,
+    name: { zh: '齿轮仔', en: 'Cogling' },
+    desc: { zh: '一枚长了腿的齿轮，对一切会动的东西都很好奇。蓄力后会直线滚撞，撞墙会晕。', en: 'A gear that grew legs and curiosity. Winds up, then rolls in a straight line — and gets dizzy when it hits a wall.' },
+  },
+  {
+    id: 'mite', cost: 1, group: 3, make: (x, y) => new Mite(x, y), weight: 2,
+    name: { zh: '锈螨', en: 'Rust Mite' },
+    desc: { zh: '以铁锈为食的小甲虫，成群出没，会扑跳咬人。', en: 'Tiny beetles that feed on rust. They come in swarms and leap to bite.' },
+  },
+  {
+    id: 'sentry', cost: 3, make: (x, y) => new Sentry(x, y), weight: 3, minRoom: 1,
+    name: { zh: '锡兵哨卫', en: 'Tin Sentry' },
+    desc: { zh: '玩具兵模样的守卫，背后的发条早已锈死，却仍在执勤。长枪突刺前会后拉蓄力。', en: 'A toy-soldier guard whose key rusted long ago. It still stands its post. Pulls the spear back before each thrust.' },
+  },
+  {
+    id: 'spitter', cost: 3, make: (x, y) => new Spitter(x, y), weight: 2.5, minRoom: 1,
+    name: { zh: '螺栓炮台', en: 'Bolt Spitter' },
+    desc: { zh: '蟹形自动炮台，保持距离，炮口发光后连射三发螺栓。', en: 'A crab-legged turret that keeps its distance. The muzzle glows before a three-bolt burst.' },
+  },
+  {
+    id: 'brute', cost: 14, make: (x, y) => new Brute(x, y), elite: true,
+    name: { zh: '蒸汽蛮兵', en: 'Steam Brute' },
+    desc: { zh: '锅炉改造的重型劳工。双拳砸地前会高举，喷吐蒸汽时会缓慢转向。', en: 'A boiler turned heavy labourer. Raises both fists before a slam; turns slowly while venting steam.' },
+  },
 ];

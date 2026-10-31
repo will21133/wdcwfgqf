@@ -11,4 +11,7 @@ export interface EnemyDef {
   /** minimum room index on the floor where it may appear */
   minRoom?: number;
   weight?: number;
+  /** codex (ledger) entry */
+  name?: { zh: string; en: string };
+  desc?: { zh: string; en: string };
 }

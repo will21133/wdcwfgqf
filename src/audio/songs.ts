@@ -1,5 +1,6 @@
 // The score. Each song: base layer (exploration) + combat layer (adaptive).
 import type { SongDef } from '../engine/audio/music';
+import { EXTRA_SONGS } from './score';
 
 /** helper: build a 16-step bar string from "step:note" pairs */
 export function bar(map: Record<number, string>, len = 16): string {
@@ -28,6 +29,7 @@ const G_CHORDS = [['D4', 'F4', 'A4'], ['Bb3', 'D4', 'F4'], ['A3', 'C4', 'F4'], [
 const G_ROOTS = ['D2', 'Bb1', 'F2', 'C2', 'D2', 'G1', 'Bb1', 'A1'];
 
 export const SONGS: Record<string, SongDef> = {
+  ...EXTRA_SONGS,
   gearworks: {
     bpm: 92, len: 128,
     tracks: [
