@@ -7,7 +7,9 @@ import { tr, L, L10n } from '../i18n';
 import { REBINDABLE, DEFAULT_BINDINGS, keyLabel, Action } from '../../engine/input';
 import { settings, saveSettings } from '../settings';
 import { drawHint } from './prompts';
-import { drawPadGlyph, drawKeycap, keycapW, PadGlyph } from './widgets';
+import { drawPadGlyph, drawKeycap, keycapW, promptH, PadGlyph } from './widgets';
+import { Text } from './text';
+import { col } from '../../art/palette';
 
 const NAMES: Record<string, L10n> = {
   up: L('上', 'Up'), down: L('下', 'Down'), left: L('左', 'Left'), right: L('右', 'Right'),
@@ -61,7 +63,7 @@ export class ControlsPanel implements Overlay {
     if (inp.pressed('cancel') || inp.pressed('pause')) { inp.consume('pause'); sfx('uiBack'); return false; }
     const nav = inp.nav(dt);
     if (nav.y) { this.sel = (this.sel + nav.y + this.rows.length) % this.rows.length; sfx('uiMove'); }
-    if (inp.mouseAim) for (let i = 0; i < this.rows.length; i++) if (inp.mx > 70 && inp.mx < 330 && inp.my >= 70 + i * 18 && inp.my < 88 + i * 18 && this.sel !== i) { this.sel = i; sfx('uiMove'); }
+    if (inp.mouseAim) for (let i = 0; i < this.rows.length; i++) if (inp.mx > 70 && inp.mx < 330 && inp.my >= this.rowsTop - 2 + i * this.rh && inp.my < this.rowsTop - 2 + (i + 1) * this.rh && this.sel !== i) { this.sel = i; sfx('uiMove'); }
     if (inp.pressed('confirm') || (inp.pressed('attack') && inp.mouseAim)) {
       const r = this.rows[this.sel];
       if (r === 'back') { sfx('uiBack'); return false; }
@@ -75,42 +77,61 @@ export class ControlsPanel implements Overlay {
     return true;
   }
 
+  /** row grid from the last render (mouse hit-testing uses it) */
+  private rowsTop = 72;
+  private rh = 18;
+
   render(r: Renderer) {
     const ctx = r.ui2;
-    ctx.globalAlpha = 0.85; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
-    panel(ctx, 40, 22, 560, 316);
-    G.font.draw(ctx, tr(L('按键设置', 'Controls')), 320, 32, { align: 'center', color: 'B5' });
-    G.small.draw(ctx, tr(L('键盘 / 鼠标', 'Keyboard / Mouse')), 70, 53, { color: 'K8' });
-    G.small.draw(ctx, tr(L('Xbox 手柄', 'Xbox controller')), 380, 53, { color: 'K8' });
+    ctx.globalAlpha = 0.85; ctx.fillStyle = col('K0'); ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
+    // everything is spaced from the text's real size; with much larger text (125% setting) the panel
+    // grows to the screen edges, rows tighten, and the footnote is dropped if it no longer fits
+    const lb = Text.lineH('body'), ls = Text.lineH('small');
+    const big = Text.k > 1.25;
+    const pTop = big ? 8 : 22, pBot = big ? 352 : 338;
+    panel(ctx, 40, pTop, 560, pBot - pTop);
+    Text.draw(ctx, L('按键设置', 'Controls'), 320, pTop + 10, { align: 'center', color: 'B5' });
+    const headerY = Math.round(pTop + 10 + lb + (big ? 3 : 6));
+    Text.draw(ctx, L('键盘 / 鼠标', 'Keyboard / Mouse'), 70, headerY, { size: 'small', color: 'K8' });
+    Text.draw(ctx, L('Xbox 手柄', 'Xbox controller'), 380, headerY, { size: 'small', color: 'K8' });
+    const ph = promptH();
+    const hintY = pBot - 17 - (ph - 13);
+    const n = Math.max(this.rows.length, PAD_ROWS.length);
+    const rowsTop = Math.round(headerY + ls + (big ? 4 : 6));
+    const rh = Math.max(Math.ceil(Text.inkH('body')) + 3, Math.min(18 + Math.max(0, Math.round(lb - 15)), Math.floor((hintY - 8 - rowsTop) / n)));
+    this.rowsTop = rowsTop; this.rh = rh;
     this.rows.forEach((row, i) => {
-      const y = 72 + i * 18;
+      const y = rowsTop + i * rh;
+      const cy = y - 3 + (rh - 2) / 2;
       const sel = i === this.sel;
-      if (sel) { rect(ctx, 64, y - 3, 270, 16, 'K3'); rect(ctx, 64, y - 3, 2, 16, 'B5'); }
+      if (sel) { rect(ctx, 64, y - 3, 270, rh - 2, 'K3'); rect(ctx, 64, y - 3, 2, rh - 2, 'B5'); }
       if (row === 'reset' || row === 'back') {
-        G.font.draw(ctx, tr(row === 'reset' ? L('恢复默认', 'Reset to defaults') : L('返回', 'Back')), 74, y - 1, { color: sel ? 'K10' : 'K8' });
+        Text.draw(ctx, row === 'reset' ? L('恢复默认', 'Reset to defaults') : L('返回', 'Back'), 74, cy, { color: sel ? 'K10' : 'K8', valign: 'middle' });
         return;
       }
-      G.font.draw(ctx, tr(NAMES[row]), 74, y - 1, { color: sel ? 'K10' : 'K8' });
+      Text.draw(ctx, NAMES[row], 74, cy, { color: sel ? 'K10' : 'K8', valign: 'middle' });
       const b = G.input.bindings[row];
       if (sel && this.capture) {
-        G.small.draw(ctx, tr(L('请按下新按键…（ESC 取消）', 'Press a key... (ESC cancels)')), 330, y + 1, { align: 'right', color: Math.floor(this.t * 4) % 2 ? 'B5' : 'B3' });
+        Text.draw(ctx, L('请按下新按键…（ESC 取消）', 'Press a key... (ESC cancels)'), 330, cy, { size: 'small', align: 'right', color: Math.floor(this.t * 4) % 2 ? 'B5' : 'B3', valign: 'middle' });
       } else {
         let x = 330;
         for (let k = b.length - 1; k >= 0; k--) {
           const lab = keyLabel(b[k]);
           x -= keycapW(lab);
-          drawKeycap(ctx, lab, x, y - 1);
+          drawKeycap(ctx, lab, x, Math.round(cy - ph / 2));
           x -= 4;
         }
       }
     });
     // Xbox reference
     PAD_ROWS.forEach(([b, name], i) => {
-      const y = 72 + i * 18;
-      drawPadGlyph(ctx, b, 380 + Math.floor((19 - (b === 'LB' || b === 'RB' ? 19 : b === 'LT' || b === 'RT' ? 15 : 13)) / 2), y - 1);
-      G.font.draw(ctx, tr(name), 406, y - 2, { color: 'K8' });
+      const cy = rowsTop + i * rh - 3 + (rh - 2) / 2;
+      drawPadGlyph(ctx, b, 380 + Math.floor((19 - (b === 'LB' || b === 'RB' ? 19 : b === 'LT' || b === 'RT' ? 15 : 13)) / 2), Math.round(cy - 6.5));
+      Text.draw(ctx, name, 406, cy, { color: 'K8', valign: 'middle' });
     });
-    G.small.draw(ctx, tr(L('手柄可在任何时候直接使用，会自动切换按键提示。', 'Pick up a controller anytime — prompts switch automatically.')), 380, 285, { color: 'K8', wrap: 205 });
-    drawHint(ctx, 320, 321, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('重新绑定', 'Rebind'))], ['cancel', tr(L('返回', 'Back'))]]);
+    const note = L('手柄可在任何时候直接使用，会自动切换按键提示。', 'Pick up a controller anytime — prompts switch automatically.');
+    const noteY = rowsTop + PAD_ROWS.length * rh - 3;
+    if (noteY + Text.measureWrapped(note, 'small', 205).h <= hintY - 4) Text.draw(ctx, note, 380, noteY, { size: 'small', color: 'K8', maxW: 205 });
+    drawHint(ctx, 320, hintY, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('重新绑定', 'Rebind'))], ['cancel', tr(L('返回', 'Back'))]]);
   }
 }

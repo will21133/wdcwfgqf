@@ -1,6 +1,7 @@
 // Global notice layer: small toasts for achievements, secrets, chimes and unlocks.
 // Drawn above every scene (and scene transitions) by main.ts; never blocks input.
-// Top-right corner, under the currency counters; at most three on screen, the rest wait.
+// Top-right corner, under the currency counters (y 36 down, clear of the HUD's brass / shard rows);
+// at most three on screen, the rest wait. Stacked toasts share one width so their edges line up.
 import type { Renderer } from '../../engine/gfx/renderer';
 import { G } from '../G';
 import { L, L10n, tr } from '../i18n';
@@ -20,9 +21,9 @@ export interface NoticeSpec {
   sub?: L10n;
 }
 
-interface Live extends NoticeSpec { t: number; slotY: number }
+interface Live extends NoticeSpec { t: number; slotY: number; sz?: { w: number; h: number }; szKey?: string }
 
-const DUR = 4.2, IN = 0.28, OUT = 0.3, MAX_LIVE = 3;
+const DUR = 4.2, IN = 0.28, OUT = 0.3, MAX_LIVE = 3, TOP = 36;
 
 const COLOR: Record<NoticeKind, ColorKey> = { achievement: 'B5', secret: 'V4', chime: 'B6', unlock: 'G4' };
 const LABEL: Record<NoticeKind, L10n> = {
@@ -91,11 +92,16 @@ const SOUND: Record<NoticeKind, string> = { achievement: 'notice', secret: 'secr
 const waiting: NoticeSpec[] = [];
 const live: Live[] = [];
 
-function size(n: NoticeSpec) {
+/** a toast's own size, measured once per text scale / language */
+function size(n: Live) {
+  const key = `${Text.k}|${tr(LABEL.chime)}`;
+  if (n.sz && n.szKey === key) return n.sz;
   const label = n.label ?? LABEL[n.kind];
   const w = Math.max(Text.measure(label, 'small').w, Text.measure(n.name, 'body').w, n.sub ? Text.measure(n.sub, 'small').w : 0);
   const h = 6 + Text.lineH('small') + Text.lineH('body') + (n.sub ? Text.lineH('small') : 0) + 2;
-  return { w: Math.round(clamp(w + 38, 150, 260)), h: Math.round(h) };
+  n.sz = { w: Math.round(clamp(w + 38, 150, 260)), h: Math.round(h) };
+  n.szKey = key;
+  return n.sz;
 }
 
 export const Notices = {
@@ -113,7 +119,7 @@ export const Notices = {
       G.audio.play(SOUND[n.kind]);
     }
     // stack top-down, sliding into freed slots
-    let y = 26;
+    let y = TOP;
     for (const n of live) {
       const h = size(n).h;
       n.slotY = n.slotY < 0 ? y : n.slotY + (y - n.slotY) * Math.min(1, dt * 10);
@@ -123,8 +129,11 @@ export const Notices = {
   render(r: Renderer): void {
     if (!live.length) return;
     const ctx = r.ui2;
+    // one width for the whole stack, so the left edges line up
+    let w = 0;
+    for (const n of live) w = Math.max(w, size(n).w);
     for (const n of live) {
-      const { w, h } = size(n);
+      const { h } = size(n);
       const kIn = ease.outCubic(clamp(n.t / IN, 0, 1));
       const kOut = n.t > DUR - OUT ? ease.inCubic(clamp((n.t - (DUR - OUT)) / OUT, 0, 1)) : 0;
       const x = Math.round(640 - 8 - w + (1 - kIn) * (w + 12) + kOut * (w + 12));

@@ -6,6 +6,8 @@ import { tr, L, L10n } from '../i18n';
 import { col } from '../../art/palette';
 import { ease, clamp, TAU } from '../../engine/math';
 import { drawHint } from '../ui/prompts';
+import { promptW, promptH } from '../ui/widgets';
+import { Text } from '../ui/text';
 import { drawScaled } from '../ui/overlay';
 import { buildInesPortrait, buildTickPortrait } from '../../art/sprites/hub';
 import { tickFrames } from '../entities/player';
@@ -123,10 +125,16 @@ export class CutsceneScene implements Scene {
     const ctx = r.ui2;
     const text = tr(s.text);
     const shown = text.slice(0, Math.floor(this.t * 30));
-    ctx.globalAlpha = 0.6; ctx.fillStyle = col('K0'); ctx.fillRect(0, 290, 640, 70); ctx.globalAlpha = 1;
-    G.font.draw(ctx, shown, 320, 300, { align: 'center', color: 'K10', wrap: 520, lineH: 16 });
-    if (this.t * 30 >= text.length) drawHint(ctx, 600, 341, [['confirm', '']]);
-    drawHint(ctx, 44, 341, [['cancel', tr(L('跳过', 'Skip'))]]);
+    // caption band sized from the whole line (so it does not grow while typing), prompts at the bottom
+    const hintY = 360 - 6 - promptH();
+    const textH = G.font.blockSize(text, 520, 16)[1];
+    const top = Math.min(290, Math.floor(hintY - 6 - textH - 8));
+    ctx.globalAlpha = 0.6; ctx.fillStyle = col('K0'); ctx.fillRect(0, top, 640, 360 - top); ctx.globalAlpha = 1;
+    G.font.draw(ctx, shown, 320, top + 10, { align: 'center', color: 'K10', wrap: 520, lineH: 16 });
+    if (this.t * 30 >= text.length) drawHint(ctx, 600, hintY, [['confirm', '']]);
+    // left-aligned at x 16 (drawHint centres its row)
+    const skip = tr(L('跳过', 'Skip'));
+    drawHint(ctx, 16 + (promptW('cancel') + 4 + Text.measure(skip, 'body').w) / 2, hintY, [['cancel', skip]]);
   }
 }
 

@@ -84,9 +84,30 @@ export function coinIcon(ctx: Ctx, x: number, y: number) {
   rect(ctx, x + 3, y + 2, 1, 3, 'B1');
 }
 
+/** time shard: a cut violet gem (crown facets, girdle, pointed pavilion) in a 7×8 box */
+const SHARD = [
+  '.kkkkk.',
+  'klwlmdk',
+  'kllmmdk',
+  'kdddddk',
+  '.kmmdk.',
+  '..kmdk.',
+  '..kdk..',
+  '...k...',
+];
+const SHARD_C: Record<string, string> = { k: 'K0', l: 'V4', w: 'K10', m: 'V3', d: 'V2' };
 export function shardIcon(ctx: Ctx, x: number, y: number) {
-  rect(ctx, x + 2, y, 3, 1, 'K0'); rect(ctx, x + 1, y + 1, 5, 6, 'K0'); rect(ctx, x + 2, y + 7, 3, 1, 'K0');
-  rect(ctx, x + 2, y + 1, 3, 6, 'V2'); rect(ctx, x + 3, y + 1, 1, 6, 'V4'); rect(ctx, x + 2, y + 2, 1, 2, 'V3');
+  for (let j = 0; j < SHARD.length; j++) {
+    const row = SHARD[j];
+    for (let i = 0; i < row.length; i++) {
+      const c = SHARD_C[row[i]];
+      if (!c) continue;
+      let n = 1;
+      while (i + n < row.length && row[i + n] === row[i]) n++;
+      rect(ctx, x + i, y + j, n, 1, c);
+      i += n - 1;
+    }
+  }
 }
 
 /** keycap prompt like  [Q]  */

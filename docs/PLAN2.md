@@ -20,7 +20,7 @@
 2. **`npm run typecheck` 必须通过**；合并前跑一次 `node tools/qarun.cjs "seed=21&bot=1&speed=8&god=1" 120 tools/out/qa_<pkg>`，0 个运行时错误。
 3. **字符串**不再写进 `src/game/i18n.ts`：每个包在自己的 `src/game/strings/<pkg>.ts` 里调用 `registerStrings('<pkg>', {...})`（§1.2）。所有面向玩家的文字必须是 `{zh, en}`。
 4. **调试路由**不再改 `src/game/boot.ts`：在自己的文件里 `registerDebugRoute(...)`（§1.2），并在包的入口文件里 import。
-5. **音效**放在自己的 `src/audio/sfx_<pkg>.ts`，导出 `register<Pkg>Sfx(a)`；基础包 F1 在 `src/main.ts` 预留了全部 7 个注册调用（文件先以空函数存在）。
+5. **音效**放在自己的 `src/audio/sfx_<pkg>.ts`，导出 `register<Pkg>Sfx(a)`；基础包 F1 在 `src/game/boot.ts` 的 `setupAudio()`（与 1.0 的音效注册在一起）预留了全部 7 个注册调用（文件先以空函数存在）。
 6. **颜色只用调色板**（`src/art/palette.ts`）。C 青 = 残响/回溯/时砂；M 品红 = 敌方子弹；V 紫 = 定格伤害。玩家颜色 R3 / B5 / G3 / U4（GDD2 §5.2）。
 7. **文字规则**（GDD2 §12.1）：中文不得用 `tiny`；关键信息用 `body`（FP12）。开发模式下 `Text.draw` 遇到中文 + `tiny` 会在控制台打印 `[text] CJK in tiny`，验收时必须为 0。
 8. **确定性**：游戏逻辑里禁止新增 `Math.random` 和 `setTimeout`/`setInterval`；用 `world.rng` / `run.rng` 和 `world.after()`。
@@ -53,14 +53,25 @@ export const Text: {
   measure(s: string | L10n, size?: TextSize): { w: number; h: number };   // 逻辑像素
   wrap(s: string | L10n, size: TextSize, maxW: number): string[];
   lineH(size: TextSize): number;
+  // F1 修复追加：
+  measureWrapped(s: string | L10n, size: TextSize, maxW?: number): { w: number; h: number };
+  inkMid(size?: TextSize): number;   // 从 top y 到字身（汉字 / 大写字母）中心的逻辑距离
+  inkH(size?: TextSize): number;     // 字身高度（逻辑像素），给框定高用
+  readonly k: number;                // 本帧文字相对布局的大小（见下）
 };
+// TextOpts 追加 valign?: 'top' | 'middle' —— 'middle' 时 y 是字身中心：固定高度的行、键帽、芯片、横幅一律用它。
+// 文字倍率：m = round(s)；k = m/s 在 960×540 以上的窗口为 0.8–1.33（更小的窗口 0.67–1），
+// 文字大小 125% 再升一级、最多 1.5。所以**任何装文字的框都必须从 lineH / measure /
+// measureWrapped / inkH 推出尺寸**，不要写死 15/13 之类的像素；widgets 另有 promptH()（按键图标高 13，
+// 125% 时 15）和 tagChipH()。Text.measure 返回 UI 层宽度，不适用于 1× 离屏画布烘焙的文字。
 
 // src/engine/gfx/renderer.ts（新增成员）
 r.uiScale: number;                          // 设备像素 / 逻辑像素
 r.snap(v: number): number;                  // 对齐设备像素网格
 r.worldToUi(x: number, y: number): { x: number; y: number };
-r.label(l: WorldLabel): void;               // 每帧入队，在 UI 层画（不受后处理影响）
-r.worldUi(fn: (ctx: CanvasRenderingContext2D, toUi: (x: number, y: number) => { x: number; y: number }) => void): void;
+r.label(l: WorldLabel): void;               // 每帧入队，在 UI 层画（不受后处理影响）；只能在渲染代码里调用
+r.worldUi(fn: (ctx: CanvasRenderingContext2D, toUi: (x: number, y: number) => { x: number; y: number }) => void): void;   // 同上
+// WorldLabel.alpha 会被抬到 minAlpha（默认 0.7，路牌永远可读）；要完全淡出的标签传 minAlpha: 0
 interface WorldLabel { x: number; y: number; text: string | L10n; size?: TextSize; color?: ColorKey;
   plate?: boolean; alpha?: number; minAlpha?: number /* 默认 0.7 */; player?: number /* 槽位 */ }
 
@@ -351,7 +362,7 @@ Bullet.reversible: boolean;         // 白芯；P1 实现翻转
 ### 1.11 存档 v2（F1 定义结构与迁移；P6 拥有 save.ts）
 
 `localStorage['secondhand.profile.v2']`，`version: 2`。新增字段：`achievements: string[]`、`secrets: string[]`、`flags: Record<string,number>`、`unlocks: string[]`、`chimes: string[]`、`cosmetics: {owned: string[]; equipped: Record<string,string>}`、`hints: string[]`、`stats: Record<string,number>`、`mastery: Record<string,{xp:number; lv:number}>`、`affinity: Record<Patron,number>`、`rescued: Patron[]`、`contracts: Record<string,number>`、`clockNodes: string[]`（主发条）、`lastSeen: number`、`deathTapes: {floor:number; frames:string /*压缩*/}[]`（最多 5 条）、`prologueDone: boolean`、`daily: Record<string,number>`。
-迁移：读取 v1 → 退还已花费碎片（按 1.0 成本表求和）→ 保留 `weapons`、计数、`seen`、`lore`、`ines` → `wins ≥ 1` 时解锁契约。
+迁移：读取 v1 → 退还已花费碎片（按 1.0 成本表求和，**包括武器节点**，GDD2 §10.3"退还所有已花费的碎片，保留已解锁武器"）→ 保留 `weapons`、计数、`seen`、`lore`、`ines` → `wins ≥ 1` 时解锁契约。v2 坏档另存为 `.v2.corrupt.<时间戳>` 后回落到 v1 迁移。
 
 ---
 
@@ -569,7 +580,7 @@ Bullet.reversible: boolean;         // 白芯；P1 实现翻转
 | `src/game/progression/{hands,mastery}.ts` `src/game/systems/rewindStyles.ts` `src/game/entities/scarf.ts` `src/game/weapons/{index,hook,twinhands,tuningfork}.ts` `src/game/cosmetics.ts` `src/game/ui/{armory,handStand}.ts` | P5 |
 | `src/game/scenes/{hub,summary}.ts` `src/game/ui/{metaPanels,mainspring,departure,contracts,ledger,shrine}.ts` `src/game/{save,flow,story,modes}.ts` `src/game/progression/{patrons,income,contracts}.ts` `src/game/rooms/rescue.ts` | P6 |
 | `src/game/rooms/{tutorial,rehearsal}.ts` `src/game/scenes/{prologue,title,cutscene}.ts` `src/game/progression/{events,hintsData,secrets,achievements}.ts` `src/game/ui/{eventOverlay,dialogue,controls,menu,almanac}.ts` `src/game/settings.ts` | P7 |
-| `src/game/ui/{text,widgets,panels,hints,draw,prompts,joinPanel}.ts` | 冻结 |
+| `src/game/ui/{text,widgets,panels,hints,notices,draw,prompts,joinPanel}.ts` `src/game/scenes/{registryDebug,widgetPreview}.ts` | 冻结 |
 | `src/game/strings/<pkg>.ts` | 各自的包 |
 | 各包"新建"中列出的 `tools/scripts/*.json`，以及 `tools/out/<pkg>/` | 各自的包 |
 

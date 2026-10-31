@@ -1,13 +1,17 @@
 import { makeCanvas, Ctx } from './canvas';
 import { PostFX, PostParams, defaultPost, VIEW_W, VIEW_H, WORLD_W, WORLD_H } from './post';
 import { hexToRgb, col } from '../../art/palette';
-import { textMul, artMul, textScale } from './font';
+import { textMul, baseMul, textScale, Mat2D } from './font';
 
 /** text sizes of the game's Text API (src/game/ui/text.ts) */
 export type LabelSize = 'title' | 'body' | 'small' | 'tiny';
 /** a string, or a bilingual { zh, en } pair */
 export type LabelText = string | { zh: string; en: string };
-/** text anchored to a world position, drawn crisp on the UI layer (no bloom / CA / wobble / grain) */
+/**
+ * Text anchored to a world position, drawn crisp on the UI layer (no bloom / CA / wobble / grain).
+ * Centred on x; y is the top of the text. `alpha` is clamped UP to `minAlpha` (default 0.7, so
+ * signs stay readable, GDD2 §12.1): pass `minAlpha: 0` for a label that should fade out fully.
+ */
 export interface WorldLabel {
   x: number; y: number; text: LabelText; size?: LabelSize; color?: string;
   plate?: boolean; alpha?: number; minAlpha?: number /* default 0.7 */; player?: number /* slot */;
@@ -15,40 +19,82 @@ export interface WorldLabel {
 type UiFn = (ctx: CanvasRenderingContext2D, toUi: (x: number, y: number) => { x: number; y: number }) => void;
 
 /**
+ * Keep a JS mirror of the context's transform in ctx.__t (save / restore / setTransform / translate
+ * / scale / rotate / transform / resetTransform all update it), so code that needs the transform on
+ * every glyph or rect (font.ts ctxTransform, the snapping below) never allocates a DOMMatrix.
+ */
+function mirrorTransform(ctx: CanvasRenderingContext2D): { reset(): void } {
+  const t: Mat2D = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+  const stack: Mat2D[] = [];
+  (ctx as unknown as { __t: Mat2D }).__t = t;
+  const set = (a: number, b: number, c: number, d: number, e: number, f: number) => { t.a = a; t.b = b; t.c = c; t.d = d; t.e = e; t.f = f; };
+  const o = {
+    save: ctx.save.bind(ctx), restore: ctx.restore.bind(ctx), setTransform: ctx.setTransform.bind(ctx) as (...a: unknown[]) => void,
+    resetTransform: ctx.resetTransform.bind(ctx), translate: ctx.translate.bind(ctx), scale: ctx.scale.bind(ctx),
+    rotate: ctx.rotate.bind(ctx), transform: ctx.transform.bind(ctx),
+  };
+  ctx.save = () => { stack.push({ ...t }); o.save(); };
+  ctx.restore = () => { const p = stack.pop(); if (p) set(p.a, p.b, p.c, p.d, p.e, p.f); o.restore(); };
+  ctx.setTransform = ((a?: number | DOMMatrix2DInit, b?: number, c?: number, d?: number, e?: number, f?: number) => {
+    if (typeof a === 'number') { set(a, b!, c!, d!, e!, f!); o.setTransform(a, b, c, d, e, f); return; }
+    const m = a ?? {};
+    set(m.a ?? m.m11 ?? 1, m.b ?? m.m12 ?? 0, m.c ?? m.m21 ?? 0, m.d ?? m.m22 ?? 1, m.e ?? m.m41 ?? 0, m.f ?? m.m42 ?? 0);
+    o.setTransform(a);
+  }) as typeof ctx.setTransform;
+  ctx.resetTransform = () => { set(1, 0, 0, 1, 0, 0); o.resetTransform(); };
+  const mul = (a2: number, b2: number, c2: number, d2: number, e2: number, f2: number) =>
+    set(t.a * a2 + t.c * b2, t.b * a2 + t.d * b2, t.a * c2 + t.c * d2, t.b * c2 + t.d * d2, t.a * e2 + t.c * f2 + t.e, t.b * e2 + t.d * f2 + t.f);
+  ctx.translate = (x: number, y: number) => { mul(1, 0, 0, 1, x, y); o.translate(x, y); };
+  ctx.scale = (x: number, y: number) => { mul(x, 0, 0, y, 0, 0); o.scale(x, y); };
+  ctx.rotate = (r: number) => { const c = Math.cos(r), s = Math.sin(r); mul(c, s, -s, c, 0, 0); o.rotate(r); };
+  ctx.transform = (a: number, b: number, c: number, d: number, e: number, f: number) => { mul(a, b, c, d, e, f); o.transform(a, b, c, d, e, f); };
+  // a canvas resize resets the context: identity transform, empty state stack
+  return { reset() { stack.length = 0; set(1, 0, 0, 1, 0, 0); } };
+}
+
+/**
  * Make an axis-aligned scaled context draw on whole device pixels: fillRect edges and drawImage
  * destinations are rounded to the device grid, so panels and icons never get blurry seams.
+ * Needs mirrorTransform(ctx) first.
  */
 function snapToDeviceGrid(ctx: CanvasRenderingContext2D) {
   const fill = ctx.fillRect.bind(ctx);
   const draw = ctx.drawImage.bind(ctx) as (...a: unknown[]) => void;
-  const ID = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+  const t = (ctx as unknown as { __t: Mat2D }).__t;
+  // device-space calls go straight to the native setTransform (the mirror is restored after)
+  const nativeSet = CanvasRenderingContext2D.prototype.setTransform as (this: CanvasRenderingContext2D, ...a: number[]) => void;
+  const toDevice = () => nativeSet.call(ctx, 1, 0, 0, 1, 0, 0);
+  const back = () => nativeSet.call(ctx, t.a, t.b, t.c, t.d, t.e, t.f);
   ctx.fillRect = (x: number, y: number, w: number, h: number) => {
-    const t = ctx.getTransform();
     if (t.b !== 0 || t.c !== 0 || (t.a === 1 && t.d === 1)) return fill(x, y, w, h);
     let x0 = Math.round(t.e + t.a * x), x1 = Math.round(t.e + t.a * (x + w));
     let y0 = Math.round(t.f + t.d * y), y1 = Math.round(t.f + t.d * (y + h));
-    if (x1 < x0) [x0, x1] = [x1, x0];
-    if (y1 < y0) [y0, y1] = [y1, y0];
+    if (x1 < x0) { const q = x0; x0 = x1; x1 = q; }
+    if (y1 < y0) { const q = y0; y0 = y1; y1 = q; }
     if (x1 === x0 && w !== 0) x1++;
     if (y1 === y0 && h !== 0) y1++;
-    ctx.setTransform(ID);
+    toDevice();
     fill(x0, y0, x1 - x0, y1 - y0);
-    ctx.setTransform(t);
+    back();
   };
-  ctx.drawImage = ((img: CanvasImageSource, ...a: number[]) => {
-    const t = ctx.getTransform();
-    if (t.b !== 0 || t.c !== 0 || t.a <= 0 || t.d <= 0 || (t.a === 1 && t.d === 1)) return draw(img, ...a);
+  ctx.drawImage = ((img: CanvasImageSource, a0: number, a1: number, a2?: number, a3?: number, a4?: number, a5?: number, a6?: number, a7?: number) => {
+    const n = a4 !== undefined ? 8 : a2 !== undefined ? 4 : 2;
+    if (t.b !== 0 || t.c !== 0 || t.a <= 0 || t.d <= 0 || (t.a === 1 && t.d === 1)) {
+      if (n === 2) return draw(img, a0, a1);
+      if (n === 4) return draw(img, a0, a1, a2, a3);
+      return draw(img, a0, a1, a2, a3, a4, a5, a6, a7);
+    }
     const iw = (img as HTMLCanvasElement).width, ih = (img as HTMLCanvasElement).height;
     let sx = 0, sy = 0, sw = iw, sh = ih, dx: number, dy: number, dw: number, dh: number;
-    if (a.length === 2) { [dx, dy] = a; dw = iw; dh = ih; }
-    else if (a.length === 4) { [dx, dy, dw, dh] = a; }
-    else { [sx, sy, sw, sh, dx, dy, dw, dh] = a; }
+    if (n === 2) { dx = a0; dy = a1; dw = iw; dh = ih; }
+    else if (n === 4) { dx = a0; dy = a1; dw = a2!; dh = a3!; }
+    else { sx = a0; sy = a1; sw = a2!; sh = a3!; dx = a4!; dy = a5!; dw = a6!; dh = a7!; }
     const x0 = Math.round(t.e + t.a * dx), x1 = Math.round(t.e + t.a * (dx + dw));
     const y0 = Math.round(t.f + t.d * dy), y1 = Math.round(t.f + t.d * (dy + dh));
     if (x1 <= x0 || y1 <= y0) return;
-    ctx.setTransform(ID);
+    toDevice();
     draw(img, sx, sy, sw, sh, x0, y0, x1 - x0, y1 - y0);
-    ctx.setTransform(t);
+    back();
   }) as typeof ctx.drawImage;
 }
 
@@ -81,6 +127,10 @@ export class Renderer {
   static labelPainter: ((ctx: CanvasRenderingContext2D, l: WorldLabel, x: number, y: number, alpha: number) => void) | null = null;
   private worldUiQueue: (WorldLabel | UiFn)[] = [];
   private uiSaved = false;
+  private uiMirror: { reset(): void };
+  /** between begin() and end(): world labels may be queued */
+  private inFrame = false;
+  private warnedLabel = false;
   ambient = '#3a3a52';
   private lightSprites = new Map<string, HTMLCanvasElement>();
   private fallbackCtx: Ctx | null = null;
@@ -95,6 +145,7 @@ export class Renderer {
     Object.assign(this.ui.style, { position: 'fixed', left: '0', top: '0', pointerEvents: 'none', imageRendering: 'pixelated', zIndex: '1' });
     screen.insertAdjacentElement('afterend', this.ui);
     this.ui2 = this.ui.getContext('2d')!;
+    this.uiMirror = mirrorTransform(this.ui2);
     snapToDeviceGrid(this.ui2);
     try {
       this.post = new PostFX(screen);
@@ -117,6 +168,7 @@ export class Renderer {
       this.ui.width = W;
       this.ui.height = H;
       this.uiSaved = false; // resizing resets the context state stack
+      this.uiMirror.reset();
     }
     this.ui.style.width = window.innerWidth + 'px';
     this.ui.style.height = window.innerHeight + 'px';
@@ -133,11 +185,21 @@ export class Renderer {
   /** world position → logical UI position (follows camera and shake, ignores post wobble) */
   worldToUi(x: number, y: number): { x: number; y: number } { return { x: x - this.camX, y: y - this.camY }; }
 
-  /** queue a world-anchored label for this frame; drawn on the UI layer below the HUD */
-  label(l: WorldLabel) { this.worldUiQueue.push(l); }
+  /**
+   * Queue a world-anchored label for this frame; drawn on the UI layer below the HUD.
+   * Call it from render code (between the scene's r.begin() and the frame's end): the queue is
+   * per frame and begin() empties it, so labels queued from update() would never show.
+   */
+  label(l: WorldLabel) { this.checkFrame(); this.worldUiQueue.push(l); }
 
-  /** queue free-form world-anchored UI drawing for this frame (same layer as labels) */
-  worldUi(fn: UiFn) { this.worldUiQueue.push(fn); }
+  /** queue free-form world-anchored UI drawing for this frame (same layer as labels; render code only) */
+  worldUi(fn: UiFn) { this.checkFrame(); this.worldUiQueue.push(fn); }
+
+  private checkFrame() {
+    if (this.inFrame || this.warnedLabel) return;
+    this.warnedLabel = true;
+    console.warn('[ui] r.label() / r.worldUi() called outside render: world labels are per frame, queue them from render code');
+  }
 
   /** draw queued world labels now (scenes call this right after the world, before the HUD) */
   flushWorldUi() {
@@ -200,7 +262,7 @@ export class Renderer {
     const L = this.viewLayout();
     const u = this.ui2;
     this.uiScale = L.s; this.uiX = L.x; this.uiY = L.y;
-    textScale.s = L.s; textScale.m = textMul(L.s); textScale.k = textScale.m / L.s; textScale.r = textScale.m / artMul(L.s);
+    textScale.s = L.s; textScale.m = textMul(L.s); textScale.k = textScale.m / L.s; textScale.r = textScale.m / baseMul(L.s);
     if (this.uiSaved) u.restore();
     u.save();
     this.uiSaved = true;
@@ -214,6 +276,7 @@ export class Renderer {
     u.imageSmoothingEnabled = false;
     u.setTransform(L.s, 0, 0, L.s, L.x, L.y);
     this.worldUiQueue.length = 0;
+    this.inFrame = true;
   }
 
   /** world-space visible test */
@@ -267,6 +330,7 @@ export class Renderer {
   end() {
     // labels queued by scenes that never flushed (previews) still show, on top
     this.flushWorldUi();
+    this.inFrame = false;
     if (this.post) {
       this.post.render({ world: this.world, light: this.light, unlit: this.unlit, glow: this.glow }, this.params);
     } else if (this.fallbackCtx) {

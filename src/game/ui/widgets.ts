@@ -7,7 +7,7 @@ import { tr, L, L10n } from '../i18n';
 import { keyLabel, Action } from '../../engine/input';
 import { rect, panel } from './draw';
 import { Text, TextSize, ColorKey } from './text';
-import { artMul } from '../../engine/gfx/font';
+import { artMul, ctxTransform } from '../../engine/gfx/font';
 import { term } from '../strings';
 import { Terms } from '../meta/registry';
 
@@ -26,8 +26,14 @@ export function drawBits(ctx: CanvasRenderingContext2D, rows: readonly string[],
   }
 }
 
-/** all prompt icons are this tall (keycaps, pad buttons, mouse) */
+/** prompt icons (keycaps, pad buttons, mouse) are this tall at 100% text size */
 export const PROMPT_H = 13;
+/**
+ * Height of prompt icons this frame: 13 px, or 15 px when the 125% text size makes key-cap labels
+ * taller than the cap face. Icons are drawn centred in this height; centre text beside a prompt at
+ * y + promptH() / 2 with Text valign 'middle'.
+ */
+export function promptH(): number { return Text.k > 1.3 ? 15 : PROMPT_H; }
 
 // 5×7 bold letters for the face buttons, 3×5 letters for bumpers / sticks
 const BIG: Record<string, string[]> = {
@@ -160,25 +166,27 @@ export function keycapW(label: string): number {
 
 export function drawKeycap(ctx: CanvasRenderingContext2D, label: string, x: number, y: number): number {
   x = Math.round(x); y = Math.round(y);
-  if (label === 'LMB' || label === 'RMB' || label === 'MMB') return drawMouse(ctx, label, x, y);
+  const h = promptH();
+  if (label === 'LMB' || label === 'RMB' || label === 'MMB') return drawMouse(ctx, label, x, y + (h - PROMPT_H) / 2);
   const w = keycapW(label);
   rect(ctx, x + 1, y, w - 2, 1, 'K0');
-  rect(ctx, x, y + 1, 1, 11, 'K0');
-  rect(ctx, x + w - 1, y + 1, 1, 11, 'K0');
-  rect(ctx, x + 1, y + 12, w - 2, 1, 'K0');
+  rect(ctx, x, y + 1, 1, h - 2, 'K0');
+  rect(ctx, x + w - 1, y + 1, 1, h - 2, 'K0');
+  rect(ctx, x + 1, y + h - 1, w - 2, 1, 'K0');
   rect(ctx, x + 1, y + 1, w - 2, 1, 'K6');
-  rect(ctx, x + 1, y + 2, w - 2, 8, 'K4');
-  rect(ctx, x + 1, y + 10, w - 2, 2, 'K2');
+  rect(ctx, x + 1, y + 2, w - 2, h - 5, 'K4');
+  rect(ctx, x + 1, y + h - 3, w - 2, 2, 'K2');
   if (label === '↕↔') {
     // four arrows: ◂ ▴ ▾ ▸
-    const c = 'K10';
-    drawBits(ctx, ['..#', '.##', '###', '.##', '..#'], x + 3, y + 3, c);
-    drawBits(ctx, ['..#..', '.###.', '#####'], x + 8, y + 2, c);
-    drawBits(ctx, ['#####', '.###.', '..#..'], x + 14, y + 6, c);
-    drawBits(ctx, ['#..', '##.', '###', '##.', '#..'], x + 21, y + 3, c);
+    const c = 'K10', o = Math.round((h - PROMPT_H) / 2);
+    drawBits(ctx, ['..#', '.##', '###', '.##', '..#'], x + 3, y + 3 + o, c);
+    drawBits(ctx, ['..#..', '.###.', '#####'], x + 8, y + 2 + o, c);
+    drawBits(ctx, ['#####', '.###.', '..#..'], x + 14, y + 6 + o, c);
+    drawBits(ctx, ['#..', '##.', '###', '##.', '#..'], x + 21, y + 3 + o, c);
     return w;
   }
-  G.small.draw(ctx, label, x + w / 2, y - 2, { align: 'center', color: 'K10', shadow: false });
+  // label centred on the cap face (rows 1 .. h-4)
+  Text.draw(ctx, label, x + w / 2, y + (h - 2) / 2, { size: 'small', align: 'center', color: 'K10', shadow: false, valign: 'middle' });
   return w;
 }
 
@@ -216,7 +224,7 @@ export function promptW(a: Action | 'nav', who?: PromptDevice | null): number {
 
 /** Device-aware button icon, top-left at (x, y), 13 px tall. Returns its width. */
 export function drawPrompt(ctx: CanvasRenderingContext2D, action: Action | 'nav', x: number, y: number, who?: PromptDevice | null): number {
-  if (usesPad(who)) return drawPadGlyph(ctx, PAD_FOR[action] ?? 'A', x, y);
+  if (usesPad(who)) return drawPadGlyph(ctx, PAD_FOR[action] ?? 'A', x, y + Math.round((promptH() - PROMPT_H) / 2));
   return drawKeycap(ctx, keyFor(action), x, y);
 }
 
@@ -230,14 +238,16 @@ export function drawPromptLabel(ctx: CanvasRenderingContext2D, action: Action | 
   const total = iw + (iw && tw ? 4 : 0) + tw;
   const x0 = Math.round(cx - total / 2);
   y = Math.round(y);
+  // the plate fits the taller of the icon and the text's letters
+  const ph = Math.max(promptH(), Math.ceil(Text.inkH('body')) + 2);
   if (o.plate !== false) {
     const a = ctx.globalAlpha;
     ctx.globalAlpha = a * 0.85;
-    rect(ctx, x0 - 4, y - 2, total + 8, PROMPT_H + 4, 'K0');
+    rect(ctx, x0 - 4, y - 2, total + 8, ph + 4, 'K0');
     ctx.globalAlpha = a;
   }
-  if (action) drawPrompt(ctx, action, x0, y, o.who);
-  if (tw) Text.draw(ctx, text, x0 + iw + (iw ? 4 : 0), y - 2, { color: o.color ?? 'K10' });
+  if (action) drawPrompt(ctx, action, x0, y + Math.round((ph - promptH()) / 2), o.who);
+  if (tw) Text.draw(ctx, text, x0 + iw + (iw ? 4 : 0), y + ph / 2, { color: o.color ?? 'K10', valign: 'middle' });
   return total + 8;
 }
 
@@ -247,14 +257,16 @@ export function drawPromptLabel(ctx: CanvasRenderingContext2D, action: Action | 
  * plain drawImage (snapped to the exact layout scale).
  */
 export function drawPixelArt(ctx: CanvasRenderingContext2D, img: CanvasImageSource & { width: number; height: number }, cx: number, cy: number, k = 1) {
-  const t = ctx.getTransform();
+  const t = ctxTransform(ctx);
   const s = t.a;
   const m = (Math.abs(s - 1) < 1e-4 ? 1 : artMul(s)) * k;
   const W = img.width * m, H = img.height * m;
+  // read the (possibly live) transform before resetting it
+  const X = Math.round(t.e + s * cx - W / 2), Y = Math.round(t.f + t.d * cy - H / 2);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, Math.round(t.e + s * cx - W / 2), Math.round(t.f + t.d * cy - H / 2), W, H);
+  ctx.drawImage(img, X, Y, W, H);
   ctx.restore();
 }
 
@@ -328,18 +340,21 @@ export const TAG_ICON: Record<TagId, string[]> = {
   heal: ['..###..', '..###..', '#######', '#######', '#######', '..###..', '..###..'],
 };
 
-/** 13 px tall chip: icon + FP10 name in the tag colour on a dark plate. Returns its width. */
+/** height of a tag chip this frame: 13 px at 100%, taller when text is larger */
+export function tagChipH(): number { return Math.max(13, Math.round(Text.inkH('small')) + 3); }
+
+/** chip (tagChipH() tall): icon + FP10 name in the tag colour on a dark plate. Returns its width. */
 export function drawTagChip(ctx: CanvasRenderingContext2D, tag: TagId, x: number, y: number): number {
   x = Math.round(x); y = Math.round(y);
   const name = tr(TAG_NAME[tag]);
   const tw = Math.ceil(Text.measure(name, 'small').w);
-  const w = tw + 15;
+  const w = tw + 15, h = tagChipH();
   const c = TAG_COLOR[tag];
-  rect(ctx, x + 1, y, w - 2, 13, 'K0'); rect(ctx, x, y + 1, w, 11, 'K0');
-  rect(ctx, x + 1, y + 1, w - 2, 11, 'K1');
-  rect(ctx, x + 1, y + 1, 1, 11, c);
-  drawBits(ctx, TAG_ICON[tag], x + 4, y + 3, c);
-  Text.draw(ctx, name, x + 12, y - 2, { size: 'small', color: c, shadow: false });
+  rect(ctx, x + 1, y, w - 2, h, 'K0'); rect(ctx, x, y + 1, w, h - 2, 'K0');
+  rect(ctx, x + 1, y + 1, w - 2, h - 2, 'K1');
+  rect(ctx, x + 1, y + 1, 1, h - 2, c);
+  drawBits(ctx, TAG_ICON[tag], x + 4, y + Math.round((h - 7) / 2), c);
+  Text.draw(ctx, name, x + 12, y + h / 2, { size: 'small', color: c, shadow: false, valign: 'middle' });
   return w;
 }
 
@@ -366,14 +381,14 @@ export function drawStamp(ctx: CanvasRenderingContext2D, text: L10n, x: number, 
   const size: TextSize = big ? 'title' : 'body';
   const s = tr(text);
   const m = Text.measure(s, size);
-  const w = Math.ceil(m.w) + 10, h = Math.ceil(m.h) + 4;
+  const w = Math.ceil(m.w) + 10, h = Math.ceil(Text.inkH(size)) + 8;
   const prev = ctx.globalAlpha;
   ctx.globalAlpha = prev * Math.max(0, a);
   const x0 = Math.round(x - w / 2), y0 = Math.round(y - h / 2);
   rect(ctx, x0, y0, w, h, 'K0');
   rect(ctx, x0 + 1, y0 + 1, w - 2, h - 2, color);
   rect(ctx, x0 + 2, y0 + 2, w - 4, h - 4, 'K0');
-  Text.draw(ctx, s, x, y0 + 1 - (big ? 4 : 1), { size, color, align: 'center', shadow: false });
+  Text.draw(ctx, s, x, y0 + h / 2, { size, color, align: 'center', shadow: false, valign: 'middle' });
   ctx.globalAlpha = prev;
 }
 
@@ -402,10 +417,10 @@ export function drawTermLabel(ctx: CanvasRenderingContext2D, id: string, x: numb
     const total = nw + gap + pw;
     const x0 = o.align === 'center' ? x - total / 2 : o.align === 'right' ? x - total : x;
     const a = Text.draw(ctx, name, x0, y, { size, color });
-    const lh = Text.lineH(size), sh = Text.lineH('small');
-    // a short dash between name and meaning: "回忆 – 本局强化 · 死后消失"
-    rect(ctx, Math.round(x0 + nw + 4), Math.round(y + lh / 2), 6, 1, 'K6');
-    Text.draw(ctx, plain, x0 + nw + gap, y + Math.round((lh - sh) / 2) + 1, { size: 'small', color: 'K7' });
+    // both parts share the name's letter centre; a short dash between them: "回忆 – 本局强化 · 死后消失"
+    const c = y + Text.inkMid(size);
+    rect(ctx, Math.round(x0 + nw + 4), Math.round(c), 6, 1, 'K6');
+    Text.draw(ctx, plain, x0 + nw + gap, c, { size: 'small', color: 'K7', valign: 'middle' });
     return { w: total, h: a.h };
   }
   const a = Text.draw(ctx, name, x, y, { size, color, align: o.align });

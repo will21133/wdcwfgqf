@@ -37,6 +37,18 @@ export const settings: Settings = {
   textSize: 100, hudLabels: 'auto', rewindMode: 'both', flashLimit: false, termHints: 'auto',
 };
 
+/**
+ * Settings whose consumers are not built yet stay out of the menu until the owning package wires
+ * them up and flips the flag (an option that does nothing would only confuse players):
+ * rewindMode → F3 (tap-only rewind), hudLabels → P1 (HUD 2.0 labels).
+ */
+export const settingsLive = { rewindMode: false, hudLabels: false };
+
+/** the ?lang= debug override applies until the player picks a language in the menu */
+let urlLang = true;
+/** menu: switch language (also ends a ?lang= override for this session) */
+export function setLanguage(v: Lang) { settings.lang = v; urlLang = false; saveSettings(); }
+
 /** strongest full-screen flash allowed: 0 when flashes are off, a soft cap when limited */
 export function flashCap(): number { return !settings.flashes ? 0 : settings.flashLimit ? 0.12 : Infinity; }
 
@@ -75,8 +87,8 @@ export function applySettings() {
   G.audio.volumes.sfx = settings.sfx;
   G.audio.applyVolumes();
   // ?lang=zh|en (debug / screenshots) wins over the saved language for this session
-  const urlLang = G.debug.get('lang');
-  i18n.lang = urlLang === 'zh' || urlLang === 'en' ? urlLang : settings.lang;
+  const q = urlLang ? G.debug.get('lang') : null;
+  i18n.lang = q === 'zh' || q === 'en' ? q : settings.lang;
   rumbleSettings.enabled = settings.rumble;
   rumbleSettings.strength = settings.rumbleStrength;
   if (G.r) G.r.params.pixelPerfect = settings.pixelPerfect;

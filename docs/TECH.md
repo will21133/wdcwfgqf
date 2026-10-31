@@ -23,6 +23,11 @@
   逻辑坐标仍是 640x360（上下文带 setTransform(s)）；文字/数字以整数倍 m=textMul(s) 位块贴图并对齐设备像素，
   fillRect / drawImage 自动对齐设备网格。世界标签（交互提示、路牌、伤害数字、横幅、商店说明、NPC 气泡）
   通过 r.label() / r.worldUi() 在世界之后、HUD 之前画进这一层，所以回溯扭曲、色差、泛光都碰不到它们。
+  r.label / r.worldUi 只能在渲染代码里调用（每帧队列，begin() 清空；在 update 里调用会在开发模式警告一次）。
+  m = round(s)（GDD2 §12.1）。于是文字是布局尺寸的 k = m/s 倍：960×540 以上的窗口为 0.8–1.33
+  （1280×720 / 1920×1080 恰好 1.0），更小的窗口 0.67–1.0；文字大小 125% 再升一级，最多到 1.5。所有装文字的框都从 Text.lineH / measure / inkH 推出尺寸，
+  固定高度的行、键帽、芯片、横幅里的文字用 valign:'middle'（按字身居中），所以任何 k 下都不溢出、不偏。
+  UI 上下文的变换在 JS 里有镜像（ctx.__t），逐字/逐矩形取变换不分配对象。
 ```
 
 ## 模块
@@ -63,14 +68,15 @@ src/
 ### 存档
 `localStorage`（Electron 版写入用户目录）：局外进度、设置、图鉴、统计。局内不存档（肉鸽标准），但支持"暂停并退出后继续"的快照。
 
-- **存档 v2**（`src/game/save.ts`，键 `secondhand.profile.v2`，PLAN2 §1.11）：1.0 字段 + 注册表字段（`achievements secrets flags unlocks chimes cosmetics hints stats mastery affinity rescued contracts clockNodes lastSeen deathTapes prologueDone daily termSeen taught migration`）。读取时用 `normalize()` 补齐缺失字段，坏档另存为 `….v2.corrupt`。
-- **v1 迁移**：没有 v2 档但有 `secondhand.profile.v1` 时自动迁移：按冻结的 1.0 成本表 `V1_NODE_COSTS` 退还主发条碎片（武器节点保留、不退款，因为武器保留），保留武器/计数/图鉴/lore/伊妮丝进度，`wins ≥ 1` 解锁 `contracts`，`profile.migration = {from:1, refund, nodes}` 供工坊提示。v1 键原样保留作备份。测试档：`tools/fixtures/profile_v1.json`（3 个节点，退还 77 → 100 碎片）。
-- 设置（`secondhand.settings.v1`）新增：`textSize 100|125`、`hudLabels`/`termHints 'auto'|'always'|'off'`、`rewindMode 'both'|'tap'`、`flashLimit`；`showDamage` 已接入伤害数字。`?lang=` 在本次会话里优先于存档语言。
+- **存档 v2**（`src/game/save.ts`，键 `secondhand.profile.v2`，PLAN2 §1.11）：1.0 字段 + 注册表字段（`achievements secrets flags unlocks chimes cosmetics hints stats mastery affinity rescued contracts clockNodes lastSeen deathTapes prologueDone daily termSeen taught migration`）。读取时用 `normalize()` 补齐缺失字段，坏档另存为 `….v2.corrupt.<时间戳>`（每次一份，不覆盖），然后若有 1.0 存档就重新迁移，否则新档。`lastSeen` 用真实时钟 `Date.now()`（不受 `?fakeTime=` / 冻结时钟影响）。
+- **v1 迁移**：没有 v2 档但有 `secondhand.profile.v1` 时自动迁移：按冻结的 1.0 成本表 `V1_NODE_COSTS` 退还全部已花费的主发条碎片（GDD2 §10.3"退还所有已花费的碎片，保留已解锁武器"：武器节点也退款，武器照样保留；武器节点等级仍记在 `nodes` 里，免得 1.0 发条台在 P6 替换之前再卖一次已有的武器），保留武器/计数/图鉴/lore/伊妮丝进度，`wins ≥ 1` 解锁 `contracts`，`profile.migration = {from:1, refund, nodes}` 供工坊提示。v1 键原样保留作备份。测试档：`tools/fixtures/profile_v1.json`（3 个节点，退还 77 → 100 碎片）。
+- 设置（`secondhand.settings.v1`）新增：`textSize 100|125`、`hudLabels`/`termHints 'auto'|'always'|'off'`、`rewindMode 'both'|'tap'`、`flashLimit`；`showDamage` 已接入伤害数字。`?lang=` 在本次会话里优先于存档语言，直到玩家在菜单里换语言。`settingsLive.{rewindMode,hudLabels}` 为 false 时这两项不出现在设置菜单里（F3 / P1 接好后改为 true）。
 
 ### 共享注册表（F1，PLAN2 §1.2）
 - `meta/registry.ts`：成就 / 解锁 / 外观 / 十一响 / Flags / Stats / Secrets / Terms / Teach。首次获得时弹右上角提示（`ui/notices.ts`，全局层，main.ts 在场景之后绘制）并在当前世界总线上发 `achievement|secret|chime {id}`；`onMeta()` 收所有首次事件。Stats/Flags/Terms 标脏，每 4 秒或页面隐藏时写盘。
 - `strings.ts`：`registerStrings / S`，术语表 `TERMS`（GDD2 §9.8 全部 24 条：name / plain / detail）。`widgets.drawTermLabel` 读它，白话行是否显示由 `Terms.showPlain(id)` 决定（设置 auto = 每个词前 3 次）。打开展示术语的界面时调用一次 `Terms.seen(id)`（1.5 秒内重复调用只算一次）。
-- `ui/hints.ts`：伊妮丝的便条。每存档一次、20 秒节流、每房间一张、首领战期间与转阶段后 4 秒内排队（`hintsHooks.busy`、`Hints.hold`），换房间时丢弃未显示的。`pause:true` 在单人时推一个阻塞 overlay 冻结游戏。卡片在左下角（x 8，底边 326，宽 232），由 main.ts 在场景之后绘制；带 `hidesNotes` 的面板（暂停、设置、构筑、账簿……）打开时隐藏并暂停计时。
+- `ui/hints.ts`：伊妮丝的便条。每存档一次、20 秒节流、每房间一张、首领战期间与转阶段后 4 秒内排队（`hintsHooks.busy`、`Hints.hold`），换房间时丢弃旧房间里排队的（进入新房间那一帧——构造函数、enter()——请求的便条属于新房间，经 `G.scenes.onSwitch` 判定）；排队的便条只在本可以显示的时间里计 30 秒寿命（首领战不算）。`pause:true` 在单人时推一个阻塞 overlay 冻结游戏。卡片在左下角（x 8，底边 326，宽 232），由 main.ts 在场景之后绘制；带 `hidesNotes` 的面板（暂停、设置、构筑、账簿……）打开时隐藏并暂停计时。
 - `ui/panels.ts`、`debugRoutes.ts`（boot 先跑路由；内置 `?scene=…` 与 `?debug=registry` 也是路由）、`clock.ts`（`RealClock`，`?fakeTime=2026-10-31T23:59:30` 从该时刻起走）。
 - QA 句柄：`window.__reg`（注册表）、`__save`（存档模块，`__save.profile`）、`__hints`。`tools/shot.cjs` 脚本步骤支持 `setStorage / removeStorage / reload / eval`。
-- 文字大小 125%：`textScale.boost` 让文字倍率在 ≤150% 的前提下升一级整数倍（窗口太小时不变）；`textScale.r` 是本帧相对 100% 的放大比，固定行高的布局（`MenuList.rh`）按它放大。
+- 文字大小 125%：`textScale.boost` 让文字倍率在 ≤150% 的前提下升一级整数倍（窗口太小时不变）；`Text.k` 是本帧文字相对布局的大小，`MenuList.rh` 等固定行高按 `Text.lineH` 增长；奖励卡按实测文字加宽（3 张时最多 200）、加高、下移，实在放不下时先去掉页眉引言，再把描述 / "将替换"降到 10px。
+- 字体子集：`tools/subset-fonts.py` 写 `build/fonts/*.woff2` 和 `.stamp`；缺 fontTools 时删除旧子集；`vite.config.ts` 只在 `.stamp` 比所有源文件都新时使用子集，否则打完整字体并警告。

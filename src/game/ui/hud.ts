@@ -4,7 +4,7 @@ import { G } from '../G';
 import { rect, hourglass, gearIcon, coinIcon, shardIcon } from './draw';
 import { damp } from '../../engine/math';
 import { col } from '../../art/palette';
-import { tr } from '../i18n';
+import { Text } from './text';
 import { MEMORIES } from '../progression/memories';
 import { patronSigil, partIcon, SLOT_GLYPH } from '../../art/sprites/icons';
 
@@ -56,7 +56,8 @@ export class HUD {
     // brass caps
     rect(ctx, bx - 2, by - 2, 2, bh + 4, 'B3');
     rect(ctx, bx + bw, by - 2, 2, bh + 4, 'B3');
-    G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, bx + bw + 5, by - 1, { fill: 'K10' });
+    // 5×7 digits (+1 px outline = 9 font px) centred on the bar at every text scale
+    G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, bx + bw + 5, by + bh / 2 - 4.5 * Text.k, { fill: 'K10' });
 
     // ── Sand charges (hourglasses) ──
     const hy = y + 14;
@@ -92,10 +93,10 @@ export class HUD {
     // ── currencies (top-right) ──
     const brass = Math.round(this.brassShown);
     coinIcon(ctx, 640 - 16, 11);
-    G.digits.draw(ctx, String(brass), 640 - 19, 10, { fill: 'B5', align: 'right' });
+    G.digits.draw(ctx, String(brass), 640 - 19, 14.5 - 4.5 * Text.k, { fill: 'B5', align: 'right' });
     if (run.shards > 0) {
       shardIcon(ctx, 640 - 16, 23);
-      G.digits.draw(ctx, String(run.shards), 640 - 19, 23, { fill: 'V4', align: 'right' });
+      G.digits.draw(ctx, String(run.shards), 640 - 19, 27 - 4.5 * Text.k, { fill: 'V4', align: 'right' });
     }
     ctx.globalAlpha = 1;
 
@@ -119,11 +120,11 @@ export class HUD {
         }
       });
       const extra = run.memories.filter((m) => !slots.includes(MEMORIES[m.id]?.slot)).length;
-      if (extra) G.digits.draw(ctx, '+' + extra, 10 + 5 * 22, y0 + 5, { fill: 'K8' });
+      if (extra) G.digits.draw(ctx, '+' + extra, 10 + 5 * 22, y0 + 9 - 4.5 * Text.k, { fill: 'K8' });
       if (run.parts.length) {
         const px = 10 + 5 * 22 + (extra ? 4 + Math.ceil(G.digits.measure('+' + extra)) : 2);
         ctx.drawImage(partIcon('gear').img, px, y0 + 1);
-        G.digits.draw(ctx, String(run.parts.length), px + 17, y0 + 5, { fill: 'B5' });
+        G.digits.draw(ctx, String(run.parts.length), px + 17, y0 + 9 - 4.5 * Text.k, { fill: 'B5' });
       }
     }
 
@@ -131,7 +132,8 @@ export class HUD {
     if (this.boss) {
       const b = this.boss;
       const w = 300, x = 320 - w / 2, y = 336;
-      G.font.draw(ctx, tr(b.bossName), 320, y - 16, { align: 'center', color: 'K10', outline: 'K0' });
+      // name sits just above the bar (letters end 5 px above it at any text scale)
+      Text.draw(ctx, b.bossName, 320, y - 5 - Text.inkH('body') / 2, { align: 'center', color: 'K10', outline: 'K0', valign: 'middle' });
       rect(ctx, x - 2, y - 2, w + 4, 9, 'K0');
       rect(ctx, x - 1, y - 1, w + 2, 7, 'B2');
       rect(ctx, x, y, w, 5, 'K2');

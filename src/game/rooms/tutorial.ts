@@ -4,7 +4,7 @@ import { Entity } from '../entities/entity';
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Action } from '../../engine/input';
 import { tr, L, L10n } from '../i18n';
-import { drawPrompt, drawPromptLabel, promptW } from '../ui/widgets';
+import { drawPrompt, drawPromptLabel, promptW, promptH } from '../ui/widgets';
 import { Text } from '../ui/text';
 import type { World } from '../world/world';
 import { TS } from '../world/room';
@@ -25,7 +25,8 @@ class Sign extends Entity {
       const tw = Text.measure(t, 'body').w;
       let x = Math.round(q.x - (bw + tw + 2) / 2);
       for (const act of acts) x += drawPrompt(ctx, act, x, Math.round(q.y)) + 3;
-      Text.draw(ctx, t, x + 2, Math.round(q.y) - 2, { color: 'B6' });
+      // text centred on the key icons at any text size
+      Text.draw(ctx, t, x + 2, Math.round(q.y) + promptH() / 2, { color: 'B6', valign: 'middle' });
       ctx.globalAlpha = 1;
     });
   }

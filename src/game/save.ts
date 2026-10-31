@@ -5,7 +5,6 @@
 import type { Mods } from './run';
 import type { Patron } from './progression/memories';
 import { L, L10n } from './i18n';
-import { RealClock } from './clock';
 
 const KEY = 'secondhand.profile.v2';
 const KEY_V1 = 'secondhand.profile.v1';
@@ -83,7 +82,11 @@ export const V1_NODE_COSTS: Record<string, number[]> = {
   echo: [30, 60], window: [45], reroll: [40, 80], choice: [90], revive: [100], luck: [50],
   w_maul: [30], w_bow: [50], w_chakram: [70],
 };
-/** 1.0 weapon-unlock nodes: the weapons are kept, so these are not refunded */
+/**
+ * 1.0 weapon-unlock nodes. GDD2 §10.3: "退还所有已花费的碎片，保留已解锁武器" — every spent shard is
+ * refunded (these included) AND the weapons stay unlocked. The node levels are also carried over so
+ * the 1.0 Mainspring panel (until P6 replaces it) does not offer to sell an owned weapon again.
+ */
 const V1_WEAPON_NODES = new Set(['w_maul', 'w_bow', 'w_chakram']);
 
 const arr = <T>(v: unknown, d: T[]): T[] => (Array.isArray(v) ? (v as T[]) : d);
@@ -110,7 +113,6 @@ function normalize(raw: any): Profile {
 export function v1Refund(nodes: Record<string, number>): number {
   let n = 0;
   for (const [id, lv] of Object.entries(nodes ?? {})) {
-    if (V1_WEAPON_NODES.has(id)) continue;
     const c = V1_NODE_COSTS[id];
     if (!c) continue;
     for (let i = 0; i < Math.min(lv, c.length); i++) n += c[i];
@@ -127,7 +129,7 @@ export function migrateV1(v1: any): Profile {
   const refund = v1Refund(oldNodes);
   p.shards = num(old.shards) + refund;
   p.totalShards = num(old.totalShards);
-  // weapon unlock nodes stay bought (their weapons are kept); every other node is refunded
+  // every node is refunded; weapon-unlock nodes stay marked (their weapons are kept, see above)
   p.nodes = {};
   for (const id of V1_WEAPON_NODES) if (oldNodes[id]) p.nodes[id] = oldNodes[id];
   p.weapons = arr(old.weapons, ['rapier']).filter((w) => typeof w === 'string');
@@ -154,10 +156,9 @@ function readProfile() {
   try { raw = localStorage.getItem(KEY); } catch { /* storage unavailable */ }
   if (raw) {
     try { profile = normalize(JSON.parse(raw)); return; } catch {
-      // keep the unreadable save aside instead of silently overwriting it
-      try { localStorage.setItem(KEY + '.corrupt', raw); } catch { /* ignore */ }
-      profile = fresh();
-      return;
+      // keep the unreadable save aside (one copy per incident) instead of silently overwriting it,
+      // then fall back to the 1.0 save if there is one, so a 1.0 player loses nothing
+      try { localStorage.setItem(`${KEY}.corrupt.${Date.now()}`, raw); } catch { /* ignore */ }
     }
   }
   let v1: string | null = null;
@@ -168,7 +169,9 @@ function readProfile() {
   profile = fresh();
 }
 export function saveProfile() {
-  profile.lastSeen = RealClock.now().getTime();
+  // the real wall clock: RealClock may be frozen (seeded / daily runs) or faked (?fakeTime=), and
+  // lastSeen must stay true for the "long absence" egg on the next launch
+  profile.lastSeen = Date.now();
   try { localStorage.setItem(KEY, JSON.stringify(profile)); } catch { /* ignore */ }
 }
 export function resetProfile() { profile = fresh(); saveProfile(); }

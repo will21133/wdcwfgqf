@@ -14,7 +14,9 @@ export const G = {
   small: null as unknown as PixelFont,
   /** FP8 — latin letters and digits only (CJK is routed to `small` with a dev warning) */
   tiny: null as unknown as PixelFont,
+  /** 5×7 HUD / counter digits (GDD2 §12.1) */
   digits: null as unknown as DigitFont,
+  /** 3×5 digits: reserved for tiny corner badges only (GDD2 §12.1); nothing uses them yet */
   digitsSmall: null as unknown as DigitFont,
   scenes: new SceneManager(),
   input,

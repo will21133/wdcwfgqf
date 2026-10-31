@@ -13,6 +13,7 @@ import type { Overlay } from '../ui/overlay';
 import { drawHint } from '../ui/prompts';
 import { panel } from '../ui/draw';
 import { drawPixelArt } from '../ui/widgets';
+import { Text } from '../ui/text';
 import { frand } from '../../engine/rng';
 
 export interface TitleHooks { start(): void; credits(): void; ledger(): void }
@@ -276,32 +277,43 @@ export class TitleScene implements Scene {
     ui.globalAlpha = la;
     const lx = 430, ly = 58 - Math.round((1 - la) * 10);
     drawPixelArt(ui, LOGO!, lx, ly + LOGO!.height / 2);
-    G.font.draw(ui, 'S E C O N D   H A N D', lx, ly + 73, { align: 'center', color: 'K9', outline: 'K0' });
+    // wordmark, a red rule as wide as it, and the tagline: all spaced from the text's real size
+    const wm = 'S E C O N D   H A N D';
+    const [wmW] = G.font.draw(ui, wm, lx, ly + 73, { align: 'center', color: 'K9', outline: 'K0' });
+    const ruleY = Math.round(ly + 73 + Text.lineH('body') + 6);
+    const ruleW = Math.max(140, Math.ceil(wmW) + 10);
     ui.fillStyle = col('R3');
-    ui.fillRect(lx - 70, ly + 94, 140, 1);
+    ui.fillRect(Math.round(lx - ruleW / 2), ruleY, ruleW, 1);
     ui.fillStyle = col('B4');
-    ui.fillRect(lx - 3, ly + 92, 6, 5);
-    G.small.draw(ui, tr(L('撤销失误，保留胜果', 'Undo your wounds. Keep your victories.')), lx, ly + 101, { align: 'center', color: 'K8' });
+    ui.fillRect(lx - 3, ruleY - 2, 6, 5);
+    const tagY = ruleY + 7;
+    Text.draw(ui, L('撤销失误，保留胜果', 'Undo your wounds. Keep your victories.'), lx, tagY, { size: 'small', align: 'center', color: 'K8' });
+    // the plaque starts below the tagline (it only moves when text is much larger than the layout)
+    const plaqueY = Math.max(203, Math.round(tagY + Text.lineH('small') + 10));
     // brass plaque that carries the menu (and the first "press any key" prompt)
     const pa = ease.outCubic(clamp((t - 0.9) / 0.6, 0, 1));
+    // the plaque holds four menu rows (they grow with the text) with 11 px of brass margin around them
+    const plaqueH = 90 + 4 * (this.list.rh - this.list.rowH);
     if (pa > 0) {
       ui.globalAlpha = pa;
-      // grows with the 125% text size so the four rows stay inside the plaque
-      panel(ui, lx - 68, 203, 136, 90 + 4 * (this.list.rh - this.list.rowH), { fill: 'K1' });
+      panel(ui, lx - 68, plaqueY, 136, plaqueH, { fill: 'K1' });
     }
     ui.globalAlpha = 1;
     if (t > 1.2 && !G.audio.ctx) {
-      // first interaction gives the page keyboard focus and unlocks audio
-      G.font.draw(ui, tr(L('按任意键', 'Press any key')), lx, 230, { align: 'center', color: Math.floor(t * 2) % 2 ? 'K10' : 'K8' });
-      G.small.draw(ui, tr(L('或点击画面', 'or click the screen')), lx, 250, { align: 'center', color: 'K8' });
+      // first interaction gives the page keyboard focus and unlocks audio: two lines centred on the plaque
+      const l1 = Text.lineH('body'), l2 = Text.lineH('small'), gap = 4;
+      const py = plaqueY + (plaqueH - (l1 + gap + l2)) / 2;
+      Text.draw(ui, L('按任意键', 'Press any key'), lx, py, { align: 'center', color: Math.floor(t * 2) % 2 ? 'K10' : 'K8' });
+      Text.draw(ui, L('或点击画面', 'or click the screen'), lx, py + l1 + gap, { size: 'small', align: 'center', color: 'K8' });
     } else if (t > 1.2) {
       const ma = clamp((t - 1.2) / 0.5, 0, 1);
       ui.globalAlpha = ma;
-      this.list.render(ui, lx - 55, 214, 110);
+      this.list.render(ui, lx - 55, plaqueY + 11, 110);
       ui.globalAlpha = 1;
       drawHint(ui, 320, 340, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('确认', 'Confirm'))]]);
     }
-    G.small.draw(ui, 'v0.9 · Early Access build', 6, 342, { color: 'K7' });
+    // version line, centred on y 349 so it never touches the bottom edge
+    Text.draw(ui, L('v0.9 · 抢先体验版', 'v0.9 · Early Access build'), 6, 349, { size: 'small', color: 'K7', valign: 'middle' });
     for (const o of this.overlays) o.render(r);
   }
 }

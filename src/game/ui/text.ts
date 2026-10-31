@@ -17,6 +17,13 @@ export interface TextOpts {
   shadow?: boolean; outline?: ColorKey | false; maxW?: number; alpha?: number;
   /** 85% K0 backing plate */
   plate?: boolean;
+  /**
+   * 'top' (default): y is the top of the text's line box.
+   * 'middle': y is the vertical centre of the letters (CJK / capitals; descenders hang below), so
+   * text stays centred in a box at every text scale. Use it for anything inside a fixed-height row,
+   * key cap, chip, plate or banner.
+   */
+  valign?: 'top' | 'middle';
 }
 
 function font(size: TextSize): PixelFont {
@@ -34,14 +41,16 @@ export const Text = {
     if (o.plate) {
       const m = Text.measureWrapped(t, size, o.maxW);
       const x0 = o.align === 'center' ? x - m.w / 2 : o.align === 'right' ? x - m.w : x;
+      const y0 = o.valign === 'middle' ? y - Text.inkMid(size) - (m.h - Text.lineH(size)) / 2 : y;
       const a = ctx.globalAlpha;
       ctx.globalAlpha = a * 0.85 * Math.max(0, Math.min(1, o.alpha ?? 1));
-      rect(ctx, x0 - 3, y + 1, m.w + 6, m.h + 1, 'K0');
+      rect(ctx, x0 - 3, y0 + 1, m.w + 6, m.h + 1, 'K0');
       ctx.globalAlpha = a;
     }
     const [w, h] = f.draw(ctx, t, x, y, {
       color: o.color ?? 'K10', align: o.align, wrap: o.maxW, alpha: o.alpha, scale: mag(size),
       outline: o.outline ? o.outline : false, shadow: o.outline ? false : o.shadow === false ? false : 'K0',
+      valign: o.valign === 'middle' ? 'ink' : undefined,
     });
     return { w, h };
   },
@@ -63,6 +72,21 @@ export const Text = {
   lineH(size: TextSize): number {
     return font(size).lineH * mag(size) * textScale.k;
   },
+  /** logical px from a 'top' y to the centre of the letters (see TextOpts.valign) */
+  inkMid(size: TextSize = 'body'): number {
+    return font(size).inkMid * mag(size) * textScale.k;
+  },
+  /** height of the letters (CJK / capitals) in logical px — what to centre in a box */
+  inkH(size: TextSize = 'body'): number {
+    const [t, b] = font(size).ink;
+    return (b - t) * mag(size) * textScale.k;
+  },
+  /**
+   * how large text is this frame relative to the 640×360 layout (logical px per font px):
+   * 0.8–1.33 at 100% for windows from 960×540 up, up to 1.5 with the 125% text-size setting.
+   * Boxes that hold text should grow with it (or use lineH / measure directly).
+   */
+  get k(): number { return textScale.k; },
 };
 
 const SLOT_TICK = ['R3', 'B5', 'G3', 'U4'];

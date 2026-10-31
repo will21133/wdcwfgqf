@@ -40,6 +40,8 @@ import { WEAPON_INFO } from '../ui/metaPanels';
 import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
 import { Hints, hintsHooks } from '../ui/hints';
+import { Text } from '../ui/text';
+import { col } from '../../art/palette';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
 const BOT = G.debug.has('bot');
@@ -434,7 +436,8 @@ export class GameScene implements Scene, RoomHost {
     this.hud.boss = this.boss && !this.boss.inIntro && !this.boss.dead ? this.boss : null;
     this.hud.render(r, this.world);
     const ctx = r.ui2;
-    if (this.titleCard) this.renderTitleCard(ctx);
+    // the floor / boss title card yields to menus and reward screens (it would sit half under them)
+    if (this.titleCard && !blocking) this.renderTitleCard(ctx);
     if (this.world.player!.hp <= 0 && this.deathT > 1.0) {
       const a = Math.min(1, (this.deathT - 1.0) / 1.0);
       ctx.globalAlpha = a * 0.75;
@@ -453,16 +456,21 @@ export class GameScene implements Scene, RoomHost {
     const a = t < 0.5 ? ease.outCubic(t / 0.5) : t > 2.6 ? 1 - (t - 2.6) / 0.6 : 1;
     if (a <= 0) return;
     const w = Math.round(220 * clamp(t / 0.6, 0, 1));
+    // floor card: 10px kicker + the floor name at 12px × 2 in a band centred on y 123
+    // (96–150 at 100% text; the band grows with the text so the rules never cut it)
+    const ls = Text.lineH('small'), lt = Text.lineH('title');
+    const H = Math.max(54, Math.ceil(4 + ls + lt + 6));
+    const top = Math.round(123 - H / 2);
     ctx.globalAlpha = a * 0.55;
-    ctx.fillStyle = '#0b0a14';
-    ctx.fillRect(0, 94, 640, 58);
+    ctx.fillStyle = col('K0');
+    ctx.fillRect(0, top - 2, 640, H + 4);
     ctx.globalAlpha = a;
-    ctx.fillStyle = '#d99c45';
-    ctx.fillRect(320 - w, 96, w * 2, 1);
-    ctx.fillRect(320 - w, 149, w * 2, 1);
-    // floor card: 10px kicker + the floor name at 12px × 2, inside the 96–150 band
-    G.small.draw(ctx, this.titleCard!.sub, 320, 98, { align: 'center', color: 'B5' });
-    G.font.draw(ctx, this.titleCard!.title, 320, 111, { align: 'center', color: 'K10', outline: 'K0', scale: 2 });
+    ctx.fillStyle = col('B4');
+    ctx.fillRect(320 - w, top, w * 2, 1);
+    ctx.fillRect(320 - w, top + H - 1, w * 2, 1);
+    const ty = top + Math.round((H - (ls + lt)) / 2) - 1;
+    Text.draw(ctx, this.titleCard!.sub, 320, ty, { size: 'small', align: 'center', color: 'B5' });
+    Text.draw(ctx, this.titleCard!.title, 320, ty + ls, { size: 'title', align: 'center', color: 'K10', outline: 'K0' });
     ctx.globalAlpha = 1;
   }
 }

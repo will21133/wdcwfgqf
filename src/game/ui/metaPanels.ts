@@ -23,7 +23,8 @@ let GEAR_ON: Sprite[] | null = null, GEAR_OFF: Sprite[] | null = null;
 
 function shardCounter(ctx: CanvasRenderingContext2D, x: number, y: number) {
   shardIcon(ctx, x, y);
-  G.digits.draw(ctx, String(profile.shards), x + 10, y, { fill: 'V4' });
+  // digits (9 font px with outline) centred on the 8 px icon at any text size
+  G.digits.draw(ctx, String(profile.shards), x + 10, y + 4 - 4.5 * Text.k, { fill: 'V4' });
 }
 
 // ───────────────────────── Mainspring ─────────────────────────
@@ -37,7 +38,9 @@ export class MainspringOverlay implements Overlay {
   constructor() { GEAR_ON ??= gearFrames(9, 10, BRASS_GEAR, 4, 2); GEAR_OFF ??= gearFrames(9, 10, IRON_GEAR, 4, 2); sfx('uiOpen'); }
 
   // the weapon column (col 4) must stay clear of the detail panel at x = 400
-  private pos(n: NodeDef) { return { x: 96 + n.col * 64, y: 96 + n.row * 52 }; }
+  private pos(n: NodeDef) { return { x: 96 + n.col * 64, y: 96 + n.row * 52 + this.shift }; }
+  /** grid offset: the header grows with the text size, the node grid moves down below it */
+  private shift = 0;
   private available(n: NodeDef) { return !n.requires || nodeLevel(n.requires) > 0; }
   private cost(n: NodeDef) { const lv = nodeLevel(n.id); return lv < n.costs.length ? n.costs[lv] : -1; }
 
@@ -83,8 +86,10 @@ export class MainspringOverlay implements Overlay {
     const ctx = r.ui2;
     ctx.globalAlpha = 0.8; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
     panel(ctx, 24, 18, 592, 324);
-    G.font.draw(ctx, tr(L('发条台', 'The Mainspring')), 40, 28, { color: 'B5' });
-    G.small.draw(ctx, tr(L('用时之碎片拧紧你的发条——这些强化永久有效。', 'Wind Time Shards into your spring — these upgrades are permanent.')), 40, 46, { color: 'K8' });
+    Text.draw(ctx, L('发条台', 'The Mainspring'), 40, 28, { color: 'B5' });
+    const subY = Math.round(28 + Text.lineH('body') + 3);
+    Text.draw(ctx, L('用时之碎片拧紧你的发条——这些强化永久有效。', 'Wind Time Shards into your spring — these upgrades are permanent.'), 40, subY, { size: 'small', color: 'K8' });
+    this.shift = Math.max(0, Math.round(subY + Text.lineH('small') + 8 - 66));
     shardCounter(ctx, 560, 30);
     // connections
     for (const n of NODES) {
@@ -96,7 +101,7 @@ export class MainspringOverlay implements Overlay {
       if (a.x === b.x) ctx.fillRect(a.x, y0, 1, Math.abs(a.y - b.y));
       else { ctx.fillRect(x0, b.y, Math.abs(a.x - b.x), 1); ctx.fillRect(a.x, y0, 1, Math.abs(a.y - b.y)); }
     }
-    G.small.draw(ctx, tr(L('武器', 'Weapons')), this.pos(NODES.find((n) => n.col === 4)!).x, 66, { align: 'center', color: 'K7' });
+    Text.draw(ctx, L('武器', 'Weapons'), this.pos(NODES.find((n) => n.col === 4)!).x, 72 + this.shift, { size: 'small', align: 'center', color: 'K7', valign: 'middle' });
     NODES.forEach((n, i) => {
       const p = this.pos(n);
       const lv = nodeLevel(n.id), max = n.costs.length;
@@ -117,7 +122,7 @@ export class MainspringOverlay implements Overlay {
     // detail panel
     const n = NODES[this.sel];
     const lv = nodeLevel(n.id), c = this.cost(n);
-    const x = 400, y = 74;
+    const x = 400, y = 74 + this.shift;
     panel(ctx, x, y, 200, 180, { fill: 'K2', rivets: false });
     // name, level and description stack on measured heights so long names never collide
     const nh = Text.draw(ctx, n.name, x + 10, y + 6, { color: lv > 0 ? 'B5' : 'K10', maxW: 180 }).h;
@@ -128,7 +133,7 @@ export class MainspringOverlay implements Overlay {
     else if (c < 0) Text.draw(ctx, L('已满级', 'Maxed'), x + 10, y + 155, { color: 'B5' });
     else {
       shardIcon(ctx, x + 10, y + 160);
-      G.digits.draw(ctx, `${c}`, x + 22, y + 159, { fill: profile.shards >= c ? 'V4' : 'R4' });
+      G.digits.draw(ctx, `${c}`, x + 22, y + 164 - 4.5 * Text.k, { fill: profile.shards >= c ? 'V4' : 'R4' });
     }
     if (this.flash > 0) { ctx.globalAlpha = this.flash; rect(ctx, x, y, 200, 180, 'B6'); ctx.globalAlpha = 1; }
     drawHint(ctx, 320, 318, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('拧紧', 'Wind'))], ['cancel', tr(L('返回', 'Back'))]]);
@@ -179,8 +184,10 @@ export class WeaponOverlay implements Overlay {
       ctx.globalAlpha = un ? 1 : 0.25;
       drawScaled(ctx, w.sprite, x, y - 4, 3);
       ctx.globalAlpha = 1;
-      G.small.draw(ctx, un ? tr(w.name) : '???', x, y + 28, { align: 'center', color: un ? (profile.weapon === w.id ? 'B5' : 'K9') : 'K7' });
-      if (profile.weapon === w.id) G.small.draw(ctx, tr(L('装备中', 'Equipped')), x, y - 42, { align: 'center', color: 'G4' });
+      // name / "equipped" sit inside the card's bottom / top edge at any text size
+      const ih = Text.inkH('small');
+      Text.draw(ctx, un ? tr(w.name) : '???', x, y + 41 - ih / 2, { size: 'small', align: 'center', color: un ? (profile.weapon === w.id ? 'B5' : 'K9') : 'K7', valign: 'middle' });
+      if (profile.weapon === w.id) Text.draw(ctx, L('装备中', 'Equipped'), x, y - 41 + ih / 2, { size: 'small', align: 'center', color: 'G4', valign: 'middle' });
     });
     const w = WEAPON_INFO[this.sel];
     const un = profile.weapons.includes(w.id);
@@ -267,30 +274,36 @@ export class LedgerOverlay implements Overlay {
     const ctx = r.ui2;
     ctx.globalAlpha = 0.85; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
     panel(ctx, 24, 18, 592, 324);
-    G.font.draw(ctx, tr(L('账簿', 'The Ledger')), 40, 28, { color: 'B5' });
+    // header row: title, tabs and count share one centre line; the tab highlight fits the text
+    const hc = 34, th = Math.max(16, Math.ceil(Text.inkH('body')) + 6);
+    Text.draw(ctx, L('账簿', 'The Ledger'), 40, hc, { color: 'B5', valign: 'middle' });
     this.tabs.forEach((t, i) => {
       const x = 180 + i * 80;
-      if (i === this.tab) rect(ctx, x - 4, 26, 72, 16, 'K3');
-      G.font.draw(ctx, tr(t.name), x + 32, 28, { align: 'center', color: i === this.tab ? 'K10' : 'K7' });
+      if (i === this.tab) rect(ctx, x - 4, Math.round(hc - th / 2), 72, th, 'K3');
+      Text.draw(ctx, t.name, x + 32, hc, { align: 'center', color: i === this.tab ? 'K10' : 'K7', valign: 'middle' });
     });
     const es = this.tabs[this.tab].entries();
     const seenN = es.filter((e) => e.seen).length;
-    G.small.draw(ctx, `${seenN}/${es.length}`, 596, 32, { align: 'right', color: 'K7' });
-    rect(ctx, 40, 48, 560, 1, 'B1');
-    es.forEach((e, i) => {
-      const x = 56 + (i % 12) * 46, y = 72 + Math.floor(i / 12) * 34;
-      if (i === this.sel) rect(ctx, x - 16, y - 14, 32, 30, 'K3');
-      if (e.seen && e.icon) drawScaled(ctx, e.icon, x, y, 1);
-      else if (e.seen) { rect(ctx, x - 6, y - 6, 12, 12, 'K4'); G.small.draw(ctx, e.name.slice(0, 1), x, y - 4, { align: 'center', color: e.color }); }
-      else G.small.draw(ctx, '?', x, y - 4, { align: 'center', color: 'K7' });
-    });
+    Text.draw(ctx, `${seenN}/${es.length}`, 596, hc, { size: 'small', align: 'right', color: 'K7', valign: 'middle' });
+    rect(ctx, 40, Math.max(48, Math.round(hc + th / 2 + 4)), 560, 1, 'B1');
+    // detail of the selected entry, anchored above the footer so larger text grows upward
     const e = es[Math.min(this.sel, es.length - 1)];
-    rect(ctx, 40, 262, 560, 1, 'B1');
+    const desc = e ? (e.seen ? e.desc : tr(L('尚未发现。', 'Not yet discovered.'))) : '';
+    const dRule = Math.round(Math.min(262, 318 - (Text.lineH('body') + 3 + G.font.blockSize(desc, 540, 14)[1]) - 8));
+    es.forEach((en, i) => {
+      const x = 56 + (i % 12) * 46, y = 72 + Math.floor(i / 12) * 34;
+      if (y + 16 > dRule) return;
+      if (i === this.sel) rect(ctx, x - 16, y - 14, 32, 30, 'K3');
+      if (en.seen && en.icon) drawScaled(ctx, en.icon, x, y, 1);
+      else if (en.seen) { rect(ctx, x - 6, y - 6, 12, 12, 'K4'); Text.draw(ctx, en.name.slice(0, 1), x, y, { size: 'small', align: 'center', color: en.color, valign: 'middle' }); }
+      else Text.draw(ctx, '?', x, y, { size: 'small', align: 'center', color: 'K7', valign: 'middle' });
+    });
+    rect(ctx, 40, dRule, 560, 1, 'B1');
     if (e) {
-      G.font.draw(ctx, e.seen ? e.name : '???', 48, 270, { color: e.seen ? e.color : 'K7' });
-      G.font.draw(ctx, e.seen ? e.desc : tr(L('尚未发现。', 'Not yet discovered.')), 48, 288, { color: 'K8', wrap: 540, lineH: 14 });
+      Text.draw(ctx, e.seen ? e.name : '???', 48, dRule + 8, { color: e.seen ? e.color : 'K7' });
+      G.font.draw(ctx, desc, 48, dRule + 8 + Text.lineH('body') + 3, { color: 'K8', wrap: 540, lineH: 14 });
     }
-    drawHint(ctx, 320, 326, [['nav', tr(L('选择', 'Select'))], ['special', tr(L('切换页', 'Tab'))], ['cancel', tr(L('返回', 'Back'))]]);
+    drawHint(ctx, 320, 326, [['nav', tr(L('选择', 'Select'))], ['special', tr(L('切换页', 'Next page'))], ['cancel', tr(L('返回', 'Back'))]]);
     void PARTS_BY_ID;
   }
 }

@@ -13,6 +13,8 @@ import { partLook } from '../progression/rewards';
 import { THEMES } from '../../art/themes';
 import { ease, clamp } from '../../engine/math';
 import { drawHint } from '../ui/prompts';
+import { promptH } from '../ui/widgets';
+import { Text } from '../ui/text';
 import { col } from '../../art/palette';
 import { WEAPON_INFO } from '../ui/metaPanels';
 
@@ -40,15 +42,19 @@ export class SummaryScene implements Scene {
     const k = ease.outCubic(clamp(this.t / 0.6, 0, 1));
     ctx.globalAlpha = k;
     const title: L10n = this.kind === 'victory' ? L('午 夜', 'MIDNIGHT') : this.kind === 'quit' ? L('提前收工', 'CALLED IT A NIGHT') : L('停 摆', 'THE CLOCK STOPS');
-    G.font.draw(ctx, tr(title), 320, 34, { align: 'center', color: this.kind === 'victory' ? 'B5' : 'R3', outline: 'K0' });
+    Text.draw(ctx, title, 320, 34, { align: 'center', color: this.kind === 'victory' ? 'B5' : 'R3', outline: 'K0' });
     const run = this.run;
     const th = THEMES[Math.min(run.floor, THEMES.length - 1)];
     const ow = run.overwind > 0 ? tr(L(` · 超频 ${run.overwind}`, ` · Overwind ${run.overwind}`)) : '';
     const sub = this.kind === 'victory'
       ? L(`钟声敲响了第十二下${ow}`, `The clock struck twelve${ow}`)
       : L(`到达：第 ${run.floor + 1} 层 · ${th.name.zh} · 第 ${run.roomIndex + 1} 间${ow}`, `Reached: Floor ${run.floor + 1} · ${th.name.en} · Room ${run.roomIndex + 1}${ow}`);
-    G.small.draw(ctx, tr(sub), 320, 54, { align: 'center', color: this.kind === 'victory' ? 'B4' : 'K7' });
-    panel(ctx, 110, 70, 420, 236);
+    // every row below is spaced from the text's real size (the panel grows with larger text)
+    const lb = Text.lineH('body'), ls = Text.lineH('small');
+    const subY = Math.round(34 + lb + 5);
+    Text.draw(ctx, sub, 320, subY, { size: 'small', align: 'center', color: this.kind === 'victory' ? 'B4' : 'K7' });
+    const top = Math.max(70, Math.round(subY + ls + 4));
+    const rowsY = top + 14, rowH = Math.max(18, Math.ceil(lb) + 2);
     const s = run.stats;
     const mm = Math.floor(run.time / 60), ss = Math.floor(run.time % 60);
     const rows: [L10n, string][] = [
@@ -59,33 +65,44 @@ export class SummaryScene implements Scene {
       [L('回溯次数', 'Rewinds'), String(s.rewinds)],
       [L('悖论次数', 'Paradoxes'), String(s.paradoxes)],
     ];
+    const ruleY = Math.max(top + 130, rowsY + rows.length * rowH + 4);
+    const shardY = ruleY + 12;
+    const explY = Math.round(shardY + lb + 9);
+    const hintY = Math.max(284, Math.round(explY + ls + 14));
+    panel(ctx, 110, top, 420, hintY + promptH() + 9 - top);
     rows.forEach(([label, v], i) => {
-      const y = 84 + i * 18;
+      const y = rowsY + i * rowH;
       const show = this.t > 0.4 + i * 0.12;
       if (!show) return;
-      G.font.draw(ctx, tr(label), 130, y, { color: 'K8' });
-      G.font.draw(ctx, v, 300, y, { align: 'right', color: 'K10' });
+      Text.draw(ctx, label, 130, y, { color: 'K8' });
+      Text.draw(ctx, v, 318, y, { align: 'right', color: 'K10' });
     });
     // build icons
     const icons: [import('../../engine/gfx/sprite').Sprite, string][] = [];
     for (const m of run.memories) { const d = MEMORIES[m.id]; if (d) icons.push([patronSigil(d.patron), d.id]); }
     for (const id of run.parts) { const p = PARTS_BY_ID[id]; if (p) icons.push([partLook(p).icon, id]); }
-    G.small.draw(ctx, tr(L('本局构筑', 'Build')), 330, 84, { color: 'K8' });
-    icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, 106 + Math.floor(i / 8) * 22, 1, k); });
+    Text.draw(ctx, L('本局构筑', 'Build'), 330, rowsY, { size: 'small', color: 'K8' });
+    icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, rowsY + 22 + Math.floor(i / 8) * 22, 1, k); });
     const wi = WEAPON_INFO.find((x) => x.id === run.weapon);
     if (wi && this.t > 0.6) {
-      G.small.draw(ctx, tr(L('武器', 'Weapon')), 330, 160, { color: 'K8' });
-      drawScaled(ctx, wi.sprite, 342, 182, 1, k);
-      G.font.draw(ctx, tr(wi.name), 360, 176, { color: 'B5' });
+      const wy = ruleY - 40;
+      Text.draw(ctx, L('武器', 'Weapon'), 330, wy, { size: 'small', color: 'K8' });
+      const cy = wy + ls + 9;
+      drawScaled(ctx, wi.sprite, 342, cy, 1, k);
+      Text.draw(ctx, wi.name, 360, cy, { color: 'B5', valign: 'middle' });
     }
-    rect(ctx, 126, 200, 388, 1, 'B1');
+    rect(ctx, 126, ruleY, 388, 1, 'B1');
     if (this.t > 1.2) {
-      shardIcon(ctx, 260, 214);
       const n = Math.round(this.shardsBanked * clamp((this.t - 1.2) / 0.8, 0, 1));
-      G.font.draw(ctx, tr(L(`带回时之碎片  ${n}`, `Time Shards banked  ${n}`)), 274, 212, { color: 'V4' });
-      G.small.draw(ctx, tr(L('碎片会留在工坊，用来拧紧你的发条。', 'Shards stay in the workshop to wind your mainspring.')), 320, 236, { align: 'center', color: 'K8' });
+      // icon + line centred together
+      const line = tr(L(`带回时之碎片  ${n}`, `Time Shards banked  ${n}`));
+      const lw = Text.measure(line, 'body').w;
+      const lx = Math.round(320 - (lw + 14) / 2);
+      shardIcon(ctx, lx, Math.round(shardY + Text.inkMid('body') - 4));
+      Text.draw(ctx, line, lx + 14, shardY, { color: 'V4' });
+      Text.draw(ctx, L('碎片会留在工坊，用来拧紧你的发条。', 'Shards stay in the workshop to wind your mainspring.'), 320, explY, { size: 'small', align: 'center', color: 'K8' });
     }
-    if (this.t > 1.5) drawHint(ctx, 320, 284, [['confirm', tr(L('回到工坊', 'Return to the workshop'))]]);
+    if (this.t > 1.5) drawHint(ctx, 320, hintY, [['confirm', tr(L('回到工坊', 'Return to the workshop'))]]);
     ctx.globalAlpha = 1;
   }
 }

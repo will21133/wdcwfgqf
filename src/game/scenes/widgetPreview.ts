@@ -6,7 +6,7 @@ import { G } from '../G';
 import { col } from '../../art/palette';
 import { L, tr } from '../i18n';
 import { Text } from '../ui/text';
-import { drawPanel, drawPrompt, drawPadGlyph, drawBar, drawTagChip, drawTooltip, drawStamp, drawTermLabel, drawPromptLabel, PadGlyph, TagId, TAG_COLOR } from '../ui/widgets';
+import { drawPanel, drawPrompt, drawPadGlyph, drawBar, drawTagChip, drawTooltip, drawStamp, drawTermLabel, drawPromptLabel, promptH, tagChipH, PadGlyph, TagId, TAG_COLOR } from '../ui/widgets';
 import type { Action } from '../../engine/input';
 
 export class WidgetPreview implements Scene {
@@ -28,28 +28,28 @@ export class WidgetPreview implements Scene {
     Text.draw(ctx, L('正文 FP12：回溯会回到旧影 gjpqy_', 'Body FP12: rewinding returns to your Shadow gjpqy_'), 8, y, { color: 'K10' }); y += Text.lineH('body');
     Text.draw(ctx, L('次要 FP10：标签芯片与风味文字 gjpqy', 'Small FP10: tag chips and flavour gjpqy'), 8, y, { size: 'small', color: 'K8' }); y += Text.lineH('small');
     Text.draw(ctx, 'Tiny FP8: 0123456789 ABC xyz gjpqy', 8, y, { size: 'tiny', color: 'K8' }); y += Text.lineH('tiny') + 2;
-    Text.draw(ctx, L('带底板的世界标签', 'World label on a plate'), 8, y, { plate: true, color: 'B6' }); y += 20;
+    Text.draw(ctx, L('带底板的世界标签', 'World label on a plate'), 8, y, { plate: true, color: 'B6' }); y += Math.ceil(Text.lineH('body') + 5);
     // prompts: keyboard / mouse row, then pad glyph row
     const acts: Action[] = ['attack', 'special', 'dash', 'rewind', 'interact', 'confirm', 'cancel', 'pause', 'info'];
     let x = 8;
     for (const a of acts) x += drawPrompt(ctx, a, x, y) + 4;
     x += drawPrompt(ctx, 'up', x, y) + 4;
-    y += 18;
+    y += promptH() + 5;
     x = 8;
     const pads: PadGlyph[] = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'LS', 'RS', 'MENU', 'VIEW', 'DPAD'];
     for (const g of pads) x += drawPadGlyph(ctx, g, x, y) + 4;
     y += 20;
     drawPromptLabel(ctx, 'interact', tr(L('发条台', 'Mainspring')), 120, y);
-    y += 22;
+    y += Math.max(promptH(), Math.ceil(Text.inkH('body')) + 2) + 9;
     // tag chips
     x = 8;
     const tags = Object.keys(TAG_COLOR) as TagId[];
     for (const tg of tags) {
       const w = drawTagChip(ctx, tg, x, y);
       x += w + 4;
-      if (x > 560) { x = 8; y += 16; }
+      if (x > 560) { x = 8; y += tagChipH() + 3; }
     }
-    y += 20;
+    y += tagChipH() + 7;
     // bars
     drawBar(ctx, 8, y, 150, 7, 50, [{ v: 30, color: 'R3' }, { v: 8, color: 'C3', pattern: 'hatch' }, { v: 5, color: 'V3', pattern: 'lock' }]);
     Text.draw(ctx, '38/50', 166, y - 4, { size: 'small' });
@@ -63,7 +63,8 @@ export class WidgetPreview implements Scene {
     // term labels: stylised name + plain-language line while the player is still learning it
     y += 50;
     const terms = ['memory', 'part', 'shard', 'sand', 'echo', 'paradox'];
-    terms.forEach((id, i) => drawTermLabel(ctx, id, 8 + (i % 3) * 210, y + Math.floor(i / 3) * 34, { color: id === 'sand' || id === 'echo' || id === 'paradox' ? 'C3' : 'B5' }));
+    const termRow = Math.ceil(Text.lineH('body') + Text.lineH('small') + 6);
+    terms.forEach((id, i) => drawTermLabel(ctx, id, 8 + (i % 3) * 210, y + Math.floor(i / 3) * termRow, { color: id === 'sand' || id === 'echo' || id === 'paradox' ? 'C3' : 'B5' }));
     // tooltip and stamp (right column)
     drawTooltip(ctx, 430, 6, L('残响', 'Echo'), [L('过去的你，会重复你做过的动作。', 'Past you: repeats what you did.'), L('{c:回溯}时生成。', 'Spawned when you {c:rewind}.')]);
     drawStamp(ctx, L('卡秒！', 'TICK!'), 560, 120, 'B5', 0.3 + (this.t % 0.8));

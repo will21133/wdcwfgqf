@@ -27,6 +27,7 @@ import { col } from '../../art/palette';
 import { damp } from '../../engine/math';
 import { ICONS } from '../../art/sprites/icons';
 import { shardIcon } from '../ui/draw';
+import { Text } from '../ui/text';
 
 export const HUB_THEME: Theme = {
   id: 99, key: 'workshop', name: { zh: '钟匠工坊', en: "The Clockmaker's Workshop" },
@@ -345,7 +346,8 @@ export class HubScene implements Scene {
 
   update(dt: number) {
     this.t += dt;
-    if (this.talkIn > 0 && (this.talkIn -= dt) <= 0 && !this.overlays.length) this.talk();
+    // Ines's first line waits while a menu is open (the countdown would otherwise run out under it)
+    if (this.talkIn > 0 && !this.overlays.length && (this.talkIn -= dt) <= 0) this.talk();
     const w = this.world;
     const p = w.player!;
     if (this.overlays.length) {
@@ -371,10 +373,13 @@ export class HubScene implements Scene {
     this.world.render(r);
     r.flushWorldUi();
     const ctx = r.ui2;
-    // shard counter
-    shardIcon(ctx, 624, 11);
-    G.digits.draw(ctx, String(profile.shards), 621, 10, { fill: 'V4', align: 'right' });
-    G.small.draw(ctx, tr(HUB_THEME.name), 10, 10, { color: 'B4' });
+    // workshop name and shard counter; the full-screen station panels draw their own header over this area
+    const panelOpen = this.overlays.some((o) => o instanceof MainspringOverlay || o instanceof WeaponOverlay || o instanceof LedgerOverlay);
+    if (!panelOpen) {
+      shardIcon(ctx, 624, 11);
+      G.digits.draw(ctx, String(profile.shards), 621, 15 - 4.5 * Text.k, { fill: 'V4', align: 'right' });
+      Text.draw(ctx, HUB_THEME.name, 10, 15, { size: 'small', color: 'B4', valign: 'middle' });
+    }
     for (const o of this.overlays) o.render(r);
   }
 }

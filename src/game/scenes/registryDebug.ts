@@ -52,9 +52,6 @@ export class RegistryDebugScene implements Scene {
     ctx.fillStyle = col('K1');
     ctx.fillRect(0, 0, 640, 360);
     const c = counts();
-    drawPanel(ctx, 16, 16, 360, 300, 'brass');
-    Text.draw(ctx, L('共享注册表', 'Shared registries'), 30, 24, { color: 'B5' });
-    rect(ctx, 30, 42, 332, 1, 'B1');
     const rows: [string, string][] = [
       ['achievements', `${c.achievements.earned} earned / ${c.achievements.defined} defined`],
       ['unlocks', `${c.unlocks.owned} owned / ${c.unlocks.defined} defined`],
@@ -70,11 +67,23 @@ export class RegistryDebugScene implements Scene {
       ['save', `v${c.save.version} · ${c.save.shards} shards${c.save.migratedFrom ? ` · from v1 (+${c.save.refund})` : ''}`],
       ['clock', `${c.clock.now}${c.clock.season ? ' · ' + c.clock.season : ''}`],
     ];
-    let y = 50;
-    for (const [k, v] of rows) {
-      Text.draw(ctx, k, 30, y, { size: 'small', color: 'K7' });
-      Text.draw(ctx, v, 150, y, { size: 'small', color: 'K10', maxW: 214 });
-      y += 19;
+    // rows are measured first so the panel fits them (and spreads to the full width with larger text)
+    const ruleY = Math.round(24 + Text.lineH('body') + 3);
+    const step = Math.max(19, Math.ceil(Text.lineH('small') + 2));
+    const pw = Text.k > 1.2 ? 600 : 360;
+    const laid = rows.map(([k, v]) => {
+      const vx = Math.max(150, Math.ceil(30 + Text.measure(k, 'small').w + 8));
+      return { k, v, vx, h: Math.max(step, Math.ceil(Text.measureWrapped(v, 'small', pw - 10 - vx).h + 2)) };
+    });
+    const ph = Math.min(344, ruleY + 8 + laid.reduce((a, r) => a + r.h, 0) + 4 - 16);
+    drawPanel(ctx, 16, 16, pw, ph, 'brass');
+    Text.draw(ctx, L('共享注册表', 'Shared registries'), 30, 24, { color: 'B5' });
+    rect(ctx, 30, ruleY, pw - 28, 1, 'B1');
+    let y = ruleY + 8;
+    for (const r of laid) {
+      Text.draw(ctx, r.k, 30, y, { size: 'small', color: 'K7' });
+      Text.draw(ctx, r.v, r.vx, y, { size: 'small', color: 'K10', maxW: pw - 10 - r.vx });
+      y += r.h;
     }
   }
 }

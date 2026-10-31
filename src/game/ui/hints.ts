@@ -4,6 +4,9 @@
 // · Each note shows once per save. At most one note every 20 s and one per room; none while a boss
 //   fight is running or right after a boss changes phase (Hints.hold) — notes wait in a short queue
 //   and are dropped (not marked seen, so they can trigger again) if the room changes first.
+//   A note requested while a room is being entered (the new scene's constructor, enter() or first
+//   frames) belongs to the new room. Queued notes expire after 30 s of time in which they could
+//   have shown (a long boss fight does not age them).
 // · The card sits bottom-left: 12px text, an icon, and "[Tab] more" when the Horologium is there.
 // · pause: true notes (★) pause a solo game until dismissed; in co-op they behave like normal notes.
 import type { Renderer } from '../../engine/gfx/renderer';
@@ -11,7 +14,7 @@ import { G } from '../G';
 import { L, L10n } from '../i18n';
 import { profile, saveProfile } from '../save';
 import { Text } from './text';
-import { drawPanel, drawPrompt, promptW, drawBits, drawPixelArt, SLOT_COLOR } from './widgets';
+import { drawPanel, drawPrompt, promptW, promptH, drawBits, drawPixelArt, SLOT_COLOR } from './widgets';
 import { rect } from './draw';
 import { ease, clamp } from '../../engine/math';
 import { ICONS } from '../../art/sprites/icons';
@@ -40,7 +43,7 @@ const W = 232, X = 8, BOTTOM = 326;
 
 const DEFS: Record<string, HintDef> = {};
 const listeners: ((id: string) => void)[] = [];
-const queue: { id: string; player?: number; t0: number }[] = [];
+const queue: { id: string; player?: number; t0: number; age: number }[] = [];
 
 interface Active { def: HintDef; player?: number; t: number; hold: HoldOverlay | null; out: number }
 let active: Active | null = null;
@@ -48,6 +51,17 @@ let lastShown = -Infinity;
 let holdUntil = -Infinity;
 let roomShown = 0;
 let roomScene: unknown = null;
+
+// rooms change through the scene manager's switch hook, in the same tick as the new scene's
+// constructor and enter(): notes requested in that tick (t0 === now) survive the room change
+{
+  const prev = G.scenes.onSwitch;
+  G.scenes.onSwitch = () => { prev?.(); roomScene = G.scenes.current; startRoom(now()); };
+}
+function startRoom(cutoff: number) {
+  roomShown = 0;
+  for (let i = queue.length - 1; i >= 0; i--) if (queue[i].t0 < cutoff) queue.splice(i, 1);
+}
 
 const HEADER = L('伊妮丝的便条', "Ines's note");
 const MORE = L('更多', 'More');
@@ -157,7 +171,7 @@ const hasFooter = (a: Active) => !!a.hold || Panels.has('almanac');
 
 function cardHeight(a: Active) {
   const body = Text.measureWrapped(a.def.text, 'body', W - 40).h;
-  return Math.round(4 + Text.lineH('small') + 4 + Math.max(18, body) + (hasFooter(a) ? 6 + 13 : 0) + 7);
+  return Math.round(4 + Text.lineH('small') + 4 + Math.max(18, body) + (hasFooter(a) ? 6 + promptH() : 0) + 9);
 }
 
 export const Hints = {
@@ -166,7 +180,7 @@ export const Hints = {
   show(id: string, o?: { player?: number }): boolean {
     if (!DEFS[id] || profile.hints.includes(id)) return false;
     if (active?.def.id === id || queue.some((q) => q.id === id)) return true;
-    queue.push({ id, player: o?.player, t0: now() });
+    queue.push({ id, player: o?.player, t0: now(), age: 0 });
     Hints.pump();
     return true;
   },
@@ -174,8 +188,8 @@ export const Hints = {
   onShow(cb: (id: string) => void): void { listeners.push(cb); },
   /** hold every note back for a few seconds (boss phase changes, cutscene beats) */
   hold(sec: number): void { holdUntil = Math.max(holdUntil, now() + sec); },
-  /** a new room started: allow one more note, drop notes queued for the old room */
-  newRoom(): void { roomShown = 0; queue.length = 0; },
+  /** a new room started: allow one more note, drop notes queued before this tick (the old room's) */
+  newRoom(): void { startRoom(now()); },
   /** the note on screen (or null) */
   get active(): string | null { return active?.def.id ?? null; },
   defs(): HintDef[] { return Object.values(DEFS); },
@@ -187,15 +201,19 @@ export const Hints = {
   },
   /** show queued notes when allowed */
   pump(): void {
-    for (let i = queue.length - 1; i >= 0; i--) if (now() - queue[i].t0 > QUEUE_MAX_AGE || profile.hints.includes(queue[i].id)) queue.splice(i, 1);
+    for (let i = queue.length - 1; i >= 0; i--) if (queue[i].age > QUEUE_MAX_AGE || profile.hints.includes(queue[i].id)) queue.splice(i, 1);
     if (!queue.length || !canShowNow()) return;
     const q = queue.shift()!;
     begin(q.id, q.player);
   },
   /** main.ts: every tick, before the scene updates */
   update(dt: number): void {
+    // scenes put in place without a transition (boot, debug routes) also count as a new room;
+    // the queue is kept (it is noticed a tick late, after the new scene may have asked for a note)
     const sc = G.scenes.current;
-    if (sc !== roomScene) { roomScene = sc; Hints.newRoom(); }
+    if (sc !== roomScene) { roomScene = sc; roomShown = 0; }
+    // queued notes age only while they could show (not during boss fights / holds / menus)
+    if (queue.length && !hintsHooks.busy() && now() >= holdUntil && !covered() && !G.scenes.transitioning) for (const q of queue) q.age += dt;
     if (active) {
       if (active.out > 0) {
         active.out += dt;
@@ -227,7 +245,7 @@ export const Hints = {
     rect(ctx, x + 2, y + 2, W - 4, 1, 'S4');
     rect(ctx, x + 2, y + 2 + hh, W - 4, 1, 'S1');
     if (active.player !== undefined) rect(ctx, x + 2, y + 2, 3, hh, SLOT_COLOR[((active.player % 4) + 4) % 4]);
-    Text.draw(ctx, HEADER, x + 9, y + 2, { size: 'small', color: 'K1', shadow: false });
+    Text.draw(ctx, HEADER, x + 9, y + 2 + hh / 2, { size: 'small', color: 'K1', shadow: false, valign: 'middle' });
     // dog-eared corner on the strip
     for (let i = 0; i < 6; i++) {
       rect(ctx, x + W - 8 + i, y + 2, 6 - i, 1, 'K1');
@@ -241,23 +259,25 @@ export const Hints = {
     // body text (12px)
     Text.draw(ctx, def.text, x + 30, iy - 1, { color: 'K10', maxW: W - 40 });
     // footer: [Tab] more · timer / [confirm] got it
-    const fy = y + h - 13 - 5;
+    const ph = promptH();
+    const fy = y + h - ph - 7;
     let fx = x + W - 8;
     if (active.hold) {
       const tw = Math.ceil(Text.measure(GOT_IT, 'body').w);
       fx -= tw;
-      Text.draw(ctx, GOT_IT, fx, fy - 2, { color: active.t >= MIN_READ ? 'B5' : 'K7' });
+      Text.draw(ctx, GOT_IT, fx, fy + ph / 2, { color: active.t >= MIN_READ ? 'B5' : 'K7', valign: 'middle' });
       fx -= promptW('confirm') + 4;
       drawPrompt(ctx, 'confirm', fx, fy);
       fx -= 12;
     } else {
+      // time left: a fuse burning along the card's bottom edge (not an underline under the text)
       const k = 1 - clamp(active.t / SHOW, 0, 1);
-      rect(ctx, x + 30, y + h - 5, Math.round((W - 40) * k), 1, 'S2');
+      rect(ctx, x + 2, y + h - 3, Math.round((W - 4) * k), 1, 'S2');
     }
     if (Panels.has('almanac')) {
       const tw = Math.ceil(Text.measure(MORE, 'small').w);
       fx -= tw;
-      Text.draw(ctx, MORE, fx, fy - 1, { size: 'small', color: 'K8' });
+      Text.draw(ctx, MORE, fx, fy + ph / 2, { size: 'small', color: 'K8', valign: 'middle' });
       fx -= promptW('info') + 3;
       drawPrompt(ctx, 'info', fx, fy);
     }

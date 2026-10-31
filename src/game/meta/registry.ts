@@ -14,12 +14,14 @@ import { term } from '../strings';
 import { Notices } from '../ui/notices';
 
 type MetaKind = 'achievement' | 'secret' | 'chime' | 'unlock' | 'cosmetic' | 'teach';
-const metaListeners: ((kind: MetaKind, id: string) => void)[] = [];
-/** one listener for every first-time meta event (handy for eggs, notes and the ledger) */
-export function onMeta(cb: (kind: MetaKind, id: string) => void): void { metaListeners.push(cb); }
+const metaListeners: ((kind: MetaKind, id: string, source?: string) => void)[] = [];
+/** one listener for every first-time meta event (handy for eggs, notes and the ledger); unlocks pass their source */
+export function onMeta(cb: (kind: MetaKind, id: string, source?: string) => void): void { metaListeners.push(cb); }
 
-function emit(kind: MetaKind, id: string) {
-  for (const cb of metaListeners) cb(kind, id);
+const isDev = (() => { try { return !!(import.meta as any).env?.DEV; } catch { return false; } })();
+
+function emit(kind: MetaKind, id: string, source?: string) {
+  for (const cb of metaListeners) cb(kind, id, source);
   if (kind === 'achievement' || kind === 'secret' || kind === 'chime') {
     const w = (G.scenes.current as any)?.world;
     w?.bus?.emit?.(kind, { id });
@@ -51,12 +53,16 @@ const addOnce = (list: string[], id: string) => { if (list.includes(id)) return 
 export interface AchievementDef { id: string; name: L10n; desc: L10n; icon?: string; hidden?: boolean; reward?: string }
 export const ACHIEVEMENTS: Record<string, AchievementDef> = {};
 export function defineAchievement(d: AchievementDef): void { ACHIEVEMENTS[d.id] = d; }
-/** true the first time (and pops a toast); ids without a definition are still recorded */
+/**
+ * true the first time (and pops a toast). Ids without a definition are still recorded, but get no
+ * toast (it would show a raw id to the player) and a warning in dev builds.
+ */
 export function achieve(id: string): boolean {
   if (!addOnce(profile.achievements, id)) return false;
   saveProfile();
   const d = ACHIEVEMENTS[id];
-  Notices.push({ kind: 'achievement', name: d?.name ?? L(id, id) });
+  if (d) Notices.push({ kind: 'achievement', name: d.name });
+  else if (isDev) console.warn(`[registry] achieve('${id}'): no defineAchievement for this id — recorded without a toast`);
   emit('achievement', id);
   if (d?.reward) unlock(d.reward, `achievement:${id}`);
   return true;
@@ -75,8 +81,7 @@ export function unlock(id: string, source?: string): boolean {
   saveProfile();
   const d = UNLOCKS[id];
   if (d) Notices.push({ kind: 'unlock', name: d.name, sub: d.desc });
-  void source;
-  emit('unlock', id);
+  emit('unlock', id, source);
   for (const cb of unlockListeners) cb(id);
   return true;
 }

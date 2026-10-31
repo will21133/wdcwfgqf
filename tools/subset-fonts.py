@@ -5,9 +5,13 @@ usage: python3 tools/subset-fonts.py            (run automatically by `npm run b
 Scans every source file under src/ (plus index.html) for non-ASCII characters, adds printable ASCII,
 and writes subset woff2 files to build/fonts/. vite.config.ts swaps those in for production builds
 when they exist, so the dev server keeps the full fonts and new strings never go missing.
-Needs fontTools + brotli (pip install fonttools brotli). Without them it prints a warning and
-exits 0: the build then ships the full fonts (larger, still correct).
+Needs fontTools + brotli (pip install fonttools brotli). Without them it prints a warning, removes
+any earlier subset (it could be missing newly added characters) and exits 0: the build then ships
+the full fonts (larger, still correct). A finished subset writes build/fonts/.stamp; vite.config.ts
+only uses the subset while that stamp is newer than every source file, so a plain `vite build`
+after a string change also falls back to the full fonts instead of shipping a stale subset.
 """
+import shutil
 import glob
 import os
 import sys
@@ -43,6 +47,8 @@ def main() -> int:
         from fontTools.ttLib import TTFont
         import brotli  # noqa: F401  (woff2 output)
     except ImportError as e:
+        if os.path.isdir(OUT_DIR):
+            shutil.rmtree(OUT_DIR, ignore_errors=True)
         print(f'[subset-fonts] skipped: {e}. Install with `pip install fonttools brotli`; the build ships full fonts.')
         return 0
     from fontTools import subset as ftsubset
@@ -76,6 +82,8 @@ def main() -> int:
         total_out += b
         note = f', {len(missing)} chars not in font: {"".join(missing[:20])}' if missing else ''
         print(f'[subset-fonts] {name}: {a // 1024} KB -> {b // 1024} KB ({len(text)} chars{note})')
+    with open(os.path.join(OUT_DIR, '.stamp'), 'w', encoding='utf-8') as fh:
+        fh.write(text)
     print(f'[subset-fonts] total {total_in // 1024} KB -> {total_out // 1024} KB, written to build/fonts/')
     return 0
 

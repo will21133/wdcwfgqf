@@ -2,8 +2,7 @@
 // Keyboard / mouse (hover + wheel) / gamepad. Long lists scroll when maxRows is set.
 import { G, sfx } from '../G';
 import { rect } from './draw';
-import { col } from '../../art/palette';
-import { textScale } from '../../engine/gfx/font';
+import { Text } from './text';
 
 export interface MenuItem {
   label: () => string;
@@ -33,11 +32,15 @@ export class MenuList {
   top = 0;
   constructor(public items: MenuItem[]) {
     while (this.sel < items.length - 1 && this.isHeader(this.sel)) this.sel++;
+    // a mouse resting where the menu opens does not pick a row until it moves
+    this.lmx = G.input.mx; this.lmy = G.input.my;
   }
 
   private isHeader(i: number) { return this.items[i]?.kind === 'header'; }
-  /** row height this frame: grows with the 125% text-size setting */
-  get rh() { return Math.round(this.rowH * textScale.r); }
+  /** row height this frame: rowH at text scale 1, growing with the text (window scale, 125% setting) */
+  get rh() { return this.rowH + Math.max(0, Math.round(Text.lineH('body') - G.font.lineH)); }
+  /** height of the list's rows on screen (from y - 3 to the bottom of the last row's highlight) */
+  get listH() { return this.rows * this.rh; }
   private get rows() { return Math.max(1, Math.min(this.items.length, this.maxRows, Math.floor(this.maxH / this.rh))); }
   private follow() {
     // keep the selection (and its section header, when there is room) on screen
@@ -107,61 +110,68 @@ export class MenuList {
     sfx('uiMove');
   }
 
+  private lastRows = -1;
   render(ctx: CanvasRenderingContext2D, x: number, y: number, w: number) {
     this.x = x; this.y = y; this.w = w;
     const rows = this.rows;
+    const rh = this.rh;
+    // the window got shorter or taller (first frame, resize, text size): keep the selection in view
+    if (rows !== this.lastRows) { this.lastRows = rows; this.follow(); }
     this.top = Math.max(0, Math.min(this.items.length - rows, this.top));
     // scroll bar and arrows when the list is longer than the window
     if (rows < this.items.length) {
-      const trackY = y - 3, trackH = rows * this.rh - 2;
+      const trackY = y - 3, trackH = rows * rh - 2;
       const thumbH = Math.max(12, Math.round((trackH * rows) / this.items.length));
       const thumbY = trackY + Math.round(((trackH - thumbH) * this.top) / (this.items.length - rows));
       rect(ctx, x + w + 7, trackY, 2, trackH, 'K2');
       rect(ctx, x + w + 7, thumbY, 2, thumbH, 'B3');
-      if (this.top > 0) for (let k = 0; k < 3; k++) rect(ctx, x + w / 2 - k, y - 9 + k, 1 + k * 2, 1, 'B4');
-      if (this.top + rows < this.items.length) for (let k = 0; k < 3; k++) rect(ctx, x + w / 2 - 2 + k, y + rows * this.rh - 2 + k, 5 - k * 2, 1, 'B4');
+      if (this.top > 0) for (let k = 0; k < 3; k++) rect(ctx, x + w / 2 - k, y - 8 + k, 1 + k * 2, 1, 'B4');
+      if (this.top + rows < this.items.length) for (let k = 0; k < 3; k++) rect(ctx, x + w / 2 - 2 + k, y + rows * rh - 2 + k, 5 - k * 2, 1, 'B4');
     }
-    this.items.forEach((it, i) => {
-      if (i < this.top || i >= this.top + rows) return;
-      const yy = y + (i - this.top) * this.rh;
+    let hint: string | null = null;
+    for (let i = this.top; i < this.top + rows && i < this.items.length; i++) {
+      const it = this.items[i];
+      const yy = y + (i - this.top) * rh;
+      // every row is a highlight band from yy - 3, rh - 2 tall; everything in it is centred on cy
+      const cy = yy - 3 + (rh - 2) / 2;
       if (it.kind === 'header') {
+        // section title sits low in its row, close to the rows it introduces
         const t = it.label();
-        const oyH = Math.round(this.rh - this.rowH);
-        G.small.draw(ctx, t, x - 2, yy + 3 + oyH, { color: 'B4' });
-        const tw = Math.ceil(G.small.measure(t));
-        rect(ctx, x + tw + 4, yy + 10 + oyH, w - tw - 2, 1, 'B1');
-        return;
+        const hy = Math.round(cy + 2);
+        const tw = Math.ceil(Text.draw(ctx, t, x - 2, hy, { size: 'small', color: 'B4', valign: 'middle' }).w);
+        rect(ctx, x + tw + 4, hy, w - tw - 2, 1, 'B1');
+        continue;
       }
       const sel = i === this.sel;
       const dis = it.disabled?.();
       if (sel) {
-        rect(ctx, x - 4, yy - 3, w + 8, this.rh - 2, 'K3');
-        rect(ctx, x - 4, yy - 3, 2, this.rh - 2, 'B5');
+        rect(ctx, x - 4, yy - 3, w + 8, rh - 2, 'K3');
+        rect(ctx, x - 4, yy - 3, 2, rh - 2, 'B5');
       }
-      G.font.draw(ctx, it.label(), x + 6, yy, { color: dis ? 'K7' : sel ? 'K10' : 'K8' });
+      Text.draw(ctx, it.label(), x + 6, cy, { color: dis ? 'K7' : sel ? 'K10' : 'K8', valign: 'middle' });
       const kind = it.kind ?? 'button';
       const rx = x + w - 90;
-      // keep sliders and toggles centred on the (possibly larger) label
-      const oy = Math.round(7.5 * (textScale.r - 1));
+      const c = Math.round(cy);
       if (kind === 'slider') {
         const v = (it.get?.() as number) ?? 0;
         const k = (v - (it.min ?? 0)) / ((it.max ?? 1) - (it.min ?? 0));
-        rect(ctx, rx, yy + oy + 5, 80, 3, 'K0');
-        rect(ctx, rx, yy + oy + 5, Math.round(80 * k), 3, sel ? 'B5' : 'B3');
-        rect(ctx, rx + Math.round(80 * k) - 1, yy + oy + 3, 3, 7, sel ? 'B6' : 'B4');
-        G.digits.draw(ctx, String(Math.round(v * 100)), rx - 6, yy + 2, { fill: 'K9', align: 'right' });
+        rect(ctx, rx, c - 1, 80, 3, 'K0');
+        rect(ctx, rx, c - 1, Math.round(80 * k), 3, sel ? 'B5' : 'B3');
+        rect(ctx, rx + Math.round(80 * k) - 1, c - 3, 3, 7, sel ? 'B6' : 'B4');
+        // 5×7 digits with a 1 px outline: 9 font px tall
+        G.digits.draw(ctx, String(Math.round(v * 100)), rx - 6, cy - 4.5 * Text.k, { fill: 'K9', align: 'right' });
       } else if (kind === 'toggle') {
         const on = !!it.get?.();
-        rect(ctx, rx + 56, yy + oy + 2, 22, 9, 'K0');
-        rect(ctx, rx + 57, yy + oy + 3, 20, 7, on ? 'G2' : 'K3');
-        rect(ctx, on ? rx + 67 : rx + 58, yy + oy + 3, 9, 7, on ? 'G4' : 'K6');
+        rect(ctx, rx + 56, c - 4, 22, 9, 'K0');
+        rect(ctx, rx + 57, c - 3, 20, 7, on ? 'G2' : 'K3');
+        rect(ctx, on ? rx + 67 : rx + 58, c - 3, 9, 7, on ? 'G4' : 'K6');
       } else if (kind === 'choice') {
         const cur = it.get?.();
         const o = it.options?.find((x) => x.value === cur);
-        G.font.draw(ctx, `◀ ${o?.label ?? ''} ▶`, rx + 80, yy, { align: 'right', color: sel ? 'B5' : 'K8' });
+        Text.draw(ctx, `◀ ${o?.label ?? ''} ▶`, rx + 80, cy, { align: 'right', color: sel ? 'B5' : 'K8', valign: 'middle' });
       }
-      if (sel && it.hint) G.small.draw(ctx, it.hint(), x + 6, y + rows * this.rh + 6, { color: 'K8', wrap: w });
-    });
-    void col;
+      if (sel && it.hint) hint = it.hint();
+    }
+    if (hint) Text.draw(ctx, hint, x + 6, y + rows * rh + 6, { size: 'small', color: 'K8', maxW: w });
   }
 }

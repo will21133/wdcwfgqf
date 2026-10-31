@@ -1,6 +1,7 @@
 // Regression screenshot set: one fresh browser context per shot (clean localStorage), several window sizes.
 // usage: node tools/shotset.cjs <outDir> [WxH,WxH,...] [name,name,...]
 //   default sizes 1280x720,1920x1080; default = every shot below.
+//   env: TEXT=125 (start with the 125% text-size setting), QLANG=zh|en (append &lang= to every URL)
 //   prints console warnings/errors per shot ("[text] CJK in tiny" is counted separately).
 const { chromium } = require('playwright');
 const fs = require('node:fs');
@@ -40,6 +41,10 @@ const SHOTS = [
   { name: 'widgets', q: 'scene=widgets', wait: 2500 },
   { name: 'widgets_pad', q: 'scene=widgets&pad=1&lang=en', wait: 2500 },
   { name: 'rewind', q: 'seed=1&floor=0&god=1', wait: 3000, steps: [{ t: 0, move: [640, 300] }, { t: 0, down: 'KeyD' }, { t: 1200, up: 'KeyD' }, { t: 1300, down: 'KeyQ' }, { t: 1600, shot: 1 }, { t: 1700, up: 'KeyQ' }] },
+  { name: 'settings_bottom', q: 'seed=1&floor=0&god=1', wait: 3000, steps: [{ t: 0, press: 'Escape' }, { t: 700, eval: `(() => { const s = window.__G.scenes.current; s.overlays.at(-1).list.items[2].act(); const st = s.overlays.at(-1); st.list.sel = st.list.items.length - 3; st.list.follow(); return 1; })()` }, { t: 1500, shot: 1 }] },
+  { name: 'cutscene', q: 'scene=intro', wait: 6500 },
+  { name: 'registry_demo', q: 'debug=registry&demo=1', wait: 6000 },
+  { name: 'floorcard_pause', q: 'seed=1&floor=1&god=1', wait: 700, steps: [{ t: 0, press: 'Escape' }, { t: 700, shot: 1 }] },
 ];
 
 (async () => {
@@ -53,7 +58,8 @@ const SHOTS = [
   for (const s of SHOTS) {
     if (names && !names.has(s.name)) continue;
     for (const [W, H] of sizes) {
-      const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1, locale: process.env.LOCALE || 'zh-CN' });
+      const ctx = await b.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: +(process.env.DPR || 1), locale: process.env.LOCALE || 'zh-CN' });
+      if (process.env.TEXT === '125') await ctx.addInitScript(() => { try { localStorage.setItem('secondhand.settings.v1', JSON.stringify({ textSize: 125 })); } catch {} });
       const p = await ctx.newPage();
       const logs = [];
       p.on('console', (m) => {
@@ -62,7 +68,7 @@ const SHOTS = [
         if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${t}`);
       });
       p.on('pageerror', (e) => { errors++; logs.push(`[pageerror] ${e.message}`); });
-      await p.goto(base + '?' + s.q);
+      await p.goto(base + '?' + s.q + (process.env.QLANG ? '&lang=' + process.env.QLANG : ''));
       await p.waitForTimeout(s.wait);
       const out = `${outDir}/${s.name}_${W}x${H}.png`;
       if (s.steps) {

@@ -64,17 +64,19 @@ class Manman extends Entity {
     r.worldUi((ctx, toUi) => {
       const q = toUi(sx, sy);
       const w = Math.ceil(Math.min(220, Text.measure(say, 'small').w + 12));
-      const x = Math.round(q.x - w / 2), y = Math.round(q.y);
+      // bubble height follows the text; it grows upward so the tail stays on Manman
+      const h = Math.max(15, Math.ceil(Text.inkH('small')) + 6);
+      const x = Math.round(q.x - w / 2), y = Math.round(q.y) - (h - 15);
       ctx.globalAlpha = a;
       // speech bubble: paper body, ink outline, a little tail pointing at Manman
-      rect(ctx, x + 1, y - 1, w - 2, 1, 'K0'); rect(ctx, x + 1, y + 15, w - 2, 1, 'K0');
-      rect(ctx, x, y, 1, 15, 'K0'); rect(ctx, x + w - 1, y, 1, 15, 'K0');
-      rect(ctx, x + 1, y, w - 2, 15, 'K10');
-      rect(ctx, x + 1, y + 14, w - 2, 1, 'K9');
-      const tx = Math.round(q.x);
-      rect(ctx, tx - 2, y + 15, 5, 1, 'K10'); rect(ctx, tx - 1, y + 16, 3, 1, 'K10'); rect(ctx, tx, y + 17, 1, 1, 'K10');
-      rect(ctx, tx - 3, y + 15, 1, 1, 'K0'); rect(ctx, tx + 3, y + 15, 1, 1, 'K0'); rect(ctx, tx - 2, y + 16, 1, 1, 'K0'); rect(ctx, tx + 2, y + 16, 1, 1, 'K0'); rect(ctx, tx - 1, y + 17, 1, 1, 'K0'); rect(ctx, tx + 1, y + 17, 1, 1, 'K0'); rect(ctx, tx, y + 18, 1, 1, 'K0');
-      Text.draw(ctx, say, q.x, y - 1, { size: 'small', color: 'K1', shadow: false, align: 'center' });
+      rect(ctx, x + 1, y - 1, w - 2, 1, 'K0'); rect(ctx, x + 1, y + h, w - 2, 1, 'K0');
+      rect(ctx, x, y, 1, h, 'K0'); rect(ctx, x + w - 1, y, 1, h, 'K0');
+      rect(ctx, x + 1, y, w - 2, h, 'K10');
+      rect(ctx, x + 1, y + h - 1, w - 2, 1, 'K9');
+      const tx = Math.round(q.x), ty = y + h;
+      rect(ctx, tx - 2, ty, 5, 1, 'K10'); rect(ctx, tx - 1, ty + 1, 3, 1, 'K10'); rect(ctx, tx, ty + 2, 1, 1, 'K10');
+      rect(ctx, tx - 3, ty, 1, 1, 'K0'); rect(ctx, tx + 3, ty, 1, 1, 'K0'); rect(ctx, tx - 2, ty + 1, 1, 1, 'K0'); rect(ctx, tx + 2, ty + 1, 1, 1, 'K0'); rect(ctx, tx - 1, ty + 2, 1, 1, 'K0'); rect(ctx, tx + 1, ty + 2, 1, 1, 'K0'); rect(ctx, tx, ty + 3, 1, 1, 'K0');
+      Text.draw(ctx, say, q.x, y + (h - 1) / 2, { size: 'small', color: 'K1', shadow: false, align: 'center', valign: 'middle' });
       ctx.globalAlpha = 1;
     });
   }

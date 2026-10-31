@@ -7,7 +7,7 @@ import { panel, rect } from './draw';
 import { Text } from './text';
 import { G, sfx } from '../G';
 import { tr, L, UI, i18n } from '../i18n';
-import { settings, saveSettings } from '../settings';
+import { settings, saveSettings, settingsLive, setLanguage } from '../settings';
 import { MEMORIES, PATRONS } from '../progression/memories';
 import { PARTS_BY_ID } from '../progression/parts';
 import { HOURGLASS_BY_ID } from '../progression/hourglass';
@@ -47,7 +47,8 @@ export function settingsItems(onBack: () => void, openControls?: () => void): Me
     { label: () => tr(L('整数倍像素缩放', 'Pixel-perfect scaling')), kind: 'toggle', get: () => settings.pixelPerfect, set: set('pixelPerfect'), hint: () => tr(L('关闭时画面铺满窗口（锐利双线性）。', 'When off, the image fills the window (sharp bilinear).')) },
     { label: () => tr(L('全屏', 'Fullscreen')), act: () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); } },
     header('文字与提示', 'Text & guidance'),
-    { label: () => tr(L('语言 / Language', 'Language / 语言')), kind: 'choice', options: [{ label: '简体中文', value: 'zh' }, { label: 'English', value: 'en' }], get: () => settings.lang, set: set('lang') },
+    // shows the language actually on screen (a ?lang= debug URL can differ from the saved one)
+    { label: () => tr(L('语言 / Language', 'Language / 语言')), kind: 'choice', options: [{ label: '简体中文', value: 'zh' }, { label: 'English', value: 'en' }], get: () => i18n.lang, set: (v: string) => setLanguage(v === 'en' ? 'en' : 'zh') },
     {
       label: () => tr(L('文字大小', 'Text size')), kind: 'choice', options: [{ label: '100%', value: '100' }, { label: '125%', value: '125' }],
       get: () => String(settings.textSize), set: (v: string) => { settings.textSize = v === '125' ? 125 : 100; saveSettings(); },
@@ -58,19 +59,19 @@ export function settingsItems(onBack: () => void, openControls?: () => void): Me
       get: () => settings.termHints, set: (v: string) => { settings.termHints = v as typeof settings.termHints; saveSettings(); },
       hint: () => tr(L('在"回忆""残响"等名称旁显示一句大白话。自动：每个词前 3 次显示。', 'A plain-language line next to names like "Memory" and "Echo". Auto: the first 3 times you see each.')),
     },
-    {
-      label: () => tr(L('HUD 标注', 'HUD labels')), kind: 'choice', get options() { return tripleOpts(); },
+    ...(!settingsLive.hudLabels ? [] : [{
+      label: () => tr(L('HUD 标注', 'HUD labels')), kind: 'choice' as const, get options() { return tripleOpts(); },
       get: () => settings.hudLabels, set: (v: string) => { settings.hudLabels = v as typeof settings.hudLabels; saveSettings(); },
       hint: () => tr(L('在血条、磁带、时砂旁标出名字。自动：前 3 局显示。', 'Names next to your health bar, tape and sand. Auto: your first 3 runs.')),
-    },
+    }]),
     { label: () => tr(L('伤害数字', 'Damage numbers')), kind: 'toggle', get: () => settings.showDamage, set: set('showDamage'), hint: () => tr(L('在敌人头上显示造成的伤害。', 'Show the damage you deal above enemies.')) },
     header('操作', 'Controls'),
-    {
-      label: () => tr(L('回溯方式', 'Rewind input')), kind: 'choice',
+    ...(!settingsLive.rewindMode ? [] : [{
+      label: () => tr(L('回溯方式', 'Rewind input')), kind: 'choice' as const,
       get options() { return [{ label: tr(L('轻按+按住', 'Tap + hold')), value: 'both' }, { label: tr(L('仅轻按', 'Tap only')), value: 'tap' }]; },
       get: () => settings.rewindMode, set: (v: string) => { settings.rewindMode = v === 'tap' ? 'tap' : 'both'; saveSettings(); },
       hint: () => tr(L('轻按：回到旧影。按住：拖动磁带，选择回到哪一刻。仅轻按：按住也当作轻按。', 'Tap: return to your Shadow. Hold: scrub the tape to pick the moment. Tap only: holding counts as a tap.')),
-    },
+    }]),
     { label: () => tr(L('瞄准辅助（手柄）', 'Aim assist (gamepad)')), kind: 'toggle', get: () => settings.aimAssist, set: set('aimAssist') },
     { label: () => tr(L('手柄震动', 'Controller rumble')), kind: 'toggle', get: () => settings.rumble, set: (v: boolean) => { set('rumble')(v); if (v) rumble(0.6, 0.6, 200); } },
     { label: () => tr(L('震动强度', 'Rumble strength')), kind: 'slider', get: () => settings.rumbleStrength, set: (v: number) => { set('rumbleStrength')(v); rumble(0.6, 0.6, 150); }, disabled: () => !settings.rumble },
@@ -103,7 +104,8 @@ export class SettingsPanel implements Overlay {
     // layout follows the text size: rule under the title, rows, then room for a two-line hint
     const ruleY = Math.round(30 + Math.max(18, Text.lineH('body') + 3));
     rect(ctx, 166, ruleY, 308, 1, 'B1');
-    const listY = ruleY + 10;
+    // room above the first row for the scroll-up arrow
+    const listY = ruleY + 13;
     this.list.maxH = 334 - listY - Math.ceil(2 * Text.lineH('small') + 8);
     this.list.render(ctx, 172, listY, 296);
     this.sub?.render(r);
@@ -154,20 +156,38 @@ export class RunInfoPanel implements Overlay {
       `${tr(L('残响', 'Echo'))} ${Math.round(m.echoDmg * 100)}%`,
       `${tr(L('悖论', 'Paradox'))} ${Math.round(m.paradoxDmg)}`,
     ];
-    stats.forEach((s, i) => G.small.draw(ctx, s, 60 + i * 90, 54, { color: 'K8' }));
-    rect(ctx, 56, 68, 528, 1, 'B1');
+    // stat line(s): measured, spread across the panel; two rows when one would not fit
+    const sy = Math.round(34 + Text.lineH('body') + 6), ls = Text.lineH('small');
+    const sw = stats.map((t) => Math.ceil(Text.measure(t, 'small').w));
+    const oneRow = sw.reduce((a, b) => a + b, 0) + 14 * (stats.length - 1) <= 520;
+    const perRow = oneRow ? stats.length : Math.ceil(stats.length / 2);
+    for (let row = 0; row * perRow < stats.length; row++) {
+      // spread each row's items over the panel width with equal gaps
+      const ids = stats.map((_, i) => i).slice(row * perRow, row * perRow + perRow);
+      const used = ids.reduce((a, i) => a + sw[i], 0);
+      const gap = ids.length > 1 ? Math.min(60, (520 - used) / (ids.length - 1)) : 0;
+      let x = 60;
+      for (const i of ids) { Text.draw(ctx, stats[i], x, sy + row * ls, { size: 'small', color: 'K8' }); x += sw[i] + gap; }
+    }
+    const ruleY = Math.round(sy + Math.ceil(stats.length / perRow) * ls + 1);
+    rect(ctx, 56, ruleY, 528, 1, 'B1');
     const es = this.entries();
-    if (!es.length) { G.font.draw(ctx, tr(L('还没有任何回忆或零件。', 'No memories or parts yet.')), 320, 170, { align: 'center', color: 'K7' }); return; }
-    es.forEach((e, i) => {
-      const cx = 72 + (i % 10) * 50, cy = 98 + Math.floor(i / 10) * 44;
-      if (i === this.sel) { rect(ctx, cx - 20, cy - 20, 40, 40, 'K3'); rect(ctx, cx - 20, cy + 19, 40, 1, 'B5'); }
-      drawScaled(ctx, e.icon, cx, cy, 2);
-    });
+    if (!es.length) { Text.draw(ctx, L('还没有任何回忆或零件。', 'No memories or parts yet.'), 320, 170, { align: 'center', color: 'K7' }); return; }
+    // detail of the selected entry, anchored to the panel's bottom: name + tag, then the description
     const e = es[Math.min(this.sel, es.length - 1)];
-    rect(ctx, 56, 246, 528, 1, 'B1');
-    G.font.draw(ctx, e.name, 64, 254, { color: e.color });
-    G.small.draw(ctx, e.tag, 64 + G.font.measure(e.name) + 10, 257, { color: 'K7' });
-    G.font.draw(ctx, e.desc, 64, 274, { color: 'K9', wrap: 512 });
+    const lb = Text.lineH('body');
+    const descH = Text.measureWrapped(e.desc, 'body', 512).h;
+    const dRule = Math.round(Math.min(246, 330 - (lb + 4 + descH) - 8));
+    es.forEach((en, i) => {
+      const cx = 72 + (i % 10) * 50, cy = ruleY + 30 + Math.floor(i / 10) * 44;
+      if (cy + 20 > dRule) return;
+      if (i === this.sel) { rect(ctx, cx - 20, cy - 20, 40, 40, 'K3'); rect(ctx, cx - 20, cy + 19, 40, 1, 'B5'); }
+      drawScaled(ctx, en.icon, cx, cy, 2);
+    });
+    rect(ctx, 56, dRule, 528, 1, 'B1');
+    const nw = Text.draw(ctx, e.name, 64, dRule + 8, { color: e.color }).w;
+    Text.draw(ctx, e.tag, 64 + nw + 10, dRule + 8 + Text.inkMid('body'), { size: 'small', color: 'K7', valign: 'middle' });
+    Text.draw(ctx, e.desc, 64, dRule + 8 + lb + 4, { color: 'K9', maxW: 512 });
   }
 }
 

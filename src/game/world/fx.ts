@@ -56,25 +56,29 @@ export class FX {
       ctx.globalCompositeOperation = 'source-over';
     }
     // numbers and banners are world-anchored UI: crisp, steady during rewind, above the post effects
+    // (queued as one persistent callback: it reads the lists when the UI layer is flushed later in
+    // this same frame, so nothing is copied or allocated per frame)
     if (!this.nums.length && !this.banners.length) return;
-    const nums = this.nums.slice(), banners = this.banners.slice();
-    r.worldUi((ctx, toUi) => {
-      for (const n of nums) {
-        const pop = n.t < 0.06 ? 2 : 1;
-        const a = n.t > 0.55 ? 1 - (n.t - 0.55) / 0.2 : 1;
-        if (a <= 0) continue;
-        const q = toUi(n.x, n.y);
-        G.digits.draw(ctx, n.str, q.x, q.y - 4.5 * pop, { fill: n.color, hi: n.big ? 'B6' : undefined, align: 'center', alpha: a, pop });
-      }
-      for (const b of banners) {
-        const k = b.t / b.dur;
-        const a = k < 0.1 ? k / 0.1 : k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;
-        const yo = k < 0.1 ? (1 - k / 0.1) * 6 : 0;
-        const q = toUi(b.x, b.y - yo - k * 8);
-        Text.draw(ctx, b.text, q.x, q.y, { color: b.color, align: 'center', outline: 'K0', alpha: a });
-      }
-    });
+    r.worldUi(this.drawUi);
   }
+
+  private drawUi = (ctx: CanvasRenderingContext2D, toUi: (x: number, y: number) => { x: number; y: number }) => {
+    for (const n of this.nums) {
+      const pop = n.t < 0.06 ? 2 : 1;
+      const a = n.t > 0.55 ? 1 - (n.t - 0.55) / 0.2 : 1;
+      if (a <= 0) continue;
+      const q = toUi(n.x, n.y);
+      // centred on the anchor: 5×7 digits + outline are 9 font px tall
+      G.digits.draw(ctx, n.str, q.x, q.y - 4.5 * pop * Text.k, { fill: n.color, hi: n.big ? 'B6' : undefined, align: 'center', alpha: a, pop });
+    }
+    for (const b of this.banners) {
+      const k = b.t / b.dur;
+      const a = k < 0.1 ? k / 0.1 : k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;
+      const yo = k < 0.1 ? (1 - k / 0.1) * 6 : 0;
+      const q = toUi(b.x, b.y - yo - k * 8);
+      Text.draw(ctx, b.text, q.x, q.y, { color: b.color, align: 'center', outline: 'K0', alpha: a });
+    }
+  };
 
   number(x: number, y: number, amt: number, color: string, big: boolean) {
     const v = Math.round(amt);
