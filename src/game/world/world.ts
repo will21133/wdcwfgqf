@@ -189,9 +189,12 @@ export class World {
     if (a.kx || a.ky) {
       const hitWall = this.move(a, a.kx * dt, a.ky * dt);
       if (hitWall && Math.hypot(a.kx, a.ky) > 160 && a.team === 'enemy') {
-        // wall slam: small bonus damage, dust
+        // wall slam: dust, and bonus damage with the Anvil part
         this.fx.dust(a.x, a.y, 5);
         this.shake(0.08);
+        const slam = this.run?.mods.wallSlam ?? 0;
+        if (slam > 0) a.hurt({ amount: slam, kind: 'contact', owner: this.player, src: 'wallslam', quiet: true });
+        a.kx = a.ky = 0;
       }
       a.kx *= k; a.ky *= k;
       if (Math.abs(a.kx) < 2) a.kx = 0;

@@ -1,0 +1,1 @@
+[{"t":0,"move":[700,300]},{"t":2500,"down":"KeyW"},{"t":3300,"up":"KeyW"},{"t":3400,"shot":"walk"},{"t":3500,"press":"KeyE"},{"t":5500,"shot":"open"},{"t":5600,"press":"Enter"},{"t":7500,"shot":"result"}]

@@ -1,26 +1,43 @@
 // In-run scene: one room of the tower.
 import type { Scene } from '../../engine/scene';
 import type { Renderer } from '../../engine/gfx/renderer';
+import type { Sprite } from '../../engine/gfx/sprite';
 import { G, sfx } from '../G';
 import { Run } from '../run';
 import { World } from '../world/world';
 import { generateRoom, RoomKind } from '../world/roomgen';
 import { THEMES } from '../../art/themes';
-import { TS, T } from '../world/room';
+import { TS } from '../world/room';
 import { Player } from '../entities/player';
 import { WallLamp, WallGear, Breakable } from '../entities/props';
 import { Door } from '../entities/door';
 import { HUD } from '../ui/hud';
-import { planWaves, Wave } from '../world/director';
+import { planWaves, Wave, findEnemy } from '../world/director';
 import { RNG } from '../../engine/rng';
-import { damp } from '../../engine/math';
+import { damp, clamp, ease } from '../../engine/math';
 import { Dummy } from '../entities/enemies/gearworks';
 import { BIOMES } from '../../art/biomes';
-import { findEnemy } from '../world/director';
+import { Overlay, ChoiceOverlay, Toast } from '../ui/overlay';
+import { PauseMenu } from '../ui/pause';
+import {
+  RoomOption, nextOptions, rewardLook, memoryChoices, hourglassChoices, calibrationChoices, rollPart, partLook, Choice,
+  ROOMS_PER_FLOOR, FLOORS, rewardKindLook,
+} from '../progression/rewards';
+import { PATRONS, MEMORIES, Patron } from '../progression/memories';
+import { PARTS_BY_ID, PartDef } from '../progression/parts';
+import { CAL_BY_ID } from '../progression/calibrations';
+import { RewardOrb, Chest } from '../entities/interact';
+import { Pickup } from '../entities/pickup';
+import { RoomHost, setupShop, setupRest, setupEvent, setupVault, setPartLookup } from '../rooms/special';
+import { tr, L, L10n, UI } from '../i18n';
+import { ICONS, patronSigil } from '../../art/sprites/icons';
+import { rumble } from '../../engine/rumble';
+import { settings } from '../settings';
 
-export interface RoomSpec { kind: RoomKind; seed: number; exits: number }
+setPartLookup((id) => PARTS_BY_ID[id] ?? null);
+const ALL_PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
 
-export class GameScene implements Scene {
+export class GameScene implements Scene, RoomHost {
   world!: World;
   hud = new HUD();
   waves: Wave[] = [];
@@ -29,56 +46,154 @@ export class GameScene implements Scene {
   cleared = false;
   doors: Door[] = [];
   deathT = 0;
-  paused = false;
   t = 0;
-  private rng: RNG;
+  rng: RNG;
+  overlays: Overlay[] = [];
+  options: RoomOption[] = [];
+  titleCard: { title: string; sub: string; t: number } | null = null;
+  /** set by the flow controller (hub/title) */
+  onDeath?: (run: Run) => void;
+  onVictory?: (run: Run) => void;
+  onQuit?: (run: Run) => void;
 
-  constructor(public run: Run, public spec: RoomSpec) {
-    this.rng = new RNG(spec.seed);
+  constructor(public run: Run, public opt: RoomOption, private seed = run.rng.int(1, 1e9)) {
+    this.rng = new RNG(seed);
   }
 
   enter() {
     const run = this.run;
     const th = THEMES[Math.min(run.floor, THEMES.length - 1)];
-    const map = generateRoom({ rng: new RNG(this.spec.seed), kind: this.spec.kind, biome: run.floor, exits: this.spec.exits });
-    const w = new World(map, th, this.spec.seed);
+    this.options = this.opt.kind === 'boss' ? [] : nextOptions(run, this.rng, run.floorState);
+    const exits = this.opt.kind === 'boss' ? 1 : this.options.length;
+    const map = generateRoom({ rng: new RNG(this.seed), kind: this.opt.kind, biome: run.floor, exits });
+    const w = new World(map, th, this.seed);
     w.run = run;
     this.world = w;
-    // props
     for (const p of map.props) {
       if (p.type === 'walllamp') w.add(new WallLamp(p.tx, p.ty, th.lamp, th.lampLight));
       else if (p.type === 'wallgear') w.add(new WallGear(p.tx, p.ty, !!p.data?.big));
       else if (p.type === 'crate' || p.type === 'barrel') w.add(new Breakable(p.tx, p.ty, p.type));
     }
-    BIOMES[th.id]?.decorate?.(w, map, new RNG(this.spec.seed + 99));
-    // player at entry
+    BIOMES[th.id]?.decorate?.(w, map, new RNG(this.seed + 99));
     const ex = map.entry ? (map.entry.tx + 1) * TS : map.pw / 2;
     const ey = map.entry ? map.entry.ty * TS - 10 : map.ph / 2;
     const p = new Player(ex, ey);
     w.add(p);
     w.cam.snap(ex, ey - 40);
-    // doors
-    for (const e of map.exits) {
-      const d = new Door(e, { icon: null, label: '', color: 'B4' }, (door) => this.leave(door));
-      this.doors.push(w.add(d));
-    }
+    map.exits.forEach((e, i) => {
+      const o = this.options[i];
+      const look = !o ? { icon: ICONS.boss, color: 'B5', label: L('向上', 'Ascend') } : rewardLook(o);
+      this.doors.push(w.add(new Door(e, { icon: look.icon, label: tr(look.label), color: look.color }, () => this.leave(o ?? null))));
+    });
+    w.flushAdds();
+    run.registerHooks(w, p);
+    run.shieldReady = run.mods.firstHitShield > 0;
+    run.onCharge = () => { sfx('charge'); rumble(0.12, 0.25, 90); };
     const dbgSpawn = G.debug.get('spawn');
-    if (dbgSpawn) {
-      // debug: ?spawn=id[,id...]  spawns those enemies as a single wave
-      const defs = dbgSpawn.split(',').map((id) => findEnemy(id)).filter((d) => !!d) as any[];
-      this.waves = [{ defs }];
-    } else if (this.spec.kind === 'combat' || this.spec.kind === 'elite') {
-      this.waves = planWaves(this.rng, run.floor, run.roomIndex, this.spec.kind === 'elite');
-    } else if (this.spec.kind === 'tutorial') {
+    const kind = this.opt.kind;
+    if (dbgSpawn && run.roomIndex === 0 && run.floor === Number(G.debug.get('floor') ?? 0)) {
+      this.waves = [{ defs: dbgSpawn.split(',').map((id) => findEnemy(id)).filter((d) => !!d) as any }];
+    } else if (kind === 'combat' || kind === 'elite') {
+      this.waves = planWaves(this.rng, run.floor, run.roomIndex, kind === 'elite', run.overwind);
+      if (kind === 'elite') run.floorState.elites++;
+    } else if (kind === 'boss') {
+      this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind);
+    } else if (kind === 'tutorial') {
       const sp = map.spawnable[Math.floor(map.spawnable.length / 2)];
       w.add(new Dummy(sp.tx * TS + 8, sp.ty * TS + 8));
-    }
-    if (!this.waves.length) this.cleared = true;
+    } else if (kind === 'shop') { run.floorState.shop = true; setupShop(this); }
+    else if (kind === 'rest') setupRest(this);
+    else if (kind === 'event') setupEvent(this);
+    else if (kind === 'vault') { run.floorState.vault = true; setupVault(this); }
+    if (!this.waves.length && (kind === 'combat' || kind === 'elite' || kind === 'tutorial')) this.cleared = true;
+    if (kind === 'shop' || kind === 'rest' || kind === 'event' || kind === 'vault') this.cleared = true;
     w.flushAdds();
     G.r.params.lighting = true;
-    G.music.play(th.music);
+    G.music.play(kind === 'shop' ? 'shop' : th.music);
+    G.music.layer('combat', 0, 0.01);
+    const off = G.debug.get('offer');
+    if (off && run.roomIndex === Number(G.debug.get('roomIndex') ?? 0)) {
+      if (off === 'hourglass') this.offerHourglass();
+      else if (off === 'calibration') this.offerCalibration();
+      else if (off === 'part') { const pt = rollPart(run, this.rng); if (pt) this.grantPart(pt); }
+      else this.offerMemory(off as Patron);
+    }
+    if (run.roomIndex === 0) this.titleCard = { title: tr(th.name), sub: tr(L(`第 ${run.floor + 1} 层`, `FLOOR ${run.floor + 1}`)), t: 0 };
   }
 
+  // ───────────────────────── RoomHost ─────────────────────────
+  openOverlay(o: Overlay) { this.overlays.push(o); }
+
+  openChoice(choices: Choice[], header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string }, after?: () => void) {
+    if (!choices.length) { after?.(); return; }
+    this.openOverlay(new ChoiceOverlay(choices, header, (c) => {
+      const p = this.world.player!;
+      this.world.fx.banner(p.x, p.y - 36, tr(c.title), c.color, 1.4);
+      rumble(0.2, 0.2, 100);
+      after?.();
+    }));
+  }
+
+  offerMemory(patron: Patron, boost = 0) {
+    const pd = PATRONS[patron];
+    const choices = memoryChoices(this.run, this.rng, patron, (om, replaced) => {
+      if (replaced) this.world.bus.off(replaced);
+      const d = MEMORIES[om.id];
+      d.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, om) }, d.v[om.rarity]);
+      this.syncPlayer();
+    }, boost);
+    this.openChoice(choices, { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color });
+  }
+
+  offerHourglass() {
+    this.openChoice(hourglassChoices(this.run, this.rng, () => this.syncPlayer()), { title: UI.hourglass, sub: L('回溯的本质', 'The nature of rewinding'), icon: ICONS.hourglass, color: 'C3' });
+  }
+
+  offerCalibration() {
+    this.openChoice(calibrationChoices(this.run, this.rng, (id) => {
+      CAL_BY_ID[id]?.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, id) });
+      this.syncPlayer();
+    }), { title: UI.calibration, sub: L('秒针细剑', 'Second-Hand Rapier'), icon: ICONS.whetstone, color: 'K9' });
+  }
+
+  grantPart(p: PartDef) {
+    this.run.parts.push(p.id);
+    this.run.recompute();
+    p.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, p.id) });
+    const look = partLook(p);
+    this.toast(look.icon, tr(p.name), tr(p.desc), look.color);
+    this.syncPlayer();
+  }
+
+  toast(icon: Sprite | null, title: string, desc: string, color = 'B5') { this.overlays.push(new Toast(icon, title, desc, color)); }
+  unlockDoors() { for (const d of this.doors) d.unlock(); }
+
+  center() {
+    const m = this.world.map;
+    let sx = 0, sy = 0, n = 0;
+    for (const s of m.spawnable) { sx += s.tx; sy += s.ty; n++; }
+    if (!n) {
+      const fl = m.openTiles(1);
+      for (const s of fl) { sx += s.tx; sy += s.ty; n++; }
+    }
+    if (!n) return { x: m.pw / 2, y: m.ph / 2 };
+    return { x: Math.round((sx / n) * TS + 8), y: Math.round((sy / n) * TS + 8) };
+  }
+
+  /** keep the live player in sync with recomputed stats */
+  private syncPlayer() {
+    const p = this.world.player;
+    if (!p) return;
+    const before = p.maxHp;
+    p.maxHp = this.run.mods.maxHp;
+    if (p.maxHp > before) p.hp += p.maxHp - before;
+    p.hp = Math.min(p.maxHp, p.hp);
+    this.run.hp = p.hp;
+    p.recorder.setWindow(this.run.mods.rewindWindow);
+    if (p.dashCharges > this.run.mods.dashCharges) p.dashCharges = this.run.mods.dashCharges;
+  }
+
+  // ───────────────────────── flow ─────────────────────────
   private spawnWave() {
     const w = this.world;
     const wave = this.waves[this.waveIdx];
@@ -98,103 +213,182 @@ export class GameScene implements Scene {
     w.bus.emit('waveStart', { wave: this.waveIdx });
   }
 
-  private leave(_d: Door) {
+  private onClear() {
+    this.cleared = true;
+    const w = this.world;
     const run = this.run;
+    run.stats.rooms++;
+    sfx('roomClear');
+    w.fx.banner(w.player!.x, w.player!.y - 40, tr(UI.cleared), 'B5', 1.6);
+    w.bus.emit('roomClear', {});
+    w.slowmo(0.35, 0.35);
+    rumble(0.2, 0.3, 120);
+    const c = this.center();
+    const o = this.opt;
+    if (o.kind === 'elite') for (let i = 0; i < 3 + run.floor; i++) w.add(new Pickup(c.x, c.y, 'shard', 1));
+    if (o.kind === 'boss') {
+      for (let i = 0; i < 8 + run.floor * 3; i++) w.add(new Pickup(c.x, c.y, 'shard', 1));
+      this.spawnReward({ kind: 'combat', reward: 'memory', patron: this.rng.pick(ALL_PATRONS) }, c, 0.3);
+      w.add(new Pickup(c.x + 30, c.y, 'heal', Math.round(run.mods.maxHp * 0.5)));
+    } else this.spawnReward(o, c);
+    this.unlockDoors();
+  }
+
+  private spawnReward(o: RoomOption, c: { x: number; y: number }, boost = 0) {
+    const w = this.world, run = this.run;
+    if (!o.reward) return;
+    const look = rewardKindLook(o.reward, o.patron);
+    switch (o.reward) {
+      case 'memory': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => this.offerMemory(o.patron ?? 'oren', boost + (o.kind === 'elite' ? 0.15 : 0)))); break;
+      case 'hourglass': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => this.offerHourglass())); break;
+      case 'calibration': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => this.offerCalibration())); break;
+      case 'heal': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => {
+        const p = w.player!; const a = Math.round(p.maxHp * 0.3 * run.mods.healMul);
+        p.hp = Math.min(p.maxHp, p.hp + a); w.fx.number(p.x, p.y - 26, a, 'G4', true); sfx('heal');
+      })); break;
+      case 'brass': for (let i = 0; i < 18 + run.floor * 6; i++) w.add(new Pickup(c.x, c.y, 'brass', 3)); break;
+      case 'shards': for (let i = 0; i < 4; i++) w.add(new Pickup(c.x, c.y, 'shard', 1)); break;
+      case 'part': {
+        const part = rollPart(run, this.rng, { allowCursed: false });
+        w.add(new Chest(c.x, c.y, () => { if (part) this.grantPart(part); }, () => tr(UI.part)));
+        break;
+      }
+    }
+  }
+
+  /** bank this room's stats into the run */
+  bankStats() {
+    const run = this.run, s = this.world.stats;
+    run.stats.kills += s.kills; run.stats.rewinds += s.rewinds; run.stats.paradoxes += s.paradoxes;
+    run.stats.damage += s.damage; run.stats.hitsTaken += s.hitsTaken;
+    this.world.stats = { damage: 0, kills: 0, rewinds: 0, paradoxes: 0, hitsTaken: 0 };
+  }
+
+  private leave(o: RoomOption | null) {
+    const run = this.run;
+    const p = this.world.player!;
+    p.locked = true;
+    run.hp = p.hp;
+    this.bankStats();
+    if (this.opt.kind === 'boss' || !o) {
+      if (run.floor >= FLOORS - 1) { this.onVictory?.(run); return; }
+      run.floor++;
+      run.roomIndex = 0;
+      run.floorState = { shop: false, elites: 0, vault: false };
+      run.autoRewindLeft = run.mods.autoRewindPerFloor;
+      G.scenes.go(() => this.next({ kind: 'combat', reward: 'memory', patron: this.rng.pick(ALL_PATRONS) }), 'clock', 0.8);
+      return;
+    }
     run.roomIndex++;
-    const next: RoomSpec = { kind: run.roomIndex % 5 === 4 ? 'elite' : 'combat', seed: run.rng.int(1, 1e9), exits: run.rng.int(2, 3) };
-    this.world.player!.locked = true;
-    G.scenes.go(() => new GameScene(run, next), 'clock', 0.5);
+    G.scenes.go(() => this.next(o), 'clock', 0.5);
+  }
+
+  private next(o: RoomOption): GameScene {
+    const s = new GameScene(this.run, o);
+    s.onDeath = this.onDeath;
+    s.onVictory = this.onVictory;
+    s.onQuit = this.onQuit;
+    return s;
   }
 
   update(dt: number) {
     this.t += dt;
     const w = this.world;
     const p = w.player!;
-    if (G.input.pressed('pause')) this.paused = !this.paused;
-    if (this.paused) { G.audio.muffle(true, 700); return; }
+    this.run.time += dt;
+    if (this.titleCard) { this.titleCard.t += dt; if (this.titleCard.t > 3.2) this.titleCard = null; }
+    // overlays: the topmost blocking overlay owns input; toasts tick underneath
+    if (this.overlays.length) {
+      const top = this.overlays[this.overlays.length - 1];
+      for (let i = this.overlays.length - 1; i >= 0; i--) {
+        const o = this.overlays[i];
+        if (o === top || !o.blocks) { if (!o.update(dt)) this.overlays.splice(i, 1); }
+      }
+      if (top.blocks && this.overlays.includes(top)) { this.hud.update(dt, w); return; }
+      if (this.overlays.some((o) => o.blocks)) { this.hud.update(dt, w); return; }
+    }
+    if (G.input.pressed('pause') && p.hp > 0) { this.overlays.push(new PauseMenu(this)); return; }
     w.update(dt);
-    // waves
+    if (!w.frozen && !this.cleared) w.bus.emit('tick', { dt });
     if (!this.cleared && p.hp > 0) {
       const alive = w.aliveEnemies.length;
       if (this.waveIdx < 0 || (alive <= (this.waveIdx < this.waves.length - 1 ? 1 : 0) && this.waveIdx < this.waves.length - 1)) {
         this.waveDelay -= dt;
-        if (this.waveDelay <= 0) {
-          this.waveIdx++;
-          this.waveDelay = 0.8;
-          this.spawnWave();
-        }
-      } else if (alive === 0 && this.waveIdx >= this.waves.length - 1) {
-        this.onClear();
-      }
+        if (this.waveDelay <= 0) { this.waveIdx++; this.waveDelay = 0.8; this.spawnWave(); }
+      } else if (alive === 0 && this.waveIdx >= this.waves.length - 1) this.onClear();
     }
-    // music intensity
     const combat = !this.cleared && w.aliveEnemies.length > 0;
     G.music.layer('combat', combat ? 1 : 0, combat ? 0.8 : 3);
-    // camera follow with look-ahead toward aim
-    if (p) {
-      const look = G.input.mouseAim ? 0.18 : 0;
-      const tx = p.x + Math.cos(p.aim) * 40 * look * 2, ty = p.y - 10 + Math.sin(p.aim) * 30 * look * 2;
-      w.cam.follow(tx, ty, dt, 7);
-    }
+    const aiming = G.input.mouseAim || Math.hypot(G.input.padAimX, G.input.padAimY) > 0.3;
+    const look = aiming ? 0.36 : 0;
+    w.cam.follow(p.x + Math.cos(p.aim) * 40 * look, p.y - 10 + Math.sin(p.aim) * 30 * look, dt, 7);
     this.hud.update(dt, w);
-    // post fx decay
     const pp = G.r.params;
     pp.hurt = Math.max(0, pp.hurt - dt * 2.2);
     pp.flash = Math.max(0, pp.flash - dt * 4);
     pp.rewind = damp(pp.rewind, p.rewindFx, 18, dt);
     pp.ca = pp.rewind * 2.2 + pp.hurt * 1.5;
-    // death
     if (p.hp <= 0) {
       this.deathT += dt;
-      if (this.deathT < dt * 1.5) w.slowmo(0.25, 1.2);
-      if (this.deathT > 2.2 && (G.input.pressed('confirm') || G.input.pressed('attack'))) {
-        G.scenes.go(() => new GameScene(new Run(), { kind: 'combat', seed: (Math.random() * 1e9) | 0, exits: 2 }), 'clock', 0.6);
+      if (this.deathT < dt * 1.5) { w.slowmo(0.25, 1.2); rumble(0.9, 1, 500); G.music.stop(2); }
+      if (this.deathT > 2.4 && (G.input.pressed('confirm') || G.input.pressed('attack'))) {
+        this.run.hp = 0;
+        this.bankStats();
+        if (this.onDeath) this.onDeath(this.run);
+        else G.scenes.go(() => new GameScene(new Run(), { kind: 'combat', reward: 'memory', patron: 'oren' }), 'clock', 0.6);
       }
     }
-  }
-
-  private onClear() {
-    this.cleared = true;
-    const w = this.world;
-    for (const d of this.doors) d.unlock();
-    // entry stays sealed
-    sfx('roomClear');
-    w.fx.banner(w.player!.x, w.player!.y - 40, '— 清 场 —', 'B5', 1.6);
-    w.bus.emit('roomClear', {});
-    w.slowmo(0.35, 0.35);
   }
 
   render(r: Renderer) {
     const th = this.world.theme;
     const pp = r.params;
+    const blocking = this.overlays.some((o) => o.blocks);
     pp.tint = th.grade.tint;
     pp.lift = th.grade.lift;
-    pp.saturation = th.grade.sat * (this.paused ? 0.3 : 1);
+    pp.saturation = th.grade.sat * (blocking ? 0.55 : 1);
     pp.contrast = th.grade.contrast;
     pp.vignette = 0.42;
     pp.bloom = 0.5;
     pp.bloomThreshold = 0.6;
     pp.lighting = true;
+    pp.fade = 0;
+    if (!settings.flashes) pp.flash = 0;
+    this.world.cam.shakeScale = settings.shake;
     this.world.render(r);
     this.hud.render(r, this.world);
     const ctx = r.ui2;
+    if (this.titleCard) this.renderTitleCard(ctx);
     if (this.world.player!.hp <= 0 && this.deathT > 1.0) {
       const a = Math.min(1, (this.deathT - 1.0) / 1.0);
       ctx.globalAlpha = a * 0.75;
       ctx.fillStyle = '#0b0a14';
       ctx.fillRect(0, 0, 640, 360);
       ctx.globalAlpha = a;
-      G.font.draw(ctx, '停 摆', 320, 150, { align: 'center', color: 'R3', outline: 'K0' });
-      G.small.draw(ctx, 'THE CLOCK STOPS', 320, 170, { align: 'center', color: 'K7' });
-      if (this.deathT > 2.2) G.small.draw(ctx, '按 [攻击] 重新上发条', 320, 200, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K7' });
+      G.font.draw(ctx, tr(UI.stopped), 320, 150, { align: 'center', color: 'R3', outline: 'K0' });
+      if (this.deathT > 2.4) G.small.draw(ctx, tr(UI.retry), 320, 200, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K7' });
       ctx.globalAlpha = 1;
     }
-    if (this.paused) {
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = '#0b0a14';
-      ctx.fillRect(0, 0, 640, 360);
-      ctx.globalAlpha = 1;
-      G.font.draw(ctx, '— 暂停 —', 320, 170, { align: 'center', color: 'B5', outline: 'K0' });
-    }
+    for (const o of this.overlays) o.render(r);
+  }
+
+  private renderTitleCard(ctx: CanvasRenderingContext2D) {
+    const t = this.titleCard!.t;
+    const a = t < 0.5 ? ease.outCubic(t / 0.5) : t > 2.6 ? 1 - (t - 2.6) / 0.6 : 1;
+    if (a <= 0) return;
+    const w = Math.round(220 * clamp(t / 0.6, 0, 1));
+    ctx.globalAlpha = a * 0.55;
+    ctx.fillStyle = '#0b0a14';
+    ctx.fillRect(0, 96, 640, 54);
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#d99c45';
+    ctx.fillRect(320 - w, 100, w * 2, 1);
+    ctx.fillRect(320 - w, 145, w * 2, 1);
+    G.small.draw(ctx, this.titleCard!.sub, 320, 106, { align: 'center', color: 'B4' });
+    G.font.draw(ctx, this.titleCard!.title, 320, 122, { align: 'center', color: 'K10', outline: 'K0' });
+    ctx.globalAlpha = 1;
   }
 }
+
+export { ROOMS_PER_FLOOR };
+export type { RoomKind };

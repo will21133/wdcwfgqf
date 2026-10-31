@@ -11,6 +11,7 @@ import { INSTRUMENTS } from '../audio/instruments';
 import { SONGS } from '../audio/songs';
 import { GameScene } from './scenes/game';
 import { Run } from './run';
+import { loadSettings } from './settings';
 
 function setupAudio() {
   registerSfx(G.audio);
@@ -32,6 +33,7 @@ function setupAudio() {
 
 export async function boot() {
   setupAudio();
+  loadSettings();
   const scene = G.debug.get('scene');
   if (scene === 'room') {
     G.scenes.set(new RoomPreview(Number(G.debug.get('seed') ?? 1), Number(G.debug.get('biome') ?? 0)));
@@ -63,6 +65,8 @@ export async function boot() {
   const kind = (G.debug.get('room') as any) ?? 'combat';
   const run = new Run(seed);
   run.floor = Number(G.debug.get('floor') ?? 0);
-  if (G.debug.get('god')) run.mods.maxHp = run.hp = 9999;
-  G.scenes.set(new GameScene(run, { kind, seed, exits: 3 }));
+  run.roomIndex = Number(G.debug.get('roomIndex') ?? 0);
+  if (G.debug.get('god')) { run.bonuses.push({ apply: (m) => { m.maxHp = 9999; } }); run.recompute(); run.hp = 9999; }
+  if (G.debug.get('brass')) run.brass = Number(G.debug.get('brass'));
+  G.scenes.set(new GameScene(run, { kind, reward: 'memory', patron: (G.debug.get('patron') as any) ?? 'oren' }, seed));
 }

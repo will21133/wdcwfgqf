@@ -3,6 +3,8 @@ import type { World } from '../world/world';
 import { angleDiff, clamp, TAU } from '../../engine/math';
 import { frand } from '../../engine/rng';
 import { sfx } from '../G';
+import { rumble } from '../../engine/rumble';
+const G_sfx = sfx;
 
 export type DmgKind = 'melee' | 'proj' | 'aoe' | 'dot' | 'paradox' | 'contact' | 'fall' | 'status';
 
@@ -143,13 +145,15 @@ export class Combat {
     let amt = info.amount;
     // rust: +4% damage taken per stack
     if (t.st.rust > 0 && info.kind !== 'fall') amt *= 1 + t.st.rust * 0.04 * (w.run?.mods.rustPower ?? 1);
+    const fromPlayer = !!info.owner && info.owner.team === 'player';
+    if (fromPlayer && w.run && w.run.mods.freshDmg && t.hp / t.maxHp > 0.8) amt *= 1 + w.run.mods.freshDmg;
     // stasis: store instead of dealing
     if (t.st.stasis > 0 && !info.fromStasis && t.team === 'enemy') {
       t.st.stasisStored += amt;
       t.flash = 0.06;
       this.hitFx(t, info, amt, true);
       if (info.owner && info.owner.team === 'player') {
-        w.run?.addSand(amt * (info.echo ? 0.5 : 1));
+        w.run?.addSand(amt * (info.echo && !w.run.mods.echoSand ? 0.5 : 1));
         w.bus.emit('hit', { target: t, info, dealt: amt });
       }
       return amt;
@@ -165,7 +169,7 @@ export class Combat {
     if (info.knock && info.x !== undefined) {
       const dx = t.x - info.x, dy = t.y - (info.y ?? t.y);
       const d = Math.hypot(dx, dy) || 1;
-      const k = info.knock / t.mass;
+      const k = (info.knock * (fromPlayer && w.run ? w.run.mods.knockMul : 1)) / t.mass;
       t.kx += (dx / d) * k;
       t.ky += (dy / d) * k;
     }
@@ -182,9 +186,11 @@ export class Combat {
     this.hitFx(t, info, amt, false);
 
     if (info.owner && info.owner.team === 'player' && t.team === 'enemy') {
-      w.run?.addSand(dealt * (info.echo ? 0.5 : 1));
+      w.run?.addSand(dealt * (info.echo && !w.run.mods.echoSand ? 0.5 : 1));
       w.stats.damage += dealt;
       w.bus.emit('hit', { target: t, info, dealt });
+      // resonance rings when struck by an echo or a paradox
+      if ((info.echo || info.kind === 'paradox') && info.src !== 'resonance' && t.st.resonance > 0) this.ring(t);
     }
     if (t.hp <= 0) {
       t.hp = 0;
@@ -195,6 +201,19 @@ export class Combat {
       }
     }
     return dealt;
+  }
+
+  /** Resonance detonation: area damage scaled by stacks, consumes them */
+  ring(t: Actor) {
+    const w = this.world;
+    const n = t.st.resonance;
+    t.st.resonance = 0;
+    const dmg = 14 * n * (w.run?.mods.resonanceDmg ?? 1);
+    const R = 30 + n * 6;
+    w.fx.ring(t.x, t.y - 6, 3, R, 0.35, 'U4', 3);
+    w.fx.burst(t.x, t.y - 8, 10 + n * 3, ['W', 'U4', 'U3'], 140, 0.4);
+    G_sfx('wave', { vol: 0.5, pan: w.pan(t.x) });
+    for (const e of w.enemiesNear(t.x, t.y, R)) this.applyDamage(e, { amount: dmg, kind: 'aoe', owner: w.player, x: t.x, y: t.y, knock: 120, src: 'resonance', quiet: e !== t });
   }
 
   addStatus(t: Actor, s: 'burn' | 'rust' | 'stasis' | 'resonance', n: number) {
@@ -271,6 +290,7 @@ export class Combat {
       const hs = info.hitstop ?? (big ? 0.075 : info.echo ? 0.02 : 0.045);
       w.hitstop(hs);
       w.shake(big ? 0.28 : info.echo ? 0.06 : 0.12);
+      if (!info.echo) rumble(big ? 0.35 : 0.12, big ? 0.5 : 0.25, big ? 90 : 50);
       sfx(big ? 'hitCrit' : info.echo ? 'hitEcho' : 'hit', { vol: 0.8, pan: w.pan(t.x) });
     }
   }

@@ -15,6 +15,8 @@ import { frand } from '../../engine/rng';
 import type { DamageInfo } from '../systems/combat';
 import { VIEW_W, VIEW_H } from '../../engine/gfx/post';
 import { col } from '../../art/palette';
+import { rumble } from '../../engine/rumble';
+import { settings } from '../settings';
 
 let FRAMES: TickFrames | null = null;
 let KEYS: Sprite[] = [];
@@ -224,7 +226,7 @@ export class Player extends Actor implements Wielder {
       let base = this.aim;
       if (mv.x || mv.y) base = Math.atan2(mv.y, mv.x);
       // soft aim assist toward the nearest enemy within a cone
-      let best: number | null = null, bd = 150;
+      let best: number | null = null, bd = settings.aimAssist ? 150 : 0;
       for (const e of this.world.enemies) {
         if (e.dead) continue;
         const d = Math.hypot(e.x - this.x, e.y - this.y);
@@ -261,6 +263,7 @@ export class Player extends Actor implements Wielder {
     this.recorder.event({ type: 'dash', dx, dy });
     this.world.fx.dust(this.x, this.y, 4, Math.atan2(dy, dx));
     sfx('dash', { pan: this.world.pan(this.x) });
+    rumble(0, 0.25, 60);
     this.world.bus.emit('dash', { owner: this, dx, dy, echo: false });
     // perfect dodge check: enemy projectile/hitbox nearby
     if (this.world.enemies.some((e) => (e as any).attacking && Math.hypot(e.x - this.x, e.y - this.y) < 40)) {
@@ -306,6 +309,7 @@ export class Player extends Actor implements Wielder {
     this.dashT = 0; this.lungeT = 0; this.vx = this.vy = 0;
     this.world.stats.rewinds++;
     sfx('rewind');
+    rumble(0.1, 0.5, 400);
     G.audio.muffle(true, 1400);
     G.audio.duck(0.3, 0.6);
   }
@@ -334,7 +338,7 @@ export class Player extends Actor implements Wielder {
     const first = R.rec.frames[0];
     this.x = first.x; this.y = first.y;
     const fixedDuring = this.fixedTaken - first.fixed;
-    const restoreTo = Math.max(this.hp, Math.min(this.maxHp, first.hp - fixedDuring));
+    const restoreTo = m.noRewindHeal ? this.hp : Math.max(this.hp, Math.min(this.maxHp, first.hp - fixedDuring));
     const restored = restoreTo - this.hp;
     this.hp = restoreTo;
     this.rewinding = null;
@@ -348,6 +352,16 @@ export class Player extends Actor implements Wielder {
     while (alive.length >= m.maxEchoes) { const old = alive.shift()!; old.shatter(false); }
     const echo = this.world.add(new Echo(R.rec, this.weapon, m.echoDmg, m.echoSpeed));
     this.echoes.push(echo);
+    if (m.mirrorEcho) {
+      // mirrored twin: reflect the path horizontally around the start point
+      const sx = R.rec.frames[0].x;
+      const mir = {
+        frames: R.rec.frames.map((f) => ({ ...f, x: sx - (f.x - sx), flip: !f.flip, wa: Math.PI - f.wa })),
+        events: R.rec.events.map((e) => ({ ...e, angle: e.angle !== undefined ? Math.PI - e.angle : undefined, dx: e.dx !== undefined ? -e.dx : undefined })),
+      };
+      // keep mirrored path inside walkable space
+      if (mir.frames.every((f) => !this.world.map.solidAt(f.x, f.y))) this.echoes.push(this.world.add(new Echo(mir, this.weapon, m.echoDmg * 0.5, m.echoSpeed)));
+    }
     this.recorder.clear();
     this.scarfA.reset(this.x, this.y - 10);
     this.scarfB.reset(this.x, this.y - 10);
@@ -356,6 +370,7 @@ export class Player extends Actor implements Wielder {
     this.world.fx.burst(this.x, this.y - 8, 14, ['C4', 'C3', 'C2'], 120, 0.4);
     this.world.shake(0.2);
     sfx('rewindEnd');
+    rumble(0.45, 0.3, 140);
     G.audio.muffle(false);
     this.world.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored });
     this.world.bus.emit('echoSpawn', { echo });
@@ -376,8 +391,9 @@ export class Player extends Actor implements Wielder {
     w.hitstop(0.1);
     w.shake(0.45);
     w.stats.paradoxes++;
-    G.r.params.flash = 0.35;
+    if (settings.flashes) G.r.params.flash = 0.35;
     sfx('paradox');
+    rumble(1, 0.8, 260);
     G.audio.duck(0.4, 0.7);
     w.bus.emit('paradox', { x, y, echo: e });
     if (!m.paradoxKeepsEcho) e.shatter(true);
@@ -389,6 +405,14 @@ export class Player extends Actor implements Wielder {
     if (this.hp <= 0 || this.rewinding) return 0;
     if ((this.invuln > 0 || this.dashT > 0) && !info.pierceInvuln) return 0;
     const m = this.mods;
+    if (this.run.shieldReady) {
+      this.run.shieldReady = false;
+      this.invuln = 0.6;
+      this.world.fx.banner(this.x, this.y - 30, '封蜡', 'B5', 0.8);
+      this.world.fx.ring(this.x, this.y - 8, 4, 22, 0.3, 'B5', 2);
+      sfx('clank');
+      return 0;
+    }
     let amt = Math.max(1, Math.round(info.amount * (1 - m.armor)));
     if (info.fixed) this.fixedTaken += amt;
     this.hp -= amt;
@@ -409,10 +433,11 @@ export class Player extends Actor implements Wielder {
     w.stats.hitsTaken++;
     G.r.params.hurt = 1;
     sfx('hurt');
+    rumble(0.55, 0.8, 180);
     w.bus.emit('damaged', { info, dealt: amt });
     if (this.hp <= 0) {
-      if (m.autoRewind > 0 && this.recorder.length > 10) {
-        this.run.mods.autoRewind--;
+      if (this.run.autoRewindLeft > 0 && this.recorder.length > 10) {
+        this.run.autoRewindLeft--;
         this.hp = 1;
         this.tryRewind(true);
         w.fx.banner(this.x, this.y - 36, '最后一秒！', 'C3', 1.2);

@@ -22,24 +22,27 @@ export class Rapier extends Weapon {
     const c = Math.cos(angle), sn = Math.sin(angle);
     const ox = w.x, oy = w.y - 7;
     w.lunge(c * s.lunge, sn * s.lunge, 0.07);
-    const { amount, crit } = this.roll(w, s.dmg);
     const world = w.world;
+    const cal = world.run!.calibrations;
+    const reach = cal.includes('rp_reach') ? 1.4 : 1;
+    const wide = cal.includes('rp_arc');
+    const { amount, crit } = this.roll(w, s.dmg * (s.kind === 'sweep' && wide ? 1.4 : 1));
     const pal = w.isEcho ? 'echo' : 'brass';
     if (s.kind === 'thrust') {
       world.combat.add({
-        shape: { t: 'line', x0: ox + c * 4, y0: oy + sn * 4, x1: ox + c * 32, y1: oy + sn * 32, r: 6 },
+        shape: { t: 'line', x0: ox + c * 4, y0: oy + sn * 4, x1: ox + c * 32 * reach, y1: oy + sn * 32 * reach, r: 6 },
         team: 'player', life: 3, follow: w as any,
-        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'rapier' },
+        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'attack' },
       });
-      world.add(new Smear(w, c * 6, -7 + sn * 6, 'thrust', angle, { len: 28, width: 7 }, pal, 0.11));
+      world.add(new Smear(w, c * 6, -7 + sn * 6, 'thrust', angle, { len: Math.round(28 * reach), width: 7 }, pal, 0.11));
       sfx(w.isEcho ? 'swingEcho' : 'thrust', { pan: world.pan(w.x), vol: w.isEcho ? 0.5 : 1 });
     } else {
       world.combat.add({
-        shape: { t: 'arc', x: ox, y: oy, r: 34, a: angle, w: 1.25 },
+        shape: { t: 'arc', x: ox, y: oy, r: wide ? 42 : 34, a: angle, w: wide ? 1.6 : 1.25 },
         team: 'player', life: 4, follow: w as any,
-        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'rapier' },
+        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'attack' },
       });
-      world.add(new Smear(w, 0, -7, 'arc', angle, { R: 30, thick: 9, sweep: 2.6, cw: true }, pal, 0.14));
+      world.add(new Smear(w, 0, -7, 'arc', angle, { R: wide ? 38 : 30, thick: wide ? 11 : 9, sweep: wide ? 3.2 : 2.6, cw: true }, pal, 0.14));
       sfx(w.isEcho ? 'swingEcho' : 'swingHeavy', { pan: world.pan(w.x), vol: w.isEcho ? 0.5 : 1 });
     }
     world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho });
@@ -60,10 +63,11 @@ export class Rapier extends Weapon {
     const world = w.world;
     const { amount, crit } = this.roll(w, 26, true);
     w.lunge(c * dist, sn * dist, 0.14);
+    const flurry = world.run!.calibrations.includes('rp_flurry');
     world.combat.add({
       shape: { t: 'line', x0: w.x, y0: w.y - 7, x1: w.x + c * 18, y1: w.y - 7 + sn * 18, r: 9 },
-      team: 'player', life: 10, follow: w as any,
-      info: { amount, crit, kind: 'melee', knock: 160, owner: w as any, echo: w.isEcho, src: 'rapierSpecial' },
+      team: 'player', life: 10, follow: w as any, rehit: flurry ? 0.05 : undefined,
+      info: { amount, crit, kind: 'melee', knock: 160, owner: w as any, echo: w.isEcho, src: 'special' },
     });
     world.add(new Smear(w, c * 4, -7 + sn * 4, 'thrust', angle, { len: 34, width: 10 }, w.isEcho ? 'echo' : 'brass', 0.2));
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });
