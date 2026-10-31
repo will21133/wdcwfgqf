@@ -42,6 +42,11 @@ export function registerSfx(a: AudioEngine) {
     a.tone(out, t, { type: 'sine', f: 110, f2: 30, dur: 1.2, vol: 0.5 });
     a.bell(out, t, 220, { dur: 2.5, vol: 0.15, ratio: 1.41, index: 2 });
   });
+  reg('heartbeat', (a, t, out) => {
+    a.tone(out, t, { type: 'sine', f: 70, f2: 50, dur: 0.1, vol: 0.5 });
+    a.tone(out, t + 0.16, { type: 'sine', f: 62, f2: 45, dur: 0.12, vol: 0.35 });
+    a.noise(out, t, { dur: 0.012, vol: 0.08, type: 'highpass', f: 4000 });
+  }, { minGap: 0.4 });
   reg('denied', (a, t, out) => {
     a.tone(out, t, { type: 'square', f: 180, dur: 0.05, vol: 0.08 });
     a.tone(out, t + 0.07, { type: 'square', f: 140, dur: 0.07, vol: 0.08 });

@@ -81,7 +81,8 @@ export class GameScene implements Scene, RoomHost {
     BIOMES[th.id]?.decorate?.(w, map, new RNG(this.seed + 99));
     const ex = map.entry ? (map.entry.tx + 1) * TS : map.pw / 2;
     const ey = map.entry ? map.entry.ty * TS - 10 : map.ph / 2;
-    const p = new Player(ex, ey);
+    const p = new Player(ex, ey + 18);
+    p.autoWalk = 0.32;
     w.add(p);
     w.cam.snap(ex, ey - 40);
     map.exits.forEach((e, i) => {

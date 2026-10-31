@@ -71,6 +71,9 @@ export class Player extends Actor implements Wielder {
   deadT = 0;
   stepT = 0;
   lastEchoTouch = 0;
+  /** scripted walk-in through the entry door */
+  autoWalk = 0;
+  private beatT = 0;
 
   constructor(x: number, y: number) {
     super();
@@ -119,7 +122,13 @@ export class Player extends Actor implements Wielder {
       if (this.dashRecharge >= m.dashCd) { this.dashRecharge = 0; this.dashCharges++; }
     }
 
-    const mv = this.locked ? { x: 0, y: 0 } : inp.move();
+    if (this.autoWalk > 0) this.autoWalk -= dt;
+    const mv = this.autoWalk > 0 ? { x: 0, y: -1 } : this.locked ? { x: 0, y: 0 } : inp.move();
+    // low-HP clockwork heartbeat
+    if (this.hp > 0 && this.hp < this.maxHp * 0.25) {
+      this.beatT -= dt;
+      if (this.beatT <= 0) { this.beatT = 0.55 + (this.hp / this.maxHp) * 2; sfx('heartbeat', { vol: 0.5 }); }
+    }
     this.moveX = mv.x; this.moveY = mv.y;
     this.updateAim(mv);
 
