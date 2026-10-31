@@ -116,6 +116,24 @@ RealClock: { now(): Date; freeze(d: Date | null): void; isBetween(h1: number, m1
 // 每日一秒 / 种子局调用 RealClock.freeze(...)；调试 ?fakeTime=2026-10-31T23:59:30
 ```
 
+#### 1.2b 术语表与渐进揭示（F1 实现，GDD2 §9.8，主程追加）
+
+```ts
+// src/game/strings.ts
+export interface TermDef { id: string; name: L10n; plain: L10n; detail?: L10n; icon?: string; glossary?: boolean }
+defineTerm(d: TermDef): void;                // F1 预置 GDD2 §9.8 表格里的全部术语；各包可追加自己的
+term(id: string): TermDef | null;
+// src/game/ui/widgets.ts
+drawTermLabel(ctx, id: string, x: number, y: number, o?: { size?: TextSize; color?: ColorKey; align?: 'left'|'center'|'right'; forcePlain?: boolean }): { w: number; h: number };
+//   画"风格名"，并在其下方用 small/K7 画 plain 白话；是否显示白话由 Terms.showPlain(id) 决定
+// src/game/meta/registry.ts（存档 v2：profile.termSeen: Record<string, number>, profile.taught: string[]）
+Terms: { showPlain(id: string): boolean /* 设置 termHints=always 或 auto 且看过 <3 次 */; seen(id: string): void };
+Teach: { has(id: string): boolean; mark(id: string): void; onMark(cb: (id: string) => void): void };
+//   渐进揭示：HUD 组件、便条、门标签据此决定是否显示高级元素（节拍、破绽、擒纵器槽、分岔提示……）
+// settings: termHints: 'auto' | 'always' | 'off'（默认 auto）
+```
+所有包：凡是在 UI 上第一次展示术语（卡片、门、HUD 标注、商店、工作站、结算），一律用 `drawTermLabel` 或 `Terms.showPlain` + `term(id).plain`，不要自己硬写说明。
+
 ### 1.3 输入与玩家（F2）
 
 ```ts
