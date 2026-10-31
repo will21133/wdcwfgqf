@@ -443,6 +443,17 @@ export class Player extends Actor implements Wielder {
         w.fx.banner(this.x, this.y - 36, '最后一秒！', 'C3', 1.2);
         return amt;
       }
+      if (this.run.revivesUsed < m.revives) {
+        this.run.revivesUsed++;
+        this.hp = Math.round(this.maxHp * 0.4);
+        this.invuln = 2;
+        w.fx.banner(this.x, this.y - 36, '第二根发条', 'B5', 1.4);
+        w.fx.ring(this.x, this.y - 8, 4, 60, 0.6, 'B5', 3);
+        w.fx.burst(this.x, this.y - 8, 30, ['W', 'B6', 'B4'], 180, 0.6);
+        for (const e of w.enemiesNear(this.x, this.y, 70)) e.hurt({ amount: 20, kind: 'aoe', owner: this, x: this.x, y: this.y, knock: 300 });
+        sfx('rewindEnd');
+        return amt;
+      }
       this.hp = 0;
       this.deadT = 0;
       sfx('playerDeath');

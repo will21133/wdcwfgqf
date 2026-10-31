@@ -12,6 +12,8 @@ import { SONGS } from '../audio/songs';
 import { GameScene } from './scenes/game';
 import { Run } from './run';
 import { loadSettings } from './settings';
+import { loadProfile } from './save';
+import { Flow } from './flow';
 
 function setupAudio() {
   registerSfx(G.audio);
@@ -34,6 +36,7 @@ function setupAudio() {
 export async function boot() {
   setupAudio();
   loadSettings();
+  loadProfile();
   const scene = G.debug.get('scene');
   if (scene === 'room') {
     G.scenes.set(new RoomPreview(Number(G.debug.get('seed') ?? 1), Number(G.debug.get('biome') ?? 0)));
@@ -60,7 +63,12 @@ export async function boot() {
     ]));
     return;
   }
-  // default: straight into a run (title / hub come later in the boot flow)
+  if (scene === 'title') { Flow.title(); return; }
+  if (scene === 'hub') { Flow.hub('start'); return; }
+  if (scene === 'intro') { Flow.intro(); return; }
+  const direct = ['seed', 'room', 'floor', 'spawn', 'offer', 'god'].some((k) => G.debug.has(k));
+  if (!direct) { Flow.title(); return; }
+  // debug: straight into a run
   const seed = Number(G.debug.get('seed') ?? (Math.random() * 1e9) | 0);
   const kind = (G.debug.get('room') as any) ?? 'combat';
   const run = new Run(seed);
@@ -68,5 +76,7 @@ export async function boot() {
   run.roomIndex = Number(G.debug.get('roomIndex') ?? 0);
   if (G.debug.get('god')) { run.bonuses.push({ apply: (m) => { m.maxHp = 9999; } }); run.recompute(); run.hp = 9999; }
   if (G.debug.get('brass')) run.brass = Number(G.debug.get('brass'));
-  G.scenes.set(new GameScene(run, { kind, reward: 'memory', patron: (G.debug.get('patron') as any) ?? 'oren' }, seed));
+  const gs = new GameScene(run, { kind, reward: 'memory', patron: (G.debug.get('patron') as any) ?? 'oren' }, seed);
+  Flow.wire(gs);
+  G.scenes.set(gs);
 }

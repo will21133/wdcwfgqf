@@ -69,6 +69,7 @@ export const BASE_MODS: Mods = {
 };
 
 export interface OwnedMemory { id: string; rarity: number }
+export type RunEndKind = 'death' | 'quit' | 'victory';
 
 /** Meta (between-runs) bonuses applied at run start — filled by the save/meta system */
 export interface MetaBonus { apply(m: Mods): void }
@@ -105,6 +106,10 @@ export class Run {
   /** per-floor flags for the floor plan */
   floorState = { shop: false, elites: 0, vault: false };
   overwind = 0;
+  revivesUsed = 0;
+  rerolls = 0;
+  /** rarity boost for memory rolls */
+  luck = 0;
   onCharge?: () => void;
   /** live hook context of the current room (set by GameScene) */
   hookCtx: HookCtx | null = null;

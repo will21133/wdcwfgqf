@@ -45,10 +45,14 @@ export class ChoiceOverlay implements Overlay {
     public choices: Choice[],
     public header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string },
     private onDone?: (c: Choice) => void,
+    /** returns fresh choices, or null if no rerolls remain */
+    public reroll?: () => Choice[] | null,
   ) {
     sfx('uiOpen');
     G.audio.muffle(true, 2200);
   }
+
+  rerollsLeft = () => 0;
 
   private layout() {
     const n = this.choices.length;
@@ -84,6 +88,12 @@ export class ChoiceOverlay implements Overlay {
       }
       if (h >= 0 && h !== this.hover) { this.sel = h; sfx('uiMove'); }
       this.hover = h;
+    }
+    if (this.reroll && inp.pressed('special')) {
+      const fresh = this.reroll();
+      if (fresh && fresh.length) { this.choices = fresh; this.t = 0.12; this.sel = 0; sfx('cogWind'); }
+      else sfx('denied');
+      return true;
     }
     const click = inp.pressed('attack') && inp.mouseAim && this.hover >= 0;
     if (inp.pressed('confirm') || click || (inp.pressed('interact'))) {
@@ -141,7 +151,9 @@ export class ChoiceOverlay implements Overlay {
     });
     // footer hint
     if (this.picked < 0 && this.t > 0.5) {
-      drawHint(ctx, 320, 334, [['nav', tr(UI.choose)], ['confirm', tr(L('确认', 'Confirm'))]]);
+      const items: [any, string][] = [['nav', tr(UI.choose)], ['confirm', tr(L('确认', 'Confirm'))]];
+      if (this.reroll && this.rerollsLeft() > 0) items.push(['special', tr(L(`重抽 ×${this.rerollsLeft()}`, `Reroll ×${this.rerollsLeft()}`))]);
+      drawHint(ctx, 320, 334, items);
     }
   }
 

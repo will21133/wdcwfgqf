@@ -131,7 +131,8 @@ export function memoryChoices(run: Run, rng: RNG, patron: Patron, onApplied: (om
     picks.push(m);
   }
   return picks.map((m) => {
-    const rarity = m.slot === 'legendary' || m.slot === 'duo' ? Math.max(2, rollRarity(rng, run.floor, boost)) : rollRarity(rng, run.floor, boost);
+    const b = boost + run.luck;
+    const rarity = m.slot === 'legendary' || m.slot === 'duo' ? Math.max(2, rollRarity(rng, run.floor, b)) : rollRarity(rng, run.floor, b);
     const existing = EXCLUSIVE_SLOTS.includes(m.slot) ? run.memories.find((o) => MEMORIES[o.id]?.slot === m.slot) : undefined;
     const p = PATRONS[m.patron];
     return {

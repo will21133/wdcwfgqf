@@ -28,6 +28,7 @@ async function main() {
   G.input.attach(screen, (x, y) => r.toView(x, y));
   screen.focus();
 
+  (window as any).__G = G;
   await boot();
   document.getElementById('boot')?.remove();
 

@@ -33,6 +33,7 @@ import { tr, L, L10n, UI } from '../i18n';
 import { ICONS, patronSigil } from '../../art/sprites/icons';
 import { rumble } from '../../engine/rumble';
 import { makeBoss } from '../world/bosses';
+import { markSeen } from '../save';
 import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
 
@@ -90,6 +91,7 @@ export class GameScene implements Scene, RoomHost {
     });
     w.flushAdds();
     run.registerHooks(w, p);
+    w.bus.on('spawn', (e) => { const k = (e.e as any).codexId; if (k) markSeen((e.e as any).isBoss ? 'bosses' : 'enemies', k); }, this);
     run.shieldReady = run.mods.firstHitShield > 0;
     run.onCharge = () => { sfx('charge'); rumble(0.12, 0.25, 90); };
     const dbgSpawn = G.debug.get('spawn');
@@ -135,25 +137,30 @@ export class GameScene implements Scene, RoomHost {
   // ───────────────────────── RoomHost ─────────────────────────
   openOverlay(o: Overlay) { this.overlays.push(o); }
 
-  openChoice(choices: Choice[], header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string }, after?: () => void) {
+  openChoice(choices: Choice[], header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string }, after?: () => void, regen?: () => Choice[]) {
     if (!choices.length) { after?.(); return; }
-    this.openOverlay(new ChoiceOverlay(choices, header, (c) => {
+    const run = this.run;
+    const ov = new ChoiceOverlay(choices, header, (c) => {
       const p = this.world.player!;
       this.world.fx.banner(p.x, p.y - 36, tr(c.title), c.color, 1.4);
       rumble(0.2, 0.2, 100);
+      if (MEMORIES[c.id]) markSeen('memories', c.id);
       after?.();
-    }));
+    }, regen ? () => { if (run.rerolls <= 0) return null; run.rerolls--; return regen(); } : undefined);
+    ov.rerollsLeft = () => run.rerolls;
+    this.openOverlay(ov);
   }
 
   offerMemory(patron: Patron, boost = 0) {
     const pd = PATRONS[patron];
-    const choices = memoryChoices(this.run, this.rng, patron, (om, replaced) => {
+    const applied = (om: import('../run').OwnedMemory, replaced: import('../run').OwnedMemory | null) => {
       if (replaced) this.world.bus.off(replaced);
       const d = MEMORIES[om.id];
       d.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, om) }, d.v[om.rarity]);
       this.syncPlayer();
-    }, boost);
-    this.openChoice(choices, { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color });
+    };
+    const gen = () => memoryChoices(this.run, this.rng, patron, applied, boost);
+    this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color }, undefined, gen);
   }
 
   offerHourglass() {
@@ -168,6 +175,7 @@ export class GameScene implements Scene, RoomHost {
   }
 
   grantPart(p: PartDef) {
+    markSeen('parts', p.id);
     this.run.parts.push(p.id);
     this.run.recompute();
     p.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, p.id) });
