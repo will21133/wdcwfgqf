@@ -71,7 +71,10 @@ export class GameScene implements Scene, RoomHost {
   enter() {
     const run = this.run;
     const th = THEMES[Math.min(run.floor, THEMES.length - 1)];
-    this.options = this.opt.kind === 'boss' ? [] : nextOptions(run, this.rng, run.floorState);
+    // mark this room's one-per-floor kinds before rolling the doors out of it
+    if (this.opt.kind === 'shop') run.floorState.shop = true;
+    if (this.opt.kind === 'vault') run.floorState.vault = true;
+    this.options = this.opt.kind === 'boss' ? [] : nextOptions(run, this.rng, run.floorState, this.opt.kind);
     const exits = this.opt.kind === 'boss' ? 1 : this.options.length;
     const map = generateRoom({ rng: new RNG(this.seed), kind: this.opt.kind, biome: run.floor, exits });
     const w = new World(map, th, this.seed);

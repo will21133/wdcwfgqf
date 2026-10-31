@@ -14,6 +14,7 @@ import { THEMES } from '../../art/themes';
 import { ease, clamp } from '../../engine/math';
 import { drawHint } from '../ui/prompts';
 import { col } from '../../art/palette';
+import { WEAPON_INFO } from '../ui/metaPanels';
 
 export class SummaryScene implements Scene {
   t = 0;
@@ -42,7 +43,11 @@ export class SummaryScene implements Scene {
     G.font.draw(ctx, tr(title), 320, 34, { align: 'center', color: this.kind === 'victory' ? 'B5' : 'R3', outline: 'K0' });
     const run = this.run;
     const th = THEMES[Math.min(run.floor, THEMES.length - 1)];
-    G.small.draw(ctx, tr(L(`到达：第 ${run.floor + 1} 层 · ${th.name.zh} · 第 ${run.roomIndex + 1} 间`, `Reached: Floor ${run.floor + 1} · ${th.name.en} · Room ${run.roomIndex + 1}`)), 320, 54, { align: 'center', color: 'K7' });
+    const ow = run.overwind > 0 ? tr(L(` · 超频 ${run.overwind}`, ` · Overwind ${run.overwind}`)) : '';
+    const sub = this.kind === 'victory'
+      ? L(`钟声敲响了第十二下${ow}`, `The clock struck twelve${ow}`)
+      : L(`到达：第 ${run.floor + 1} 层 · ${th.name.zh} · 第 ${run.roomIndex + 1} 间${ow}`, `Reached: Floor ${run.floor + 1} · ${th.name.en} · Room ${run.roomIndex + 1}${ow}`);
+    G.small.draw(ctx, tr(sub), 320, 54, { align: 'center', color: this.kind === 'victory' ? 'B4' : 'K7' });
     panel(ctx, 110, 70, 420, 236);
     const s = run.stats;
     const mm = Math.floor(run.time / 60), ss = Math.floor(run.time % 60);
@@ -66,7 +71,13 @@ export class SummaryScene implements Scene {
     for (const m of run.memories) { const d = MEMORIES[m.id]; if (d) icons.push([patronSigil(d.patron), d.id]); }
     for (const id of run.parts) { const p = PARTS_BY_ID[id]; if (p) icons.push([partLook(p).icon, id]); }
     G.small.draw(ctx, tr(L('本局构筑', 'Build')), 330, 84, { color: 'K7' });
-    icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, 106 + Math.floor(i / 8) * 22, 1); });
+    icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, 106 + Math.floor(i / 8) * 22, 1, k); });
+    const wi = WEAPON_INFO.find((x) => x.id === run.weapon);
+    if (wi && this.t > 0.6) {
+      G.small.draw(ctx, tr(L('武器', 'Weapon')), 330, 160, { color: 'K7' });
+      drawScaled(ctx, wi.sprite, 342, 182, 1, k);
+      G.font.draw(ctx, tr(wi.name), 360, 176, { color: 'B5' });
+    }
     rect(ctx, 126, 200, 388, 1, 'B1');
     if (this.t > 1.2) {
       shardIcon(ctx, 260, 214);

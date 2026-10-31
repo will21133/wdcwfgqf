@@ -28,7 +28,7 @@ export function pickPatron(run: Run, rng: RNG): Patron {
   }) ?? 'oren';
 }
 
-export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; elites: number; vault: boolean }): RoomOption[] {
+export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; elites: number; vault: boolean }, cur?: string): RoomOption[] {
   const next = run.roomIndex + 1;
   if (next >= ROOMS_PER_FLOOR) return [{ kind: 'boss', reward: null }];
   if (next === ROOMS_PER_FLOOR - 1) {
@@ -57,6 +57,7 @@ export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; eli
     if (!f) break;
     const o = f[0]();
     if (o.kind === 'elite' && o.reward === 'part') delete o.patron;
+    if (o.kind !== 'combat' && o.kind === cur) continue; // no two events (etc.) back to back
     if (!opts.some((x) => key(x) === key(o) || (x.kind !== 'combat' && x.kind === o.kind))) opts.push(o);
   }
   return rng.shuffle(opts);

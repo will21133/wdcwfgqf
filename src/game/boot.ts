@@ -40,6 +40,15 @@ export async function boot() {
   const lang = G.debug.get('lang');
   if (lang === 'zh' || lang === 'en') { const { i18n } = await import('./i18n'); i18n.lang = lang; }
   const scene = G.debug.get('scene');
+  if (scene === 'summary') {
+    // debug: end-of-run report (?scene=summary&kind=victory|death|quit)
+    const { SummaryScene } = await import('./scenes/summary');
+    const run = new Run(7);
+    run.floor = 3; run.roomIndex = 9; run.time = 912; run.weapon = G.debug.get('weapon') ?? run.weapon;
+    Object.assign(run.stats, { rooms: 25, kills: 393, damage: 22188, rewinds: 41, paradoxes: 6 });
+    G.scenes.set(new SummaryScene(run, (G.debug.get('kind') as any) ?? 'victory', 54, () => {}));
+    return;
+  }
   if (scene === 'room') {
     G.scenes.set(new RoomPreview(Number(G.debug.get('seed') ?? 1), Number(G.debug.get('biome') ?? 0)));
     return;
