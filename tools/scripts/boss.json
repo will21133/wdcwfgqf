@@ -1,0 +1,10 @@
+[{"t":0,"move":[640,250]},
+ {"t":1800,"shot":"intro"},
+ {"t":4200,"shot":"fight0"},
+ {"t":4300,"down":"KeyW"},{"t":4800,"up":"KeyW"},
+ {"t":4900,"mdown":0},{"t":4950,"mup":0},{"t":5150,"mdown":0},{"t":5200,"mup":0},{"t":5400,"mdown":0},{"t":5450,"mup":0},
+ {"t":5600,"shot":"fight1"},
+ {"t":6500,"shot":"fight2"},
+ {"t":7500,"press":"KeyQ"},{"t":7700,"shot":"rewind"},
+ {"t":9500,"shot":"fight3"}
+]

@@ -4,6 +4,7 @@ import { G } from '../G';
 import { rect, hourglass, gearIcon, coinIcon, shardIcon } from './draw';
 import { damp } from '../../engine/math';
 import { col } from '../../art/palette';
+import { tr } from '../i18n';
 
 export class HUD {
   hpShown = -1;
@@ -12,7 +13,7 @@ export class HUD {
   lastCharges = 0;
   brassShown = 0;
   alpha = 1;
-  bossName = '';
+  boss: import('../entities/boss').Boss | null = null;
 
   update(dt: number, w: World) {
     const p = w.player;
@@ -38,7 +39,7 @@ export class HUD {
     // ── HP ──
     const x = 10, y = 10;
     gearIcon(ctx, x, y + 1, 'B4', 'B2', p.hp / p.maxHp < 0.3 && Math.floor(G.time * 4) % 2 ? 'R4' : 'R3');
-    const bw = Math.round(70 + m.maxHp * 0.3), bh = 7;
+    const bw = Math.min(150, Math.round(70 + m.maxHp * 0.3)), bh = 7;
     const bx = x + 12, by = y + 2;
     rect(ctx, bx - 1, by - 1, bw + 2, bh + 2, 'K0');
     rect(ctx, bx, by, bw, bh, 'K2');
@@ -49,7 +50,7 @@ export class HUD {
     rect(ctx, bx, by, fw, 2, 'R3');
     rect(ctx, bx, by, Math.min(fw, 2), 1, 'R4');
     // brass tube ticks every 10 hp
-    for (let i = 10; i < p.maxHp; i += 10) rect(ctx, bx + Math.round((bw * i) / p.maxHp), by + bh - 2, 1, 2, 'K1');
+    for (let i = 10; i < p.maxHp && p.maxHp < 400; i += 10) rect(ctx, bx + Math.round((bw * i) / p.maxHp), by + bh - 2, 1, 2, 'K1');
     // brass caps
     rect(ctx, bx - 2, by - 2, 2, bh + 4, 'B3');
     rect(ctx, bx + bw, by - 2, 2, bh + 4, 'B3');
@@ -97,6 +98,23 @@ export class HUD {
       ctx.drawImage(simg, 640 - 17 - simg.width, 22);
     }
     ctx.globalAlpha = 1;
+
+    // ── boss bar ──
+    if (this.boss) {
+      const b = this.boss;
+      const w = 300, x = 320 - w / 2, y = 336;
+      G.font.draw(ctx, tr(b.bossName), 320, y - 16, { align: 'center', color: 'K10', outline: 'K0' });
+      rect(ctx, x - 2, y - 2, w + 4, 9, 'K0');
+      rect(ctx, x - 1, y - 1, w + 2, 7, 'B2');
+      rect(ctx, x, y, w, 5, 'K2');
+      const fw = Math.round((w * b.shownHp) / b.maxHp), hw = Math.round((w * b.hp) / b.maxHp);
+      rect(ctx, x, y, fw, 5, 'K9');
+      rect(ctx, x, y, hw, 5, b.phase ? 'O1' : 'R2');
+      rect(ctx, x, y, hw, 2, b.phase ? 'O2' : 'R3');
+      for (const ph of b.phases) { rect(ctx, x + Math.round(w * ph), y - 2, 1, 9, 'B5'); }
+      // brass end caps with gears
+      rect(ctx, x - 6, y - 3, 4, 11, 'B3'); rect(ctx, x + w + 2, y - 3, 4, 11, 'B3');
+    }
 
     // ── crosshair when aiming with mouse ──
     if (G.input.mouseAim && G.input.mouseInside && p.hp > 0) {

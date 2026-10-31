@@ -32,6 +32,8 @@ import { RoomHost, setupShop, setupRest, setupEvent, setupVault, setPartLookup }
 import { tr, L, L10n, UI } from '../i18n';
 import { ICONS, patronSigil } from '../../art/sprites/icons';
 import { rumble } from '../../engine/rumble';
+import { makeBoss } from '../world/bosses';
+import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
@@ -51,6 +53,7 @@ export class GameScene implements Scene, RoomHost {
   overlays: Overlay[] = [];
   options: RoomOption[] = [];
   titleCard: { title: string; sub: string; t: number } | null = null;
+  boss: Boss | null = null;
   /** set by the flow controller (hub/title) */
   onDeath?: (run: Run) => void;
   onVictory?: (run: Run) => void;
@@ -97,7 +100,15 @@ export class GameScene implements Scene, RoomHost {
       this.waves = planWaves(this.rng, run.floor, run.roomIndex, kind === 'elite', run.overwind);
       if (kind === 'elite') run.floorState.elites++;
     } else if (kind === 'boss') {
-      this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind);
+      const c = this.center();
+      const b = makeBoss(run.floor, c.x, c.y - 40);
+      if (b) {
+        this.boss = w.add(b);
+        this.waves = [];
+        this.cleared = false;
+        p.locked = true;
+        this.titleCard = { title: tr(b.bossName), sub: tr(b.bossTitle), t: -0.2 };
+      } else this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind);
     } else if (kind === 'tutorial') {
       const sp = map.spawnable[Math.floor(map.spawnable.length / 2)];
       w.add(new Dummy(sp.tx * TS + 8, sp.ty * TS + 8));
@@ -105,7 +116,7 @@ export class GameScene implements Scene, RoomHost {
     else if (kind === 'rest') setupRest(this);
     else if (kind === 'event') setupEvent(this);
     else if (kind === 'vault') { run.floorState.vault = true; setupVault(this); }
-    if (!this.waves.length && (kind === 'combat' || kind === 'elite' || kind === 'tutorial')) this.cleared = true;
+    if (!this.waves.length && !this.boss && (kind === 'combat' || kind === 'elite' || kind === 'tutorial' || kind === 'boss')) this.cleared = true;
     if (kind === 'shop' || kind === 'rest' || kind === 'event' || kind === 'vault') this.cleared = true;
     w.flushAdds();
     G.r.params.lighting = true;
@@ -118,7 +129,7 @@ export class GameScene implements Scene, RoomHost {
       else if (off === 'part') { const pt = rollPart(run, this.rng); if (pt) this.grantPart(pt); }
       else this.offerMemory(off as Patron);
     }
-    if (run.roomIndex === 0) this.titleCard = { title: tr(th.name), sub: tr(L(`第 ${run.floor + 1} 层`, `FLOOR ${run.floor + 1}`)), t: 0 };
+    if (run.roomIndex === 0 && !this.boss) this.titleCard = { title: tr(th.name), sub: tr(L(`第 ${run.floor + 1} 层`, `FLOOR ${run.floor + 1}`)), t: 0 };
   }
 
   // ───────────────────────── RoomHost ─────────────────────────
@@ -310,7 +321,13 @@ export class GameScene implements Scene, RoomHost {
     if (G.input.pressed('pause') && p.hp > 0) { this.overlays.push(new PauseMenu(this)); return; }
     w.update(dt);
     if (!w.frozen && !this.cleared) w.bus.emit('tick', { dt });
-    if (!this.cleared && p.hp > 0) {
+    if (this.boss) {
+      // intro: camera on the boss, player waits
+      if (this.boss.inIntro) { w.cam.follow(this.boss.x, this.boss.y - 30, dt, 4); this.hud.update(dt, w); this.postFx(dt, p); return; }
+      if (p.locked && !this.cleared) p.locked = false;
+      if (!this.cleared && this.boss.dead) { this.cleared = true; this.onClear(); }
+      G.music.layer('boss', this.boss.phase > 0 ? 1 : 0, 2);
+    } else if (!this.cleared && p.hp > 0) {
       const alive = w.aliveEnemies.length;
       if (this.waveIdx < 0 || (alive <= (this.waveIdx < this.waves.length - 1 ? 1 : 0) && this.waveIdx < this.waves.length - 1)) {
         this.waveDelay -= dt;
@@ -323,11 +340,7 @@ export class GameScene implements Scene, RoomHost {
     const look = aiming ? 0.36 : 0;
     w.cam.follow(p.x + Math.cos(p.aim) * 40 * look, p.y - 10 + Math.sin(p.aim) * 30 * look, dt, 7);
     this.hud.update(dt, w);
-    const pp = G.r.params;
-    pp.hurt = Math.max(0, pp.hurt - dt * 2.2);
-    pp.flash = Math.max(0, pp.flash - dt * 4);
-    pp.rewind = damp(pp.rewind, p.rewindFx, 18, dt);
-    pp.ca = pp.rewind * 2.2 + pp.hurt * 1.5;
+    this.postFx(dt, p);
     if (p.hp <= 0) {
       this.deathT += dt;
       if (this.deathT < dt * 1.5) { w.slowmo(0.25, 1.2); rumble(0.9, 1, 500); G.music.stop(2); }
@@ -338,6 +351,14 @@ export class GameScene implements Scene, RoomHost {
         else G.scenes.go(() => new GameScene(new Run(), { kind: 'combat', reward: 'memory', patron: 'oren' }), 'clock', 0.6);
       }
     }
+  }
+
+  private postFx(dt: number, p: Player) {
+    const pp = G.r.params;
+    pp.hurt = Math.max(0, pp.hurt - dt * 2.2);
+    pp.flash = Math.max(0, pp.flash - dt * 4);
+    pp.rewind = damp(pp.rewind, p.rewindFx, 18, dt);
+    pp.ca = pp.rewind * 2.2 + pp.hurt * 1.5;
   }
 
   render(r: Renderer) {
@@ -356,6 +377,7 @@ export class GameScene implements Scene, RoomHost {
     if (!settings.flashes) pp.flash = 0;
     this.world.cam.shakeScale = settings.shake;
     this.world.render(r);
+    this.hud.boss = this.boss && !this.boss.inIntro && !this.boss.dead ? this.boss : null;
     this.hud.render(r, this.world);
     const ctx = r.ui2;
     if (this.titleCard) this.renderTitleCard(ctx);

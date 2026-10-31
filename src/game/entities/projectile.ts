@@ -5,8 +5,13 @@ import { frand } from '../../engine/rng';
 import { TAU } from '../../engine/math';
 import type { DamageInfo } from '../systems/combat';
 import { sfx } from '../G';
+import { drawSprite, Sprite } from '../../engine/gfx/sprite';
+import { gearFrames, BRASS_GEAR } from '../../art/gear';
 
-export type BulletStyle = 'orb' | 'bolt' | 'big' | 'arrow' | 'spore' | 'shard' | 'star' | 'ink';
+let GEARB: Sprite[] | null = null;
+const gearBulletFrames = () => (GEARB ??= gearFrames(5, 8, BRASS_GEAR, 4, 2));
+
+export type BulletStyle = 'orb' | 'bolt' | 'big' | 'arrow' | 'spore' | 'shard' | 'star' | 'ink' | 'gear';
 
 export interface BulletOpts {
   team: Team; x: number; y: number; ang: number; speed: number; dmg: number;
@@ -120,6 +125,13 @@ export class Bullet extends Entity {
     const [c0, c1, c2] = this.pal.map(col);
     const pulse = Math.floor(this.age * 20) % 2;
     switch (this.style) {
+      case 'gear': {
+        const fr = gearBulletFrames();
+        drawSprite(r.u, fr[Math.floor(this.age * 20) % fr.length], x, y);
+        r.glowAt(this.x, this.y, 10, this.pal[1], 0.25);
+        r.lightAt(this.x, this.y, 30, this.pal[1], 0.35);
+        return;
+      }
       case 'orb':
       case 'spore':
       case 'star': {
