@@ -286,7 +286,8 @@ export class TitleScene implements Scene {
     const pa = ease.outCubic(clamp((t - 0.9) / 0.6, 0, 1));
     if (pa > 0) {
       ui.globalAlpha = pa;
-      panel(ui, lx - 68, 203, 136, 90, { fill: 'K1' });
+      // grows with the 125% text size so the four rows stay inside the plaque
+      panel(ui, lx - 68, 203, 136, 90 + 4 * (this.list.rh - this.list.rowH), { fill: 'K1' });
     }
     ui.globalAlpha = 1;
     if (t > 1.2 && !G.audio.ctx) {

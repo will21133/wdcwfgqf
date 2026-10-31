@@ -1,0 +1,38 @@
+[
+ {
+  "t": 100,
+  "eval": "__hints.define({id:'demo_note', text:{zh:'{c:时砂}满 50 了。按 [分岔] 在原地留下一个{c:残响}——它会沿你刚走过的路线走回来。', en:'You have 50 {c:Sand}. Fork to leave an {c:Echo} here: it walks back along the path you just took.'}, icon:'hourglass'}); __hints.define({id:'demo_pause', pause:true, text:{zh:'{v:紫色}伤害被锁定了：回溯也拿不回来。先躲开带紫光的攻击。', en:'{v:Violet} damage is locked: rewinding will not give it back. Dodge attacks that glow violet.'}}); __hints.show('demo_note')"
+ },
+ {
+  "t": 1200,
+  "shot": "note"
+ },
+ {
+  "t": 1300,
+  "eval": "JSON.stringify({again: __hints.show('demo_note'), seen: __hints.seen('demo_note'), active: __hints.active})"
+ },
+ {
+  "t": 7600,
+  "eval": "JSON.stringify({active: __hints.active, throttled: __hints.show('demo_pause'), queuedActive: __hints.active})"
+ },
+ {
+  "t": 8000,
+  "eval": "(__G.time += 25, __hints.newRoom(), __hints.show('demo_pause'))"
+ },
+ {
+  "t": 8600,
+  "eval": "JSON.stringify({active: __hints.active, overlays: __G.scenes.current.overlays.length})"
+ },
+ {
+  "t": 9200,
+  "shot": "pause"
+ },
+ {
+  "t": 9400,
+  "press": "Enter"
+ },
+ {
+  "t": 9900,
+  "eval": "JSON.stringify({active: __hints.active, overlays: __G.scenes.current.overlays.length, hints: __save.profile.hints})"
+ }
+]

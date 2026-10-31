@@ -4,6 +4,7 @@ import type { Overlay } from './overlay';
 import { drawScaled, RARITY_TEXT } from './overlay';
 import { MenuList, MenuItem } from './menu';
 import { panel, rect } from './draw';
+import { Text } from './text';
 import { G, sfx } from '../G';
 import { tr, L, UI, i18n } from '../i18n';
 import { settings, saveSettings } from '../settings';
@@ -22,19 +23,58 @@ interface PauseHost { run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void
 
 export function settingsItems(onBack: () => void, openControls?: () => void): MenuItem[] {
   const set = <K extends keyof typeof settings>(k: K) => (v: (typeof settings)[K]) => { settings[k] = v; saveSettings(); };
+  const header = (zh: string, en: string): MenuItem => ({ kind: 'header', label: () => tr(L(zh, en)) });
+  // option labels are read every frame, so a language switch shows at once
+  const tripleOpts = () => [
+    { label: tr(L('自动', 'Auto')), value: 'auto' },
+    { label: tr(L('总是', 'Always')), value: 'always' },
+    { label: tr(L('关闭', 'Off')), value: 'off' },
+  ];
   return [
+    header('音频', 'Audio'),
     { label: () => tr(L('主音量', 'Master volume')), kind: 'slider', get: () => settings.master, set: set('master') },
     { label: () => tr(L('音乐', 'Music')), kind: 'slider', get: () => settings.music, set: set('music') },
     { label: () => tr(L('音效', 'Sound effects')), kind: 'slider', get: () => settings.sfx, set: (v: number) => { set('sfx')(v); sfx('hit'); } },
+    header('画面', 'Display'),
     { label: () => tr(L('屏幕震动', 'Screen shake')), kind: 'slider', get: () => settings.shake, set: set('shake'), min: 0, max: 1 },
+    {
+      label: () => tr(L('闪光效果', 'Flash effects')), kind: 'choice',
+      get options() { return [{ label: tr(L('开', 'On')), value: 'on' }, { label: tr(L('减弱', 'Limited')), value: 'limit' }, { label: tr(L('关', 'Off')), value: 'off' }]; },
+      get: () => (!settings.flashes ? 'off' : settings.flashLimit ? 'limit' : 'on'),
+      set: (v: string) => { settings.flashes = v !== 'off'; settings.flashLimit = v === 'limit'; saveSettings(); },
+      hint: () => tr(L('减弱：全屏闪白变得很轻；关：完全不闪（光敏友好）。', 'Limited: full-screen flashes are much softer. Off: none at all (photosensitivity).')),
+    },
+    { label: () => tr(L('整数倍像素缩放', 'Pixel-perfect scaling')), kind: 'toggle', get: () => settings.pixelPerfect, set: set('pixelPerfect'), hint: () => tr(L('关闭时画面铺满窗口（锐利双线性）。', 'When off, the image fills the window (sharp bilinear).')) },
+    { label: () => tr(L('全屏', 'Fullscreen')), act: () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); } },
+    header('文字与提示', 'Text & guidance'),
     { label: () => tr(L('语言 / Language', 'Language / 语言')), kind: 'choice', options: [{ label: '简体中文', value: 'zh' }, { label: 'English', value: 'en' }], get: () => settings.lang, set: set('lang') },
+    {
+      label: () => tr(L('文字大小', 'Text size')), kind: 'choice', options: [{ label: '100%', value: '100' }, { label: '125%', value: '125' }],
+      get: () => String(settings.textSize), set: (v: string) => { settings.textSize = v === '125' ? 125 : 100; saveSettings(); },
+      hint: () => tr(L('125%：文字放大一级像素（随窗口大小，最多 150%），依然锐利。', '125%: text one pixel step larger (depends on the window, at most 150%) and still sharp.')),
+    },
+    {
+      label: () => tr(L('术语说明', 'Term explanations')), kind: 'choice', get options() { return tripleOpts(); },
+      get: () => settings.termHints, set: (v: string) => { settings.termHints = v as typeof settings.termHints; saveSettings(); },
+      hint: () => tr(L('在"回忆""残响"等名称旁显示一句大白话。自动：每个词前 3 次显示。', 'A plain-language line next to names like "Memory" and "Echo". Auto: the first 3 times you see each.')),
+    },
+    {
+      label: () => tr(L('HUD 标注', 'HUD labels')), kind: 'choice', get options() { return tripleOpts(); },
+      get: () => settings.hudLabels, set: (v: string) => { settings.hudLabels = v as typeof settings.hudLabels; saveSettings(); },
+      hint: () => tr(L('在血条、磁带、时砂旁标出名字。自动：前 3 局显示。', 'Names next to your health bar, tape and sand. Auto: your first 3 runs.')),
+    },
+    { label: () => tr(L('伤害数字', 'Damage numbers')), kind: 'toggle', get: () => settings.showDamage, set: set('showDamage'), hint: () => tr(L('在敌人头上显示造成的伤害。', 'Show the damage you deal above enemies.')) },
+    header('操作', 'Controls'),
+    {
+      label: () => tr(L('回溯方式', 'Rewind input')), kind: 'choice',
+      get options() { return [{ label: tr(L('轻按+按住', 'Tap + hold')), value: 'both' }, { label: tr(L('仅轻按', 'Tap only')), value: 'tap' }]; },
+      get: () => settings.rewindMode, set: (v: string) => { settings.rewindMode = v === 'tap' ? 'tap' : 'both'; saveSettings(); },
+      hint: () => tr(L('轻按：回到旧影。按住：拖动磁带，选择回到哪一刻。仅轻按：按住也当作轻按。', 'Tap: return to your Shadow. Hold: scrub the tape to pick the moment. Tap only: holding counts as a tap.')),
+    },
+    { label: () => tr(L('瞄准辅助（手柄）', 'Aim assist (gamepad)')), kind: 'toggle', get: () => settings.aimAssist, set: set('aimAssist') },
     { label: () => tr(L('手柄震动', 'Controller rumble')), kind: 'toggle', get: () => settings.rumble, set: (v: boolean) => { set('rumble')(v); if (v) rumble(0.6, 0.6, 200); } },
     { label: () => tr(L('震动强度', 'Rumble strength')), kind: 'slider', get: () => settings.rumbleStrength, set: (v: number) => { set('rumbleStrength')(v); rumble(0.6, 0.6, 150); }, disabled: () => !settings.rumble },
-    { label: () => tr(L('整数倍像素缩放', 'Pixel-perfect scaling')), kind: 'toggle', get: () => settings.pixelPerfect, set: set('pixelPerfect'), hint: () => tr(L('关闭时画面铺满窗口（锐利双线性）。', 'When off, the image fills the window (sharp bilinear).')) },
-    { label: () => tr(L('闪光效果', 'Flash effects')), kind: 'toggle', get: () => settings.flashes, set: set('flashes'), hint: () => tr(L('关闭全屏闪白（光敏友好）。', 'Disable full-screen flashes (photosensitivity).')) },
-    { label: () => tr(L('瞄准辅助（手柄）', 'Aim assist (gamepad)')), kind: 'toggle', get: () => settings.aimAssist, set: set('aimAssist') },
     { label: () => tr(L('按键设置', 'Controls')), act: () => openControls?.() },
-    { label: () => tr(L('全屏', 'Fullscreen')), act: () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); } },
     { label: () => tr(L('返回', 'Back')), act: onBack },
   ];
 }
@@ -44,7 +84,11 @@ export class SettingsPanel implements Overlay {
   done = false;
   list: MenuList;
   sub: Overlay | null = null;
-  constructor() { this.list = new MenuList(settingsItems(() => (this.done = true), () => (this.sub = new ControlsPanel()))); }
+  /** Ines's notes stay hidden (and paused) while this is open */
+  hidesNotes = true;
+  constructor() {
+    this.list = new MenuList(settingsItems(() => (this.done = true), () => (this.sub = new ControlsPanel())));
+  }
   update(dt: number) {
     if (this.sub) { if (!this.sub.update(dt)) this.sub = null; return true; }
     if (G.input.pressed('cancel') || G.input.pressed('pause')) { G.input.consume('pause'); sfx('uiBack'); return false; }
@@ -56,14 +100,19 @@ export class SettingsPanel implements Overlay {
     ctx.globalAlpha = 0.6; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
     panel(ctx, 150, 20, 340, 320);
     G.font.draw(ctx, tr(UI.settings), 320, 30, { align: 'center', color: 'B5' });
-    rect(ctx, 166, 48, 308, 1, 'B1');
-    this.list.render(ctx, 172, 58, 296);
+    // layout follows the text size: rule under the title, rows, then room for a two-line hint
+    const ruleY = Math.round(30 + Math.max(18, Text.lineH('body') + 3));
+    rect(ctx, 166, ruleY, 308, 1, 'B1');
+    const listY = ruleY + 10;
+    this.list.maxH = 334 - listY - Math.ceil(2 * Text.lineH('small') + 8);
+    this.list.render(ctx, 172, listY, 296);
     this.sub?.render(r);
   }
 }
 
 export class RunInfoPanel implements Overlay {
   blocks = true;
+  hidesNotes = true;
   sel = 0;
   constructor(private run: Run) {}
   private entries(): { icon: Sprite; name: string; desc: string; color: string; tag: string }[] {
@@ -124,6 +173,7 @@ export class RunInfoPanel implements Overlay {
 
 export class PauseMenu implements Overlay {
   blocks = true;
+  hidesNotes = true;
   list: MenuList;
   closing = false;
   confirmQuit = false;
@@ -157,10 +207,13 @@ export class PauseMenu implements Overlay {
   render(r: Renderer) {
     const ctx = r.ui2;
     ctx.globalAlpha = 0.55; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
-    panel(ctx, 220, 110, 200, 136);
-    G.font.draw(ctx, tr(UI.paused), 320, 120, { align: 'center', color: 'B5' });
-    rect(ctx, 236, 138, 168, 1, 'B1');
-    this.list.render(ctx, 240, 148, 160);
+    const extra = this.list.items.length * (this.list.rh - this.list.rowH) + Math.round(Math.max(0, Text.lineH('body') - 15));
+    panel(ctx, 220, 110 - Math.round(extra / 2), 200, 136 + extra);
+    const top = 110 - Math.round(extra / 2);
+    G.font.draw(ctx, tr(UI.paused), 320, top + 10, { align: 'center', color: 'B5' });
+    const ruleY = Math.round(top + 10 + Math.max(18, Text.lineH('body') + 3));
+    rect(ctx, 236, ruleY, 168, 1, 'B1');
+    this.list.render(ctx, 240, ruleY + 10, 160);
     void i18n;
   }
 }

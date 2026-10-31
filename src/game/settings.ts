@@ -3,6 +3,7 @@ import { G } from './G';
 import { i18n, Lang } from './i18n';
 import { rumbleSettings } from '../engine/rumble';
 import { DEFAULT_BINDINGS, Action } from '../engine/input';
+import { textScale } from '../engine/gfx/font';
 
 export interface Settings {
   master: number; music: number; sfx: number;
@@ -14,7 +15,18 @@ export interface Settings {
   flashes: boolean;
   bindings: Partial<Record<Action, string[]>>;
   aimAssist: boolean;
+  /** damage numbers over enemies */
   showDamage: boolean;
+  /** UI text size in percent: 125 draws glyphs one device-pixel step larger where the window allows */
+  textSize: 100 | 125;
+  /** HUD labels next to the health bar, tape, sand ... (GDD2 §9.4): auto = first 3 runs */
+  hudLabels: 'auto' | 'always' | 'off';
+  /** rewind input: tap + hold-to-scrub (default), or tap only (GDD2 §3.2) */
+  rewindMode: 'both' | 'tap';
+  /** cap full-screen flash intensity (photosensitivity) */
+  flashLimit: boolean;
+  /** plain-language lines under stylised terms (GDD2 §9.8): auto = until seen 3 times */
+  termHints: 'auto' | 'always' | 'off';
 }
 
 const KEY = 'secondhand.settings.v1';
@@ -22,7 +34,16 @@ const KEY = 'secondhand.settings.v1';
 export const settings: Settings = {
   master: 0.8, music: 0.7, sfx: 0.85, shake: 1, lang: 'zh', rumble: true, rumbleStrength: 1,
   pixelPerfect: false, flashes: true, bindings: {}, aimAssist: true, showDamage: true,
+  textSize: 100, hudLabels: 'auto', rewindMode: 'both', flashLimit: false, termHints: 'auto',
 };
+
+/** strongest full-screen flash allowed: 0 when flashes are off, a soft cap when limited */
+export function flashCap(): number { return !settings.flashes ? 0 : settings.flashLimit ? 0.12 : Infinity; }
+
+/** should HUD labels show? (auto: the first three runs) */
+export function hudLabelsOn(runs: number): boolean {
+  return settings.hudLabels === 'always' || (settings.hudLabels === 'auto' && runs < 3);
+}
 
 export function loadSettings() {
   try {
@@ -30,7 +51,17 @@ export function loadSettings() {
     if (raw) Object.assign(settings, JSON.parse(raw));
     else if (!navigator.language.toLowerCase().startsWith('zh')) settings.lang = 'en';
   } catch { /* storage unavailable */ }
+  sanitize();
   applySettings();
+}
+
+function sanitize() {
+  if (settings.textSize !== 100 && settings.textSize !== 125) settings.textSize = 100;
+  if (!['auto', 'always', 'off'].includes(settings.hudLabels)) settings.hudLabels = 'auto';
+  if (!['auto', 'always', 'off'].includes(settings.termHints)) settings.termHints = 'auto';
+  if (settings.rewindMode !== 'both' && settings.rewindMode !== 'tap') settings.rewindMode = 'both';
+  settings.flashLimit = !!settings.flashLimit;
+  settings.showDamage = settings.showDamage !== false;
 }
 
 export function saveSettings() {
@@ -43,9 +74,12 @@ export function applySettings() {
   G.audio.volumes.music = settings.music;
   G.audio.volumes.sfx = settings.sfx;
   G.audio.applyVolumes();
-  i18n.lang = settings.lang;
+  // ?lang=zh|en (debug / screenshots) wins over the saved language for this session
+  const urlLang = G.debug.get('lang');
+  i18n.lang = urlLang === 'zh' || urlLang === 'en' ? urlLang : settings.lang;
   rumbleSettings.enabled = settings.rumble;
   rumbleSettings.strength = settings.rumbleStrength;
   if (G.r) G.r.params.pixelPerfect = settings.pixelPerfect;
+  textScale.boost = settings.textSize === 125;
   for (const k of Object.keys(DEFAULT_BINDINGS) as Action[]) G.input.bindings[k] = settings.bindings[k]?.slice() ?? DEFAULT_BINDINGS[k].slice();
 }

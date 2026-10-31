@@ -1,0 +1,13 @@
+[
+ {"t": 100, "press": "Escape"},
+ {"t": 800, "eval": "(()=>{const o=__G.scenes.current.overlays.at(-1); o.list.items[2].act(); return __G.scenes.current.overlays.length})()"},
+ {"t": 1500, "shot": "top"},
+ {"t": 1600, "eval": "(()=>{const s=__G.scenes.current.overlays.at(-1); s.list.sel=11; s.list.follow(); return s.list.items[11].label()})()"},
+ {"t": 2300, "shot": "textsize"},
+ {"t": 2400, "down": "ArrowRight"}, {"t": 2600, "up": "ArrowRight"},
+ {"t": 3400, "shot": "textsize125"},
+ {"t": 3500, "eval": "localStorage.getItem('secondhand.settings.v1')"},
+ {"t": 3600, "down": "ArrowLeft"}, {"t": 3800, "up": "ArrowLeft"},
+ {"t": 3900, "eval": "(()=>{const s=__G.scenes.current.overlays.at(-1); s.list.sel=17; s.list.follow(); return s.list.items[17].label()})()"},
+ {"t": 4600, "shot": "bottom"}
+]

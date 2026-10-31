@@ -218,4 +218,28 @@ export function registerSfx(a: AudioEngine) {
     a.bell(out, t + 0.1, 1174.7, { dur: 0.6, vol: 0.07, ratio: 3.5, index: 1 });
   });
   reg('pickupBig', (a, t, out) => { [523, 659, 784, 1046, 1318].forEach((f, i) => a.bell(out, t + i * 0.07, f, { dur: 1.2, vol: 0.08, ratio: 3.5, index: 1.4 })); });
+
+  // ── meta notices (registry toasts, Ines's notes) ──
+  // achievement / unlock: two bright brass notes, a fifth apart
+  reg('notice', (a, t, out) => {
+    a.bell(out, t, 1318.5, { dur: 0.9, vol: 0.07, ratio: 2.0, index: 1.1 });
+    a.bell(out, t + 0.11, 1975.5, { dur: 1.3, vol: 0.07, ratio: 2.0, index: 1.1 });
+  }, { minGap: 0.2 });
+  // secret: a falling glassy arpeggio
+  reg('secretFound', (a, t, out) => {
+    [2637, 2093, 1568, 1318.5].forEach((f, i) => a.bell(out, t + i * 0.06, f, { dur: 1.1, vol: 0.05, ratio: 3.01, index: 1.6 }));
+    a.tone(out, t, { type: 'sine', f: 330, dur: 0.8, vol: 0.05 });
+  }, { minGap: 0.3 });
+  // chime: one deep tower bell with a long tail (hum + strike + tierce)
+  reg('chimeRing', (a, t, out) => {
+    a.bell(out, t, 196, { dur: 4.5, vol: 0.16, ratio: 2.0, index: 2.2 });
+    a.bell(out, t, 392, { dur: 3.2, vol: 0.08, ratio: 1.19, index: 1.4 });
+    a.bell(out, t + 0.01, 588, { dur: 2.4, vol: 0.05, ratio: 2.76, index: 1.0 });
+    a.noise(out, t, { dur: 0.05, vol: 0.12, type: 'bandpass', f: 2400, q: 2 });
+  }, { minGap: 0.5, maxVoices: 2 });
+  // Ines's note slides in: paper rustle + soft tick
+  reg('notePaper', (a, t, out) => {
+    a.noise(out, t, { dur: 0.16, vol: 0.12, type: 'bandpass', f: 3200, f2: 1800, q: 0.8, a: 0.03 });
+    a.bell(out, t + 0.05, 1760, { dur: 0.4, vol: 0.035, ratio: 3.5, index: 0.8 });
+  }, { minGap: 0.3 });
 }

@@ -1,0 +1,26 @@
+{
+  "shards": 23,
+  "totalShards": 180,
+  "nodes": { "hp": 2, "dmg": 1, "sand": 1 },
+  "weapons": ["rapier"],
+  "weapon": "rapier",
+  "seen": {
+    "enemies": ["cogling", "sentry", "spitter", "mite"],
+    "memories": ["oren_attack", "pip_dash"],
+    "parts": ["hearth_ember"],
+    "events": ["baker"],
+    "bosses": []
+  },
+  "lore": [],
+  "runs": 6,
+  "wins": 0,
+  "deaths": 6,
+  "bestFloor": 1,
+  "bestTime": 0,
+  "ines": 2,
+  "introSeen": true,
+  "tutorialDone": true,
+  "overwind": 0,
+  "maxOverwind": 0,
+  "version": 1
+}

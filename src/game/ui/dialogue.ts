@@ -14,6 +14,8 @@ export interface DLine { name: L10n; portrait: Sprite; portraitTalk?: Sprite; te
 
 export class DialogueOverlay implements Overlay {
   blocks = true;
+  /** Ines's notes stay hidden (and paused) while this is open */
+  hidesNotes = true;
   i = 0;
   t = 0;
   open = 0;

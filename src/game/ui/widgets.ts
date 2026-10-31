@@ -7,10 +7,12 @@ import { tr, L, L10n } from '../i18n';
 import { keyLabel, Action } from '../../engine/input';
 import { rect, panel } from './draw';
 import { Text, TextSize, ColorKey } from './text';
-import { textMul } from '../../engine/gfx/font';
+import { artMul } from '../../engine/gfx/font';
+import { term } from '../strings';
+import { Terms } from '../meta/registry';
 
 // ───────────────────────── tiny bitmap helper ─────────────────────────
-function bits(ctx: CanvasRenderingContext2D, rows: readonly string[], x: number, y: number, c: string) {
+export function drawBits(ctx: CanvasRenderingContext2D, rows: readonly string[], x: number, y: number, c: string) {
   for (let j = 0; j < rows.length; j++) {
     const r = rows[j];
     let i = 0;
@@ -92,33 +94,33 @@ export function drawPadGlyph(ctx: CanvasRenderingContext2D, g: PadGlyph, x: numb
   x = Math.round(x); y = Math.round(y);
   const w = padGlyphW(g);
   if (g === 'A' || g === 'B' || g === 'X' || g === 'Y') {
-    bits(ctx, DISC, x, y, 'K3');
-    bits(ctx, DISC_RIM, x, y, 'K0');
-    bits(ctx, DISC_HI, x, y, 'K5');
-    bits(ctx, BIG[g], x + 4, y + 4, 'K0');
-    bits(ctx, BIG[g], x + 4, y + 3, FACE_COLOR[g]);
+    drawBits(ctx, DISC, x, y, 'K3');
+    drawBits(ctx, DISC_RIM, x, y, 'K0');
+    drawBits(ctx, DISC_HI, x, y, 'K5');
+    drawBits(ctx, BIG[g], x + 4, y + 4, 'K0');
+    drawBits(ctx, BIG[g], x + 4, y + 3, FACE_COLOR[g]);
     return w;
   }
   if (g === 'MENU' || g === 'VIEW' || g === 'LS' || g === 'RS') {
-    bits(ctx, DISC, x, y, 'K3');
-    bits(ctx, DISC_RIM, x, y, 'K0');
-    bits(ctx, DISC_HI, x, y, 'K5');
+    drawBits(ctx, DISC, x, y, 'K3');
+    drawBits(ctx, DISC_RIM, x, y, 'K0');
+    drawBits(ctx, DISC_HI, x, y, 'K5');
     if (g === 'MENU') { for (const j of [4, 6, 8]) rect(ctx, x + 4, y + j, 5, 1, 'K9'); }
     else if (g === 'VIEW') {
       // two overlapping windows
-      bits(ctx, ['####.', '#..#.', '#.####', '###..#', '..#..#', '..####'], x + 3, y + 3, 'K9');
+      drawBits(ctx, ['####.', '#..#.', '#.####', '###..#', '..#..#', '..####'], x + 3, y + 3, 'K9');
     } else {
       // thumbstick: inner ring + letter
-      bits(ctx, ['..###..', '.#...#.', '#.....#', '#.....#', '#.....#', '.#...#.', '..###..'], x + 3, y + 3, 'K6');
-      bits(ctx, SMALL3[g[0]], x + 5, y + 4, 'K10');
+      drawBits(ctx, ['..###..', '.#...#.', '#.....#', '#.....#', '#.....#', '.#...#.', '..###..'], x + 3, y + 3, 'K6');
+      drawBits(ctx, SMALL3[g[0]], x + 5, y + 4, 'K10');
     }
     return w;
   }
   if (g === 'DPAD') {
     const cross = ['....#####....', '....#...#....', '....#...#....', '....#...#....', '#####...#####', '#...........#', '#...........#', '#...........#', '#####...#####', '....#...#....', '....#...#....', '....#...#....', '....#####....'];
     const fill = ['.............', '.....###.....', '.....###.....', '.....###.....', '.....###.....', '.###########.', '.###########.', '.###########.', '.....###.....', '.....###.....', '.....###.....', '.....###.....', '.............'];
-    bits(ctx, fill, x, y, 'K3');
-    bits(ctx, cross, x, y, 'K0');
+    drawBits(ctx, fill, x, y, 'K3');
+    drawBits(ctx, cross, x, y, 'K0');
     // arrow nubs
     rect(ctx, x + 6, y + 2, 1, 1, 'K9'); rect(ctx, x + 6, y + 10, 1, 1, 'K9');
     rect(ctx, x + 2, y + 6, 1, 1, 'K9'); rect(ctx, x + 10, y + 6, 1, 1, 'K9');
@@ -144,8 +146,8 @@ export function drawPadGlyph(ctx: CanvasRenderingContext2D, g: PadGlyph, x: numb
   }
   const a = SMALL3[g[0]], b = SMALL3[g[1]];
   const lx = x + Math.floor((w - 7) / 2);
-  bits(ctx, a, lx, y + 4, 'K10');
-  bits(ctx, b, lx + 4, y + 4, 'K10');
+  drawBits(ctx, a, lx, y + 4, 'K10');
+  drawBits(ctx, b, lx + 4, y + 4, 'K10');
   return w;
 }
 
@@ -170,10 +172,10 @@ export function drawKeycap(ctx: CanvasRenderingContext2D, label: string, x: numb
   if (label === '↕↔') {
     // four arrows: ◂ ▴ ▾ ▸
     const c = 'K10';
-    bits(ctx, ['..#', '.##', '###', '.##', '..#'], x + 3, y + 3, c);
-    bits(ctx, ['..#..', '.###.', '#####'], x + 8, y + 2, c);
-    bits(ctx, ['#####', '.###.', '..#..'], x + 14, y + 6, c);
-    bits(ctx, ['#..', '##.', '###', '##.', '#..'], x + 21, y + 3, c);
+    drawBits(ctx, ['..#', '.##', '###', '.##', '..#'], x + 3, y + 3, c);
+    drawBits(ctx, ['..#..', '.###.', '#####'], x + 8, y + 2, c);
+    drawBits(ctx, ['#####', '.###.', '..#..'], x + 14, y + 6, c);
+    drawBits(ctx, ['#..', '##.', '###', '##.', '#..'], x + 21, y + 3, c);
     return w;
   }
   G.small.draw(ctx, label, x + w / 2, y - 2, { align: 'center', color: 'K10', shadow: false });
@@ -183,11 +185,11 @@ export function drawKeycap(ctx: CanvasRenderingContext2D, label: string, x: numb
 function drawMouse(ctx: CanvasRenderingContext2D, label: string, x: number, y: number): number {
   const outline = ['..###..', '.#.#.#.', '#..#..#', '#..#..#', '#######', '#.....#', '#.....#', '#.....#', '#.....#', '.#...#.', '..###..'];
   const body = ['.......', '..#.#..', '.##.##.', '.##.##.', '.......', '.#####.', '.#####.', '.#####.', '.#####.', '..###..', '.......'];
-  bits(ctx, body, x + 1, y + 1, 'K8');
-  bits(ctx, outline, x + 1, y + 1, 'K0');
+  drawBits(ctx, body, x + 1, y + 1, 'K8');
+  drawBits(ctx, outline, x + 1, y + 1, 'K0');
   rect(ctx, x + 2, y + 9, 5, 1, 'K9');
-  if (label === 'LMB') bits(ctx, ['.#', '##', '##'], x + 2, y + 2, 'B5');
-  else if (label === 'RMB') bits(ctx, ['#.', '##', '##'], x + 5, y + 2, 'B5');
+  if (label === 'LMB') drawBits(ctx, ['.#', '##', '##'], x + 2, y + 2, 'B5');
+  else if (label === 'RMB') drawBits(ctx, ['#.', '##', '##'], x + 5, y + 2, 'B5');
   else rect(ctx, x + 4, y + 2, 1, 3, 'B5');
   return 9;
 }
@@ -247,7 +249,7 @@ export function drawPromptLabel(ctx: CanvasRenderingContext2D, action: Action | 
 export function drawPixelArt(ctx: CanvasRenderingContext2D, img: CanvasImageSource & { width: number; height: number }, cx: number, cy: number, k = 1) {
   const t = ctx.getTransform();
   const s = t.a;
-  const m = (Math.abs(s - 1) < 1e-4 ? 1 : textMul(s)) * k;
+  const m = (Math.abs(s - 1) < 1e-4 ? 1 : artMul(s)) * k;
   const W = img.width * m, H = img.height * m;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -336,7 +338,7 @@ export function drawTagChip(ctx: CanvasRenderingContext2D, tag: TagId, x: number
   rect(ctx, x + 1, y, w - 2, 13, 'K0'); rect(ctx, x, y + 1, w, 11, 'K0');
   rect(ctx, x + 1, y + 1, w - 2, 11, 'K1');
   rect(ctx, x + 1, y + 1, 1, 11, c);
-  bits(ctx, TAG_ICON[tag], x + 4, y + 3, c);
+  drawBits(ctx, TAG_ICON[tag], x + 4, y + 3, c);
   Text.draw(ctx, name, x + 12, y - 2, { size: 'small', color: c, shadow: false });
   return w;
 }
@@ -376,49 +378,37 @@ export function drawStamp(ctx: CanvasRenderingContext2D, text: L10n, x: number, 
 }
 
 // ───────────────────────── term labels (GDD2 §9.8) ─────────────────────────
-interface TermLite { name: L10n; plain: L10n }
-/**
- * Minimal local term lookup so drawTermLabel works before strings.ts / registry.ts exist.
- * F1b replaces these two hooks with strings.ts term() and registry Terms.showPlain().
- */
-export const termHooks: { term: (id: string) => TermLite | null; showPlain: (id: string) => boolean } = {
-  term: (id) => LOCAL_TERMS[id] ?? null,
-  showPlain: () => true,
-};
-const LOCAL_TERMS: Record<string, TermLite> = {
-  memory: { name: L('回忆', 'Memory'), plain: L('本局强化 · 死后消失', 'Run upgrade · lost on death') },
-  duo: { name: L('双人回忆', 'Duo Memory'), plain: L('两位守护者合力的强化', 'Two patrons combined') },
-  hourglass: { name: L('沙漏强化', 'Hourglass'), plain: L('强化回溯能力', 'Upgrades your rewind') },
-  part: { name: L('零件', 'Part'), plain: L('被动道具 · 本局有效', 'Passive item · this run') },
-  cracked: { name: L('裂纹零件', 'Cracked Part'), plain: L('有代价的强力道具', 'Strong item with a cost') },
-  calibration: { name: L('校准', 'Calibration'), plain: L('改造当前武器', 'Modifies your weapon') },
-  escapement: { name: L('擒纵器', 'Escapement'), plain: L('本局核心规则（只能带一个）', 'Core rule for the run (one only)') },
-  brass: { name: L('黄铜', 'Brass'), plain: L('局内金币 · 商店用', 'Run money · spend in shops') },
-  shard: { name: L('时之碎片', 'Time Shard'), plain: L('局外货币 · 带回工坊升级', 'Kept after runs · upgrades') },
-  sand: { name: L('时砂', 'Sand'), plain: L('回溯/分岔要消耗的能量', 'Energy for rewinding') },
-  tape: { name: L('磁带', 'Tape'), plain: L('能倒回的最近几秒', 'The seconds you can rewind') },
-  shadow: { name: L('旧影', 'Shadow'), plain: L('3 秒前的你 · 回溯会回到这里', 'You, 3s ago · rewind returns here') },
-  echo: { name: L('残响', 'Echo'), plain: L('过去的你 · 会重复你做过的动作', 'Past you · repeats your moves') },
-  paradox: { name: L('悖论', 'Paradox'), plain: L('碰到自己的残响 → 爆炸', 'Touch your echo → explosion') },
-  fork: { name: L('分岔', 'Fork'), plain: L('原地留下一个残响', 'Leave an echo here') },
-  sync: { name: L('同步', 'Sync'), plain: L('两次攻击同时命中 → +50%', 'Two hits at once → +50%') },
-  culprit: { name: L('元凶', 'Culprit'), plain: L('刚才打伤你的敌人', 'The enemy that just hit you') },
-  stasisDmg: { name: L('定格伤害', 'Fixed damage'), plain: L('回溯也拿不回的伤害', 'Damage rewind cannot undo') },
-  mainspring: { name: L('主发条', 'Mainspring'), plain: L('永久升级', 'Permanent upgrades') },
-  patron: { name: L('守护者', 'Patron'), plain: L('赐予你回忆的五位神祇', 'The five who grant Memories') },
-  stopped: { name: L('停摆', 'Stopped'), plain: L('倒地 · 队友可以救你', 'Down · a friend can revive you') },
-  tempo: { name: L('节拍', 'Tempo'), plain: L('连招评分 · 越高伤害越高', 'Combo rating · more damage') },
-  break: { name: L('破绽', 'Break'), plain: L('打满后敌人僵直受重伤', 'Fill it to stagger the enemy') },
-  chime: { name: L('钟响', 'Chime'), plain: L('收集品 · 集齐 11 个看真结局', 'Collect all 11 for the true end') },
-};
+export interface TermLabelOpts {
+  size?: TextSize; color?: ColorKey; align?: 'left' | 'center' | 'right';
+  /** true: always show the plain line · false: never · omitted: registry Terms.showPlain(id) */
+  forcePlain?: boolean;
+  /** 'below' (default): plain line under the name · 'inline': "name  plain" on one line */
+  layout?: 'below' | 'inline';
+}
 
-/** Stylised name, with its plain-language line (small, K7) underneath while the player is learning it. */
-export function drawTermLabel(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, o: { size?: TextSize; color?: ColorKey; align?: 'left' | 'center' | 'right'; forcePlain?: boolean } = {}): { w: number; h: number } {
-  const t = termHooks.term(id);
+/**
+ * Stylised name, with its plain-language line (small, K7) while the player is still learning it.
+ * Does not count a sighting: call Terms.seen(id) once when the screen showing it opens.
+ */
+export function drawTermLabel(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, o: TermLabelOpts = {}): { w: number; h: number } {
+  const t = term(id);
   const size = o.size ?? 'body';
   const name = t ? t.name : L(id, id);
-  const a = Text.draw(ctx, name, x, y, { size, color: o.color ?? 'K10', align: o.align });
-  if (!t || !(o.forcePlain || termHooks.showPlain(id))) return a;
-  const b = Text.draw(ctx, t.plain, x, y + Text.lineH(size), { size: 'small', color: 'K7', align: o.align });
+  const color = o.color ?? 'K10';
+  const plain = t && (o.forcePlain ?? Terms.showPlain(id)) ? t.plain : null;
+  if (!plain) return Text.draw(ctx, name, x, y, { size, color, align: o.align });
+  if (o.layout === 'inline') {
+    const nw = Text.measure(name, size).w, pw = Text.measure(plain, 'small').w, gap = 14;
+    const total = nw + gap + pw;
+    const x0 = o.align === 'center' ? x - total / 2 : o.align === 'right' ? x - total : x;
+    const a = Text.draw(ctx, name, x0, y, { size, color });
+    const lh = Text.lineH(size), sh = Text.lineH('small');
+    // a short dash between name and meaning: "回忆 – 本局强化 · 死后消失"
+    rect(ctx, Math.round(x0 + nw + 4), Math.round(y + lh / 2), 6, 1, 'K6');
+    Text.draw(ctx, plain, x0 + nw + gap, y + Math.round((lh - sh) / 2) + 1, { size: 'small', color: 'K7' });
+    return { w: total, h: a.h };
+  }
+  const a = Text.draw(ctx, name, x, y, { size, color, align: o.align });
+  const b = Text.draw(ctx, plain, x, y + Text.lineH(size), { size: 'small', color: 'K7', align: o.align });
   return { w: Math.max(a.w, b.w), h: Text.lineH(size) + b.h };
 }

@@ -32,6 +32,8 @@ const PAD_ROWS: [PadGlyph, L10n][] = [
 
 export class ControlsPanel implements Overlay {
   blocks = true;
+  /** Ines's notes stay hidden (and paused) while this is open */
+  hidesNotes = true;
   sel = 0;
   capture = false;
   t = 0;

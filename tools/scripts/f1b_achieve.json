@@ -1,0 +1,7 @@
+[
+  {"t": 200, "eval": "JSON.stringify({first: __reg.achieve('test'), again: __reg.achieve('test')})"},
+  {"t": 900, "shot": "toast"},
+  {"t": 1000, "reload": true},
+  {"t": 4000, "eval": "JSON.stringify({has: __reg.hasAchievement('test'), list: __save.profile.achievements, stored: JSON.parse(localStorage.getItem('secondhand.profile.v2')).achievements})"},
+  {"t": 4100, "shot": "after_reload"}
+]

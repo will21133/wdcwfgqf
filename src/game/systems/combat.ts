@@ -3,6 +3,7 @@ import type { World } from '../world/world';
 import { angleDiff, clamp, TAU } from '../../engine/math';
 import { frand } from '../../engine/rng';
 import { sfx } from '../G';
+import { settings } from '../settings';
 import { rumble } from '../../engine/rumble';
 const G_sfx = sfx;
 
@@ -282,7 +283,8 @@ export class Combat {
     const w = this.world;
     const big = info.crit || amt >= 30;
     const color = info.fixed ? 'V3' : info.crit ? 'B5' : t.team === 'player' ? 'R4' : stored ? 'V4' : info.echo ? 'C3' : info.kind === 'dot' ? (info.src === 'burn' ? 'O2' : 'T4') : 'K10';
-    w.fx.number(t.x, t.y - t.height - 2, amt, color, big);
+    // settings → "damage numbers": numbers over enemies can be turned off; your own damage always shows
+    if (settings.showDamage || t.team === 'player') w.fx.number(t.x, t.y - t.height - 2, amt, color, big);
     if (info.quiet || info.kind === 'dot') return;
     const ang = info.x !== undefined ? Math.atan2(t.y - (info.y ?? t.y), t.x - info.x) : frand(0, TAU);
     w.fx.hitSparks(t.x, t.y - t.height * 0.5, ang, info.echo ? 'echo' : t.team === 'player' ? 'blood' : big ? 'crit' : 'normal', amt);

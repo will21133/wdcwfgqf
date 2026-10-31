@@ -1,6 +1,8 @@
 // Screenshot harness for art review / QA.
 // usage: node tools/shot.mjs <url-query> <out.png> [waitMs] [w] [h] [script.json]
 //   script.json: [{"t":ms,"down":"KeyW"},{"t":ms,"up":"KeyW"},{"t":ms,"shot":"name"} ...]
+//   also: {"eval":"js"}, {"setStorage":{"key":k,"file":path}|{"key":k,"value":str}}, {"removeStorage":k},
+//         {"reload":true} (reload the page; later steps keep their absolute times)
 const { chromium } = require('playwright');
 const fs = require('node:fs');
 
@@ -26,6 +28,12 @@ if (scriptPath) {
     if (s.move) await p.mouse.move(s.move[0], s.move[1]);
     if (s.mdown !== undefined) await p.mouse.down({ button: s.mdown === 2 ? 'right' : 'left' });
     if (s.mup !== undefined) await p.mouse.up({ button: s.mup === 2 ? 'right' : 'left' });
+    if (s.setStorage) {
+      const v = s.setStorage.file ? fs.readFileSync(s.setStorage.file, 'utf8') : String(s.setStorage.value);
+      await p.evaluate(([k, val]) => localStorage.setItem(k, val), [s.setStorage.key, v]);
+    }
+    if (s.removeStorage) await p.evaluate((k) => localStorage.removeItem(k), s.removeStorage);
+    if (s.reload) await p.reload();
     if (s.eval) logs.push('[eval] ' + JSON.stringify(await p.evaluate(s.eval)));
     if (s.shot) await p.screenshot({ path: out.replace(/\.png$/, `_${s.shot}.png`) });
   }

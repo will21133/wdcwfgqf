@@ -1,0 +1,8 @@
+[
+  {"t": 100, "removeStorage": "secondhand.profile.v2"},
+  {"t": 150, "setStorage": {"key": "secondhand.profile.v1", "file": "tools/fixtures/profile_v1.json"}},
+  {"t": 200, "reload": true},
+  {"t": 4000, "eval": "(()=>{const v1=JSON.parse(localStorage.getItem('secondhand.profile.v1')); const p=__save.profile; return JSON.stringify({v1shards: v1.shards, refund: __save.v1Refund(v1.nodes), v2shards: p.shards, version: p.version, nodes: p.nodes, weapons: p.weapons, runs: p.runs, deaths: p.deaths, ines: p.ines, seenEnemies: p.seen.enemies.length, migration: p.migration, v2stored: !!localStorage.getItem('secondhand.profile.v2'), v1kept: !!localStorage.getItem('secondhand.profile.v1')});})()"},
+  {"t": 4100, "eval": "JSON.stringify(__save.migrateV1({shards: 5, nodes: {w_maul: 1, hp: 3, luck: 1}, weapons: ['rapier','maul'], weapon: 'maul', wins: 1}), ['shards','nodes','weapons','weapon','unlocks','w_maul','hp'])"},
+  {"t": 4200, "shot": "migrated"}
+]

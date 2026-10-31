@@ -29,6 +29,8 @@ function shardCounter(ctx: CanvasRenderingContext2D, x: number, y: number) {
 // ───────────────────────── Mainspring ─────────────────────────
 export class MainspringOverlay implements Overlay {
   blocks = true;
+  /** Ines's notes stay hidden (and paused) while this is open */
+  hidesNotes = true;
   sel = 0;
   t = 0;
   flash = 0;
@@ -143,6 +145,8 @@ export const WEAPON_INFO: { id: string; name: L10n; desc: L10n; sprite: Sprite }
 
 export class WeaponOverlay implements Overlay {
   blocks = true;
+  /** Ines's notes stay hidden (and paused) while this is open */
+  hidesNotes = true;
   sel = Math.max(0, WEAPON_INFO.findIndex((w) => w.id === profile.weapon));
   t = 0;
   constructor() { sfx('uiOpen'); }
@@ -221,6 +225,8 @@ interface Entry { id: string; icon: Sprite | null; name: string; desc: string; s
 
 export class LedgerOverlay implements Overlay {
   blocks = true;
+  /** Ines's notes stay hidden (and paused) while this is open */
+  hidesNotes = true;
   tab = 0;
   sel = 0;
   tabs: { name: L10n; entries: () => Entry[] }[] = [

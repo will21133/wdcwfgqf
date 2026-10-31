@@ -36,13 +36,25 @@ export const CJK_RE = /[⺀-鿿豈-﫿︰-﹏＀-￯]/;
  * round(s), stepped down when that would make text more than 12.5% larger than its logical box.
  */
 export function textMul(s: number): number {
+  let m = artMul(s);
+  // text size 125%: one device-pixel step larger, as long as that stays within 150% of the layout
+  if (textScale.boost && (m + 1) / s <= 1.5) m++;
+  return m;
+}
+
+/** integer device px per art px for free-floating pixel art (never affected by the text-size setting) */
+export function artMul(s: number): number {
   let m = Math.max(1, Math.round(s));
   if (m > 1 && m / s > 1.125) m--;
   return m;
 }
 
-/** logical px per font px on the UI layer this frame (m / s); set by the renderer */
-export const textScale = { k: 1, s: 1, m: 1 };
+/**
+ * logical px per font px on the UI layer this frame (k = m / s); set by the renderer.
+ * boost = the 125% text-size setting (settings.ts); r = how much larger text is than at 100%
+ * this frame (1 when boost is off) — layouts with fixed row heights scale by it.
+ */
+export const textScale = { k: 1, s: 1, m: 1, boost: false, r: 1 };
 
 const isDev = (() => { try { return !!(import.meta as any).env?.DEV; } catch { return false; } })();
 const warned = new Set<string>();

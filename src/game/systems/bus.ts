@@ -28,6 +28,11 @@ export interface BusEvents {
   statusApplied: { target: Actor; status: string; stacks: number };
   perfectDodge: { x: number; y: number };
   spawn: { e: Entity };
+  /** meta registry (F1): emitted on the current world's bus when the player earns one */
+  secret: { id: string };
+  achievement: { id: string };
+  chime: { id: string };
+  hint: { id: string };
 }
 
 type Handler<K extends keyof BusEvents> = (e: BusEvents[K]) => void;

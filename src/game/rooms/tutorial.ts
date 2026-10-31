@@ -36,6 +36,8 @@ class RewindCoach extends Entity {
   shown = false;
   t = 0;
   done = false;
+  /** seconds until the follow-up line ("touch it to cause a Paradox"); runs on world time */
+  private followUp = -1;
   constructor() { super(); }
   added() {
     this.world.bus.on('damaged', () => { if (!this.done) { this.shown = true; this.t = 0; } }, this);
@@ -44,11 +46,17 @@ class RewindCoach extends Entity {
       this.done = true;
       const p = this.world.player!;
       this.world.fx.banner(p.x, p.y - 44, tr(L('那是三秒前的你。', 'That is you, three seconds ago.')), 'C3', 2.4);
-      setTimeout(() => this.world.fx.banner(p.x, p.y - 44, tr(L('触碰它，引发{c:悖论}。', 'Touch it to cause a {c:Paradox}.')), 'C3', 2.4), 2500);
+      this.followUp = 2.5;
     }, this);
   }
   removed() { this.world.bus.off(this); }
-  update(dt: number) { this.t += dt; }
+  update(dt: number) {
+    this.t += dt;
+    if (this.followUp > 0 && (this.followUp -= dt) <= 0) {
+      const p = this.world.player;
+      if (p) this.world.fx.banner(p.x, p.y - 44, tr(L('触碰它，引发{c:悖论}。', 'Touch it to cause a {c:Paradox}.')), 'C3', 2.4);
+    }
+  }
   renderUnlit(r: Renderer) {
     if (!this.shown || this.done) return;
     const p = this.world.player!;

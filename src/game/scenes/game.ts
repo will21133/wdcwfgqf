@@ -19,7 +19,7 @@ import { Dummy } from '../entities/enemies/gearworks';
 import { setupTutorial } from '../rooms/tutorial';
 import { botStep } from '../qa/bot';
 import { BIOMES } from '../../art/biomes';
-import { Overlay, ChoiceOverlay, Toast } from '../ui/overlay';
+import { Overlay, ChoiceOverlay, Toast, ChoiceHeader } from '../ui/overlay';
 import { PauseMenu, RunInfoPanel } from '../ui/pause';
 import {
   RoomOption, nextOptions, rewardLook, memoryChoices, hourglassChoices, calibrationChoices, rollPart, partLook, Choice,
@@ -39,9 +39,16 @@ import { markSeen } from '../save';
 import { WEAPON_INFO } from '../ui/metaPanels';
 import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
+import { Hints, hintsHooks } from '../ui/hints';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
 const BOT = G.debug.has('bot');
+
+// Ines's notes wait while a boss fight is on (GDD2 §9.8 rule 2)
+hintsHooks.busy = () => {
+  const s = G.scenes.current;
+  return s instanceof GameScene && !!s.boss && !s.boss.dead && !s.cleared;
+};
 const ALL_PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
 
 export class GameScene implements Scene, RoomHost {
@@ -59,6 +66,7 @@ export class GameScene implements Scene, RoomHost {
   options: RoomOption[] = [];
   titleCard: { title: string; sub: string; t: number } | null = null;
   boss: Boss | null = null;
+  private bossPhase = 0;
   /** set by the flow controller (hub/title) */
   onDeath?: (run: Run) => void;
   onVictory?: (run: Run) => void;
@@ -146,7 +154,7 @@ export class GameScene implements Scene, RoomHost {
   // ───────────────────────── RoomHost ─────────────────────────
   openOverlay(o: Overlay) { this.overlays.push(o); }
 
-  openChoice(choices: Choice[], header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string }, after?: () => void, regen?: () => Choice[]) {
+  openChoice(choices: Choice[], header: ChoiceHeader, after?: () => void, regen?: () => Choice[]) {
     if (!choices.length) { after?.(); return; }
     const run = this.run;
     const ov = new ChoiceOverlay(choices, header, (c) => {
@@ -169,18 +177,18 @@ export class GameScene implements Scene, RoomHost {
       this.syncPlayer();
     };
     const gen = () => memoryChoices(this.run, this.rng, patron, applied, boost);
-    this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color }, undefined, gen);
+    this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color, term: 'memory' }, undefined, gen);
   }
 
   offerHourglass() {
-    this.openChoice(hourglassChoices(this.run, this.rng, () => this.syncPlayer()), { title: UI.hourglass, sub: L('回溯的本质', 'The nature of rewinding'), icon: ICONS.hourglass, color: 'C3' });
+    this.openChoice(hourglassChoices(this.run, this.rng, () => this.syncPlayer()), { title: UI.hourglass, sub: L('回溯的本质', 'The nature of rewinding'), icon: ICONS.hourglass, color: 'C3', term: 'hourglass' });
   }
 
   offerCalibration() {
     this.openChoice(calibrationChoices(this.run, this.rng, (id) => {
       CAL_BY_ID[id]?.hook?.({ ...this.run.hookCtx!, on: (k, fn) => this.world.bus.on(k, fn, id) });
       this.syncPlayer();
-    }), { title: UI.calibration, sub: WEAPON_INFO.find((x) => x.id === this.run.weapon)?.name, icon: ICONS.whetstone, color: 'K9' });
+    }), { title: UI.calibration, sub: WEAPON_INFO.find((x) => x.id === this.run.weapon)?.name, icon: ICONS.whetstone, color: 'K9', term: 'calibration' });
   }
 
   grantPart(p: PartDef) {
@@ -344,6 +352,7 @@ export class GameScene implements Scene, RoomHost {
       // intro: camera on the boss, player waits
       if (this.boss.inIntro) { w.cam.follow(this.boss.x, this.boss.y - 30, dt, 4); this.hud.update(dt, w); this.postFx(dt, p); return; }
       if (p.locked && !this.cleared) p.locked = false;
+      if (this.boss.phase !== this.bossPhase) { this.bossPhase = this.boss.phase; Hints.hold(4); }
       if (!this.cleared && this.boss.dead) { this.cleared = true; this.onClear(); }
       G.music.layer('boss', this.boss.phase > 0 && !this.boss.dead ? 1 : 0, this.boss.dead ? 4 : 2);
     } else if (!this.cleared && p.hp > 0) {

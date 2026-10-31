@@ -332,7 +332,8 @@ export class HubScene implements Scene {
     for (const d of w.entities) if (d instanceof Door) d.unlock();
     G.music.play('hub', 1.5);
     G.r.params.lighting = true;
-    if (this.context === 'start' && this.hasStory() && profile.ines === 0) setTimeout(() => this.talk(), 900);
+    // first visit: Ines speaks up shortly after you arrive
+    if (this.context === 'start' && this.hasStory() && profile.ines === 0) this.talkIn = 0.9;
   }
 
   private depart() {
@@ -340,8 +341,11 @@ export class HubScene implements Scene {
     this.hooks.startRun();
   }
 
+  private talkIn = -1;
+
   update(dt: number) {
     this.t += dt;
+    if (this.talkIn > 0 && (this.talkIn -= dt) <= 0 && !this.overlays.length) this.talk();
     const w = this.world;
     const p = w.player!;
     if (this.overlays.length) {

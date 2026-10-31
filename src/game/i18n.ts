@@ -52,3 +52,7 @@ export const UI = {
     echo: L('残响', 'Echo'), passive: L('被动', 'Passive'), legendary: L('传说', 'Legendary'), duo: L('双重', 'Duo'),
   } as Record<string, L10n>,
 };
+
+// String tables and the term glossary live in strings.ts (PLAN2 §1.2); re-exported for convenience.
+export { registerStrings, S, defineTerm, term, TERMS } from './strings';
+export type { TermDef } from './strings';

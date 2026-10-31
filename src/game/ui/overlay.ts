@@ -10,6 +10,9 @@ import type { Choice } from '../progression/rewards';
 import { SLOT_GLYPH } from '../../art/sprites/icons';
 import { col } from '../../art/palette';
 import { Text } from './text';
+import { drawTermLabel } from './widgets';
+import { Terms } from '../meta/registry';
+import { term as termDef } from '../strings';
 
 export interface Overlay {
   /** returns false when finished */
@@ -33,6 +36,12 @@ function glyph(ctx: CanvasRenderingContext2D, rows: string[], x: number, y: numb
   rows.forEach((r, j) => { for (let i = 0; i < r.length; i++) if (r[i] !== '.') ctx.fillRect(x + i, y + j, 1, 1); });
 }
 
+export interface ChoiceHeader {
+  title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string;
+  /** term id of what is being offered (memory / hourglass / calibration ...): its plain line shows under the title while the player is learning it */
+  term?: string;
+}
+
 export class ChoiceOverlay implements Overlay {
   blocks = true;
   t = 0;
@@ -44,14 +53,18 @@ export class ChoiceOverlay implements Overlay {
 
   constructor(
     public choices: Choice[],
-    public header: { title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string },
+    public header: ChoiceHeader,
     private onDone?: (c: Choice) => void,
     /** returns fresh choices, or null if no rerolls remain */
     public reroll?: () => Choice[] | null,
   ) {
     sfx('uiOpen');
     G.audio.muffle(true, 2200);
+    // decide once per opening whether this offer explains its term, and count the sighting
+    if (header.term) { this.termPlain = Terms.showPlain(header.term); Terms.seen(header.term); }
   }
+
+  private termPlain = false;
 
   rerollsLeft = () => 0;
 
@@ -123,7 +136,14 @@ export class ChoiceOverlay implements Overlay {
     ctx.globalAlpha = A;
     if (h.icon) drawScaled(ctx, h.icon, 320, hy + 18, 2, A);
     Text.draw(ctx, h.title, 320, hy + 39, { align: 'center', color: h.color, outline: 'K0' });
-    if (h.sub) Text.draw(ctx, h.sub, 320, hy + 57, { size: 'small', align: 'center', color: 'K8' });
+    // what is on offer, in plain words: "回忆 | 本局强化 · 死后消失" (the name alone once learned)
+    const td = h.term ? termDef(h.term) : null;
+    const showTerm = !!td && (this.termPlain || tr(td.name) !== tr(h.title));
+    if (td && showTerm) {
+      if (tr(td.name) === tr(h.title)) Text.draw(ctx, td.plain, 320, hy + 57, { size: 'small', align: 'center', color: 'K7' });
+      else drawTermLabel(ctx, h.term!, 320, hy + 55, { align: 'center', layout: 'inline', color: 'K9', forcePlain: this.termPlain });
+    }
+    if (h.sub) Text.draw(ctx, h.sub, 320, showTerm && !h.quote ? hy + 72 : hy + 57, { size: 'small', align: 'center', color: 'K8' });
     if (h.quote) {
       const q = tr(h.quote);
       const n = Math.floor(clamp((this.t - 0.2) * 40, 0, q.length));
@@ -185,7 +205,8 @@ export class ChoiceOverlay implements Overlay {
     if (c.isNew) Text.draw(ctx, UI.new, x + w - 8, y + band - 2 - Text.lineH('small'), { size: 'small', color: 'B5', align: 'right' });
     // selection: ticking clock hand above the card
     if (sel) {
-      const cx = x + w / 2, cy = y - 8;
+      // sits on the top rim so it never collides with the header quote above the cards
+      const cx = x + w / 2, cy = y;
       const a = -Math.PI / 2 + Math.floor(G.time * 2) * (Math.PI / 6);
       rect(ctx, cx - 3, cy - 3, 7, 7, 'K0');
       rect(ctx, cx - 2, cy - 2, 5, 5, 'B4');

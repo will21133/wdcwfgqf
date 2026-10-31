@@ -1,0 +1,7 @@
+[
+ {"t": 100, "eval": "JSON.stringify({seen: __save.profile.termSeen, plain: __reg.Terms.showPlain('memory')})"},
+ {"t": 300, "eval": "(()=>{const s=__G.scenes.current; s.overlays.length=0; __G.time+=2; s.offerMemory('pip'); return __save.profile.termSeen.memory})()"},
+ {"t": 600, "eval": "(()=>{const s=__G.scenes.current; s.overlays.length=0; __G.time+=2; s.offerMemory('marta'); return __save.profile.termSeen.memory})()"},
+ {"t": 900, "eval": "(()=>{const s=__G.scenes.current; s.overlays.length=0; __G.time+=2; s.offerMemory('fen'); return JSON.stringify({n: __save.profile.termSeen.memory, plain: __reg.Terms.showPlain('memory')})})()"},
+ {"t": 3000, "shot": "fourth"}
+]

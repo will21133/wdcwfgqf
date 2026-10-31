@@ -1,7 +1,7 @@
 import { makeCanvas, Ctx } from './canvas';
 import { PostFX, PostParams, defaultPost, VIEW_W, VIEW_H, WORLD_W, WORLD_H } from './post';
 import { hexToRgb, col } from '../../art/palette';
-import { textMul, textScale } from './font';
+import { textMul, artMul, textScale } from './font';
 
 /** text sizes of the game's Text API (src/game/ui/text.ts) */
 export type LabelSize = 'title' | 'body' | 'small' | 'tiny';
@@ -200,7 +200,7 @@ export class Renderer {
     const L = this.viewLayout();
     const u = this.ui2;
     this.uiScale = L.s; this.uiX = L.x; this.uiY = L.y;
-    textScale.s = L.s; textScale.m = textMul(L.s); textScale.k = textScale.m / L.s;
+    textScale.s = L.s; textScale.m = textMul(L.s); textScale.k = textScale.m / L.s; textScale.r = textScale.m / artMul(L.s);
     if (this.uiSaved) u.restore();
     u.save();
     this.uiSaved = true;
