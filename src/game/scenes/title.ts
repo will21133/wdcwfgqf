@@ -281,7 +281,10 @@ export class TitleScene implements Scene {
     ui.fillRect(lx - 3, ly + 90, 6, 5);
     G.small.draw(ui, tr(L('撤销失误，保留胜果', 'Undo your wounds. Keep your victories.')), lx, ly + 100, { align: 'center', color: 'K7' });
     ui.globalAlpha = 1;
-    if (t > 1.2) {
+    if (t > 1.2 && !G.audio.ctx) {
+      // first interaction gives the page keyboard focus and unlocks audio
+      G.font.draw(ui, tr(L('按任意键 / 点击画面', 'Press any key / click')), lx, 240, { align: 'center', color: Math.floor(t * 2) % 2 ? 'K10' : 'K7', outline: 'K0' });
+    } else if (t > 1.2) {
       const ma = clamp((t - 1.2) / 0.5, 0, 1);
       ui.globalAlpha = ma;
       this.list.render(ui, lx - 55, 214, 110);

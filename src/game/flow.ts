@@ -60,6 +60,7 @@ export const Flow = {
   },
 
   endRun(run: Run, kind: RunEndKind) {
+    (window as any).__botLog?.push(`[END] ${kind} floor=${run.floor} room=${run.roomIndex} t=${Math.round(run.time)}s shards=${run.shards}`);
     // bank shards (a fraction is lost on abandon)
     const banked = Math.round((kind === 'quit' ? Math.floor(run.shards * 0.5) : run.shards) * (1 + 0.2 * run.overwind));
     profile.shards += banked;
