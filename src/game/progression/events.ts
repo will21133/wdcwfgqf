@@ -12,6 +12,7 @@ export interface EventCtx {
   /** open a memory choice for a patron (after the event closes) */
   memory(patron: Patron, boost?: number): void;
   hourglass(): void;
+  calibration(): void;
   part(opts?: { allowCursed?: boolean; forceCursed?: boolean }): void;
   heal(frac: number): void;
   damage(amount: number): void;
@@ -151,6 +152,39 @@ export const EVENTS: EventDef[] = [
       'A brass telescope aimed at the frozen sky. A note from Asu on the tube: "Observation #86400: the stars have not moved. Neither have I."'),
     options: [
       { label: L('望向星空', 'Look through it'), detail: L('选择一段{v:阿苏}的回忆，{r:最大生命 -8}', 'Choose a Memory from {v:Asu}, {r:max HP -8}'), act: (c) => { c.run.bonuses.push({ apply: (m) => { m.maxHp -= 8; } }); c.run.recompute(); c.memory('asu', 0.15); return L('星光落进你的表盘里，再也没有离开。', 'Starlight falls into your dial and never leaves.'); } },
+      leave(),
+    ],
+  },
+  {
+    id: 'notebook', art: 'elder', minFloor: 1,
+    title: L('园丁的笔记', "The Gardener's Notebook"),
+    text: L('芬的笔记本摊开在花架上，最后一页写着："如果时间停了，花会不会永远开着？我想看看。可是……不会凋谢的花，还算是花吗？"',
+      'Fen\'s notebook lies open on a planter. The last page reads: "If time stops, will the flowers bloom forever? I want to see. But... is a flower that never wilts still a flower?"'),
+    options: [
+      { label: L('把一片花瓣夹进书里', 'Press a petal between the pages'), detail: L('选择一段{t:芬}的回忆', 'Choose a Memory from {t:Fen}'), act: (c) => { c.memory('fen'); return L('花瓣在书页间，替她继续生长。', 'Between the pages, the petal keeps growing for her.'); } },
+      { label: L('带走笔记本', 'Take the notebook'), detail: L('{v:+2 时之碎片}，{y:恢复 10% 生命}', '{v:+2 Time Shards}, {y:heal 10%}'), act: (c) => { c.shards(2); c.heal(0.1); return L('笔记本里夹着一张种子清单，还有一个名字：奥伦。', 'Tucked inside: a list of seeds, and a name — Oren.'); } },
+      leave(),
+    ],
+  },
+  {
+    id: 'bellrope', art: 'bell', minFloor: 1,
+    title: L('钟楼的绳子', 'The Bell Rope'),
+    text: L('一根粗麻绳从高处垂下，末端还握在玛尔塔僵住的手里。她正要拉下最后一下——午夜的钟声。',
+      'A thick rope hangs from above, its end still gripped in Marta\'s frozen hands. She was about to pull the final stroke — the midnight bell.'),
+    options: [
+      { label: L('替她拉一下', 'Pull it for her'), detail: L('选择一段{b:玛尔塔}的回忆（{g:更高稀有度}），{r:失去 12 生命}', 'Choose a Memory from {b:Marta} ({g:higher rarity}), {r:lose 12 HP}'), act: (c) => { c.damage(12); c.memory('marta', 0.2); return L('绳子纹丝不动。但你听见了很远很远的一声嗡鸣。', 'The rope does not move. Yet somewhere, very far away, something hums.'); } },
+      { label: L('松开她的手', 'Loosen her grip'), detail: L('{g:+60 黄铜}', '{g:+60 Brass}'), act: (c) => { c.brass(60); return L('她手心里攥着几枚硬币——敲钟的工钱。', 'Coins in her palm — a bellringer\'s wages.'); } },
+      leave(),
+    ],
+  },
+  {
+    id: 'toolbox', art: 'child',
+    title: L('学徒的工具箱', "The Apprentice's Toolbox"),
+    text: L('皮普的工具箱翻倒在地，螺丝和齿轮撒了一地。一张纸条贴在盖子上："师傅说过：拧太紧，就会断。"',
+      'Pip\'s toolbox lies overturned, screws and gears everywhere. A note on the lid: "Master says: turn it too tight and it snaps."'),
+    options: [
+      { label: L('收拾工具', 'Gather the tools'), detail: L('选择一项{g:武器校准}', 'Choose a weapon {g:Calibration}'), act: (c) => { c.calibration(); return L('你把每一样都擦干净，放回原处。', 'You wipe each one clean and put it back.'); } },
+      { label: L('拿走最好的扳手', 'Take the best wrench'), detail: L('选择一段{y:皮普}的回忆', 'Choose a Memory from {y:Pip}'), act: (c) => { c.memory('pip'); return L('扳手的握柄上缠着胶布，磨得发亮。', 'The handle is wrapped in tape, worn shiny.'); } },
       leave(),
     ],
   },

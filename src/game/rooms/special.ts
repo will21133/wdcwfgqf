@@ -228,6 +228,7 @@ class EventStatue extends Interactable {
       run: h.run, rng: h.rng, player: w.player!,
       memory: (p: Patron, boost?: number) => pending.push(() => h.offerMemory(p, boost)),
       hourglass: () => pending.push(() => h.offerHourglass()),
+      calibration: () => pending.push(() => h.offerCalibration()),
       part: (o?: { allowCursed?: boolean; forceCursed?: boolean }) => {
         let p = rollPart(h.run, h.rng, { allowCursed: o?.allowCursed });
         if (o?.forceCursed) {
