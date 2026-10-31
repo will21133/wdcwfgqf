@@ -158,6 +158,7 @@ export class AudioEngine {
       else osc.frequency.exponentialRampToValueAtTime(Math.max(1, o.f2), t + (o.sweep ?? o.dur));
     }
     const g = ctx.createGain();
+    g.gain.value = 0; // avoid a one-sample click before the envelope starts
     const a = o.a ?? 0.002, v = o.vol ?? 0.5, rel = o.release ?? o.dur;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(v, t + a);
@@ -182,6 +183,7 @@ export class AudioEngine {
     if (o.f2) flt.frequency.exponentialRampToValueAtTime(o.f2, t + o.dur);
     flt.Q.value = o.q ?? 1;
     const g = ctx.createGain();
+    g.gain.value = 0;
     const a = o.a ?? 0.002;
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(o.vol ?? 0.5, t + a);
@@ -201,6 +203,7 @@ export class AudioEngine {
     const mod = ctx.createOscillator();
     const mg = ctx.createGain();
     const g = ctx.createGain();
+    g.gain.value = 0;
     car.frequency.value = f;
     mod.frequency.value = f * (o.ratio ?? 3.5);
     mg.gain.setValueAtTime(f * (o.index ?? 2.2), t);

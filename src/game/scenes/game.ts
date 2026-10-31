@@ -127,8 +127,9 @@ export class GameScene implements Scene, RoomHost {
     if (kind === 'shop' || kind === 'rest' || kind === 'event' || kind === 'vault') this.cleared = true;
     w.flushAdds();
     G.r.params.lighting = true;
-    G.music.play(kind === 'shop' ? 'shop' : th.music);
+    G.music.play(kind === 'shop' ? 'shop' : this.boss ? (run.floor >= 3 ? 'boss_final' : 'boss') : th.music);
     G.music.layer('combat', 0, 0.01);
+    G.music.layer('boss', 0, 0.01);
     const off = G.debug.get('offer');
     if (off && run.roomIndex === Number(G.debug.get('roomIndex') ?? 0)) {
       if (off === 'hourglass') this.offerHourglass();
@@ -341,7 +342,7 @@ export class GameScene implements Scene, RoomHost {
       if (this.boss.inIntro) { w.cam.follow(this.boss.x, this.boss.y - 30, dt, 4); this.hud.update(dt, w); this.postFx(dt, p); return; }
       if (p.locked && !this.cleared) p.locked = false;
       if (!this.cleared && this.boss.dead) { this.cleared = true; this.onClear(); }
-      G.music.layer('boss', this.boss.phase > 0 ? 1 : 0, 2);
+      G.music.layer('boss', this.boss.phase > 0 && !this.boss.dead ? 1 : 0, this.boss.dead ? 4 : 2);
     } else if (!this.cleared && p.hp > 0) {
       const alive = w.aliveEnemies.length;
       if (this.waveIdx < 0 || (alive <= (this.waveIdx < this.waves.length - 1 ? 1 : 0) && this.waveIdx < this.waves.length - 1)) {
