@@ -154,6 +154,10 @@ export function registerSfx(a: AudioEngine) {
     a.noise(out, t, { dur: 0.35, vol: 0.4, type: 'bandpass', f: 1200, f2: 400, q: 0.8 });
     a.tone(out, t, { type: 'sine', f: 500, f2: 120, dur: 0.15, vol: 0.12 });
   });
+  reg('sandSink', (a, t, out) => {
+    a.noise(out, t, { dur: 0.5, vol: 0.4, type: 'lowpass', f: 1800, f2: 300, a: 0.05 });
+    a.tone(out, t, { type: 'sine', f: 220, f2: 70, dur: 0.4, vol: 0.12 });
+  });
   reg('fall', (a, t, out) => { a.tone(out, t, { type: 'sine', f: 700, f2: 120, dur: 0.5, vol: 0.12 }); });
   reg('woodHit', (a, t, out) => {
     a.noise(out, t, { dur: 0.06, vol: 0.4, type: 'bandpass', f: 900, q: 2 });

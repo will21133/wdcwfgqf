@@ -27,6 +27,8 @@ export abstract class Enemy extends Actor {
   codexId = '';
   /** elite modifier aura */
   aura = false;
+  /** elite glow colour */
+  auraColor = 'O1';
   tier = 1;
 
   constructor(x: number, y: number, hp: number) {
@@ -144,7 +146,7 @@ export abstract class Enemy extends Actor {
     drawSprite(r.w, spr, this.x, this.y + (this.falling > 0 ? (1 - this.falling / 0.55) * 8 : 0), opts);
     if (this.isElite) {
       r.g.globalCompositeOperation = 'lighter';
-      drawSprite(r.g, spr, this.x, this.y, { flip: this.flip, tint: 'O1', alpha: 0.18 + Math.sin(this.age * 6) * 0.06 });
+      drawSprite(r.g, spr, this.x, this.y, { flip: this.flip, tint: this.auraColor, alpha: 0.18 + Math.sin(this.age * 6) * 0.06 });
       r.g.globalCompositeOperation = 'source-over';
     }
   }

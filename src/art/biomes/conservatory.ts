@@ -1304,9 +1304,7 @@ class PottedPlant extends Entity {
 }
 
 function decorateConservatory(w: World, m: RoomMap, rng: RNG) {
-  // the scene queued gearworks props (sconces, iron gears, crates); this floor dresses those hints its own way
-  const q = (w as unknown as { toAdd?: Entity[] }).toAdd;
-  if (q) for (let i = q.length - 1; i >= 0; i--) if (q[i] instanceof WallLamp || q[i] instanceof WallGear || q[i] instanceof Breakable) q.splice(i, 1);
+  // stock gearworks props are not spawned for this biome (see claimsProps); dress those hints here
   const nearExit = (tx: number, ty: number, d = 3) => m.exits.some((e) => Math.abs(e.tx - tx) < d && Math.abs(e.ty - ty) < d) || (!!m.entry && Math.abs(m.entry.tx - tx) < d && Math.abs(m.entry.ty - ty) < d + 1);
   const used = new Set<number>();
   for (const p of m.props) {
@@ -1379,6 +1377,7 @@ function decorateConservatory(w: World, m: RoomMap, rng: RNG) {
 }
 
 export const CONSERVATORY: BiomeArt = {
+  claimsProps: ['walllamp', 'wallgear', 'crate', 'barrel'],
   paintFloor,
   paintPits,
   paintDressing,

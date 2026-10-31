@@ -9,7 +9,7 @@ import { generateRoom, RoomKind } from '../world/roomgen';
 import { THEMES } from '../../art/themes';
 import { TS } from '../world/room';
 import { Player } from '../entities/player';
-import { WallLamp, WallGear, Breakable } from '../entities/props';
+import { spawnStockProps } from '../world/stockProps';
 import { Door } from '../entities/door';
 import { HUD } from '../ui/hud';
 import { planWaves, Wave, findEnemy } from '../world/director';
@@ -77,11 +77,7 @@ export class GameScene implements Scene, RoomHost {
     const w = new World(map, th, this.seed);
     w.run = run;
     this.world = w;
-    for (const p of map.props) {
-      if (p.type === 'walllamp') w.add(new WallLamp(p.tx, p.ty, th.lamp, th.lampLight));
-      else if (p.type === 'wallgear') w.add(new WallGear(p.tx, p.ty, !!p.data?.big));
-      else if (p.type === 'crate' || p.type === 'barrel') w.add(new Breakable(p.tx, p.ty, p.type));
-    }
+    spawnStockProps(w, map, th);
     BIOMES[th.id]?.decorate?.(w, map, new RNG(this.seed + 99));
     const ex = map.entry ? (map.entry.tx + 1) * TS : map.pw / 2;
     const ey = map.entry ? map.entry.ty * TS - 10 : map.ph / 2;

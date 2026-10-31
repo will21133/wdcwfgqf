@@ -60,15 +60,17 @@ export const THEMES: Theme[] = [
   {
     id: 2, key: 'archive',
     name: { zh: '流沙档案馆', en: 'The Sand Archive' },
-    ambient: '#4a3d3a', clear: '#0d0806',
-    grade: { tint: [1.04, 1.0, 0.94], lift: [0.04, 0.02, 0.0], sat: 0.95, contrast: 1.05 },
-    slab: ['S0', 'B1', 'S1', 'S2', 'S3'], seam: 'B0',
-    grime: ['S2', 'S3', 'S4'], grimeAmount: 0.4,
-    plate: ['R0', 'R1', 'R2', 'B2'], plateAmount: 0.22,
-    wallBrick: ['B0', 'B1', 'S0', 'S1'], wallMortar: 'K1', wallLip: ['S1', 'S2', 'S3'],
+    // candle-lit library at night: dark warm umber ambient, light pools come from the candles
+    ambient: '#3a2c30', clear: '#0a0607',
+    grade: { tint: [1.03, 0.99, 0.94], lift: [0.025, 0.014, 0.004], sat: 0.88, contrast: 1.06 },
+    slab: ['B0', 'B1', 'B2', 'B3', 'S1'], seam: 'K1',
+    grime: ['S0', 'S1', 'S2'], grimeAmount: 0.3,
+    plate: ['B0', 'B1', 'B2', 'B3'], plateAmount: 0,
+    wallBrick: ['B0', 'B1', 'B2', 'B3'], wallMortar: 'K1', wallLip: ['B2', 'B3', 'B4'],
     cap: ['K0', 'B0', 'K1'], capTrim: 'B3',
-    pitWater: ['S0', 'S1', 'S2', 'S3', 'S4'], pitFace: ['S1', 'S0', 'B0', 'K1'],
-    lamp: 'O3', lampLight: 'O3', dust: 'S4', music: 'archive',
+    // falling into a sinkhole kicks up sand
+    pitWater: ['K0', 'S0', 'S1', 'S2', 'S3'], pitFace: ['B1', 'B0', 'K1', 'K0'],
+    lamp: 'O3', lampLight: 'O2', dust: 'S3', music: 'archive',
   },
   {
     id: 3, key: 'clockface',

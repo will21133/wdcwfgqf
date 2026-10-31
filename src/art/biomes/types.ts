@@ -18,6 +18,8 @@ export interface PaintCtx {
 }
 
 export interface BiomeArt {
+  /** generator prop types this biome dresses itself (stock gearworks props are not spawned for these) */
+  claimsProps?: string[];
   /** paint the whole floor buffer (floor tiles only — pits are painted afterwards) */
   paintFloor?(pb: PixelBuf, c: PaintCtx): void;
   /** paint pit tiles */

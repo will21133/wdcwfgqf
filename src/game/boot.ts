@@ -59,6 +59,12 @@ export async function boot() {
     G.scenes.set(new ArtPreview(c.previewGroups(Number(G.debug.get('page') ?? 0))));
     return;
   }
+  if (scene === 'art_archive') {
+    // floor 3 (Sand Archive) sprite review
+    const a = await import('../art/sprites/archive');
+    G.scenes.set(new ArtPreview(a.archivePreview(Number(G.debug.get('p') ?? 0))));
+    return;
+  }
   if (scene === 'art') {
     const t = buildTick();
     G.scenes.set(new ArtPreview([

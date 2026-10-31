@@ -290,7 +290,7 @@ function decorate(m: RoomMap, rng: RNG, kind: RoomKind, biome: number) {
   // corner candles / standing lamps for small rooms
   if (kind !== 'combat' && kind !== 'elite' && kind !== 'boss') {
     const fl = m.openTiles(0).filter((t) => m.get(t.tx, t.ty - 1) === T.WALL);
-    for (let i = 0; i < 2 && fl.length; i++) P('candles', rng.pick(fl).tx, rng.pick(fl).ty);
+    for (let i = 0; i < 2 && fl.length; i++) { const t = rng.pick(fl); P('candles', t.tx, t.ty); }
   }
   // floating dust motes handled by the world (ambient)
   void biome;

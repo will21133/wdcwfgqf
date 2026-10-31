@@ -88,3 +88,4 @@ export class Breakable extends Actor {
     drawSprite(r.w, this.type === 'crate' ? CRATE : BARREL, this.x, this.y, { tint: this.flash > 0 ? '#ffffff' : undefined });
   }
 }
+

@@ -134,7 +134,7 @@ export class FX {
       this.w.particles.spawn({ kind: 'debris', x, y, z: 0, vx: Math.cos(a) * frand(20, 60), vy: Math.sin(a) * frand(5, 20), vz: frand(60, 140), grav: 400, life: frand(0.4, 0.7), ramp: [th.pitWater[4], th.pitWater[3], th.pitWater[2]], size: 1, bounce: 0 });
     }
     this.ring(x, y, 2, 14, 0.4, th.pitWater[4], 1, 'unlit');
-    G.audio.play('splash', { pan: this.w.pan(x) });
+    G.audio.play(th.key === 'archive' ? 'sandSink' : th.key === 'clockface' ? 'fall' : 'splash', { pan: this.w.pan(x) });
   }
 
   /** automaton death: gears, springs, oil decal */

@@ -7,7 +7,7 @@ import { RNG } from '../../engine/rng';
 import { generateRoom, RoomKind } from '../world/roomgen';
 import { THEMES } from '../../art/themes';
 import { World } from '../world/world';
-import { WallLamp, WallGear, Breakable } from '../entities/props';
+import { spawnStockProps } from '../world/stockProps';
 import { BIOMES } from '../../art/biomes';
 import { Run } from '../run';
 
@@ -19,11 +19,7 @@ export class RoomPreview implements Scene {
     const th = THEMES[biome];
     this.w = new World(m, th, seed);
     this.w.run = new Run(seed);
-    for (const p of m.props) {
-      if (p.type === 'walllamp') this.w.add(new WallLamp(p.tx, p.ty, th.lamp, th.lampLight));
-      else if (p.type === 'wallgear') this.w.add(new WallGear(p.tx, p.ty, !!p.data?.big));
-      else if (p.type === 'crate' || p.type === 'barrel') this.w.add(new Breakable(p.tx, p.ty, p.type));
-    }
+    spawnStockProps(this.w, m, th);
     BIOMES[biome]?.decorate?.(this.w, m, new RNG(seed + 99));
     this.w.flushAdds();
     this.w.cam.snap(m.pw / 2, m.ph / 2);
