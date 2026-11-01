@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
   p.on('pageerror', (e) => errs.push(e.message + '\n' + (e.stack || '').split('\n').slice(0, 4).join('\n')));
   let tinyCjk = 0;
   p.on('console', (m) => { if (m.type() === 'error') errs.push('[console] ' + m.text()); if (m.text().includes('[text] CJK in tiny')) tinyCjk++; });
-  await p.goto(process.env.BASE || ('http://127.0.0.1:5173/?' + query));
+  await p.goto((process.env.BASE || 'http://127.0.0.1:5173/').replace(/\/?$/, '/') + '?' + query); // BASE = another dev server (worktrees)
   const n = Math.ceil(+secs / 20);
   for (let i = 0; i < n; i++) {
     await p.waitForTimeout(20000);
