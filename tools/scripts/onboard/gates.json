@@ -1,0 +1,14 @@
+[
+ {"t":0,"url":"onboard=prologueDone&seed=2&floor=0&spawn=cogling&god=1&lang=zh","note":"ONBOARD2 §12.2 gates: before Scrub is taught a held rewind is a tap; before Fork is taught the first press in a room only explains (no Sand), a second press within 3 s forks, one 4 s later is explained again"},
+ {"t":10,"eval":"(async()=>{await __tut.sleep(1.2);window.__gt={};for(const e of __G.scenes.current.world.enemies){e.speed=0;e.think=()=>{};}await __tut.hold('KeyD',1.0);await __tut.sleep(0.3);const p=__G.scenes.current.world.players[0];const pv=p.rewindPreview();__gt.shadow=[Math.round(pv.x),Math.round(pv.y)];__gt.gates=__tut.gates;return __gt})()"},
+ {"t":20,"eval":"(async()=>{await __tut.hold('KeyQ',1.0);await __tut.sleep(0.6);const r=__tut.events.filter(e=>e.type==='rewind').pop();__gt.hold=r;__gt.holdLandedOnShadow=!!r&&Math.hypot(r.toX-__gt.shadow[0],r.toY-__gt.shadow[1])<=3;return __gt.hold})()"},
+ {"t":30,"eval":"(async()=>{await __tut.sleep(3.2);__gt.sand0=__tut.me.sand;await __tut.tap('KeyR');await __tut.sleep(0.2);__gt.sand1=__tut.me.sand;__gt.echoes1=__tut.me.echoes;return [__gt.sand0,__gt.sand1]})()"},
+ {"t":40,"eval":"__tut.freeze()"},
+ {"t":50,"shot":"explain"},
+ {"t":60,"eval":"__tut.thaw()"},
+ {"t":70,"eval":"(async()=>{await __tut.sleep(0.8);await __tut.tap('KeyR');await __tut.sleep(0.3);__gt.sand2=__tut.me.sand;__gt.forked1s=__tut.events.filter(e=>e.type==='fork').length;return [__gt.sand2,__gt.forked1s]})()"},
+ {"t":80,"eval":"(async()=>{await __tut.sleep(4.2);await __tut.tap('KeyR');await __tut.sleep(0.3);const s3=__tut.me.sand;await __tut.sleep(4.0);await __tut.tap('KeyR');await __tut.sleep(0.3);__gt.sand4=__tut.me.sand;__gt.sand3=s3;__gt.forkedTotal=__tut.events.filter(e=>e.type==='fork').length;__gt.queuedFork=(__tut.log.filter(e=>e.ev==='calmRequest').map(e=>e.data.id));return __gt})()"},
+ {"t":90,"eval":"({gates:'tapOnly holds:'+(__gt.hold&&__gt.hold.scrub===false)+' onShadow:'+__gt.holdLandedOnShadow+' | 1st R sand '+__gt.sand0+'→'+__gt.sand1+' | 2nd R (1 s) forks:'+(__gt.forked1s===1)+' | 4 s later forks:'+(__gt.forkedTotal>1), pass: !!(__gt.hold&&__gt.hold.scrub===false&&__gt.holdLandedOnShadow&&__gt.sand0===__gt.sand1&&__gt.forked1s===1&&__gt.forkedTotal===1&&__gt.queuedFork.includes('fork'))})"},
+ {"t":100,"eval":"__tut.audit()"},
+ {"t":110,"eval":"__tut.log.filter(e=>e.ev==='demo-desync').length"}
+]

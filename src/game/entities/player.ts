@@ -774,6 +774,8 @@ export class Player extends Actor implements Wielder {
   /** press Rewind (refuses with a reason when it can't) */
   tryRewind(auto = false) {
     if (auto) { this.beginRewind({ rescue: true, free: true, auto: true }); return; }
+    // a lesson that has not opened rewind yet (the prologue's L1–L2; ONBOARD2 §2.0)
+    if (!Gates.rewindAllow(this)) return;
     const c = this.canRewind();
     if (!c.ok) { this.refuse(c.reason!); return; }
     this.beginRewind({});

@@ -1,0 +1,119 @@
+[
+ {
+  "t": 0,
+  "url": "scene=prologue&lesson=undo&onboard=fresh&lang=zh&autoplay=onboard&fumble=1&speed=2",
+  "note": "ONBOARD2 §12.2 prologue_fail: from L3, every try goes wrong first (no rewind after the gear; breaking the dummy yourself; the echo left to fade); the third time at L3's step A the demo is offered; Tab replays it"
+ },
+ {
+  "eval": "__tut.wait('phase:try',90)",
+  "t": 10
+ },
+ {
+  "eval": "__tut.wait('caption',60)",
+  "t": 20
+ },
+ {
+  "eval": "__tut.wait('caption',60)",
+  "t": 30
+ },
+ {
+  "eval": "(async()=>{let n=0;while(!__tut.log.some(e=>e.ev==='fail'&&e.data.id==='undo')&&n++<400)await __tut.sleep(0.1);return __tut.wait('caption',20)})()",
+  "t": 40
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 50
+ },
+ {
+  "shot": "fail1",
+  "t": 60
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 70
+ },
+ {
+  "eval": "(async()=>{let n=0;while(!(__tut.log.filter(e=>e.ev==='step'&&e.data.step==='l3A').pop()||{data:{}}).data.help&&n++<900)await __tut.sleep(0.1);await __tut.sleep(0.5);return __tut.caption})()",
+  "t": 80
+ },
+ {
+  "eval": "(async()=>{let n=0;while(!__tut.log.some(e=>e.ev==='shown'&&e.data.key==='lesson.ask')&&n++<900)await __tut.sleep(0.1);await __tut.sleep(0.3);return 'ask'})()",
+  "t": 90
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 100
+ },
+ {
+  "shot": "ask",
+  "t": 110
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 120
+ },
+ {
+  "eval": "(async()=>{await __tut.tap('Tab');await __tut.wait('phase:demo',10);return __tut.demoPlays})()",
+  "t": 130
+ },
+ {
+  "shot": "replay",
+  "t": 140
+ },
+ {
+  "eval": "__tut.wait('lesson:echo',400)",
+  "t": 150
+ },
+ {
+  "eval": "(async()=>{let n=0;while(!__tut.log.some(e=>e.ev==='fail'&&e.data.id==='echo')&&n++<1200)await __tut.sleep(0.1);await __tut.sleep(0.4);return 'echoFail'})()",
+  "t": 160
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 170
+ },
+ {
+  "shot": "fail_echo",
+  "t": 180
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 190
+ },
+ {
+  "eval": "__tut.wait('lesson:paradox',300)",
+  "t": 200
+ },
+ {
+  "eval": "(async()=>{let n=0;while(!__tut.log.some(e=>e.ev==='fail'&&e.data.id==='paradox')&&n++<1500)await __tut.sleep(0.1);await __tut.sleep(0.4);return 'paradoxFail'})()",
+  "t": 210
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 220
+ },
+ {
+  "shot": "fail_paradox",
+  "t": 230
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 240
+ },
+ {
+  "eval": "__tut.wait('lesson:final',300)",
+  "t": 250
+ },
+ {
+  "eval": "(()=>{const f=__tut.fails;return {undo:(f.undo||[]).length,echo:(f.echo||[]).length,paradox:(f.paradox||[]).length,demoPlays:__tut.demoPlays,lines:__tut.log.filter(e=>e.ev==='caption'&&e.data.key==='onboard.fail').map(e=>e.data.text),pass:(f.undo||[]).length>=1&&(f.echo||[]).length>=1&&(f.paradox||[]).length>=1&&(__tut.demoPlays.undo||0)>=2}})()",
+  "t": 260
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 270
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 280
+ }
+]

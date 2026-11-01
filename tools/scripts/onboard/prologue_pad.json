@@ -1,0 +1,439 @@
+[
+ {
+  "t": 0,
+  "url": "scene=prologue&onboard=fresh&lang=zh&glyph=pad&autoplay=onboard&speed=2",
+  "note": "ONBOARD2 §12.2 prologue_pad: the first three lessons with controller glyphs; the captions' tokens read LS / X / A / LB"
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 10
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 20
+ },
+ {
+  "shot": "c00",
+  "t": 30
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 40
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 50
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 60
+ },
+ {
+  "shot": "c01",
+  "t": 70
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 80
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 90
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 100
+ },
+ {
+  "shot": "c02",
+  "t": 110
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 120
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 130
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 140
+ },
+ {
+  "shot": "c03",
+  "t": 150
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 160
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 170
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 180
+ },
+ {
+  "shot": "c04",
+  "t": 190
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 200
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 210
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 220
+ },
+ {
+  "shot": "c05",
+  "t": 230
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 240
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 250
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 260
+ },
+ {
+  "shot": "c06",
+  "t": 270
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 280
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 290
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 300
+ },
+ {
+  "shot": "c07",
+  "t": 310
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 320
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 330
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 340
+ },
+ {
+  "shot": "c08",
+  "t": 350
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 360
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 370
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 380
+ },
+ {
+  "shot": "c09",
+  "t": 390
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 400
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 410
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 420
+ },
+ {
+  "shot": "c10",
+  "t": 430
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 440
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 450
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 460
+ },
+ {
+  "shot": "c11",
+  "t": 470
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 480
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 490
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 500
+ },
+ {
+  "shot": "c12",
+  "t": 510
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 520
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 530
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 540
+ },
+ {
+  "shot": "c13",
+  "t": 550
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 560
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 570
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 580
+ },
+ {
+  "shot": "c14",
+  "t": 590
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 600
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 610
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 620
+ },
+ {
+  "shot": "c15",
+  "t": 630
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 640
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 650
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 660
+ },
+ {
+  "shot": "c16",
+  "t": 670
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 680
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 690
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 700
+ },
+ {
+  "shot": "c17",
+  "t": 710
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 720
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 730
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 740
+ },
+ {
+  "shot": "c18",
+  "t": 750
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 760
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 770
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 780
+ },
+ {
+  "shot": "c19",
+  "t": 790
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 800
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 810
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 820
+ },
+ {
+  "shot": "c20",
+  "t": 830
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 840
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 850
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 860
+ },
+ {
+  "shot": "c21",
+  "t": 870
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 880
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 890
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 900
+ },
+ {
+  "shot": "c22",
+  "t": 910
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 920
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 930
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 940
+ },
+ {
+  "shot": "c23",
+  "t": 950
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 960
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 970
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 980
+ },
+ {
+  "shot": "c24",
+  "t": 990
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1000
+ },
+ {
+  "eval": "__tut.where==='prologue_never'?'prologue_never':__tut.wait('caption',45)",
+  "t": 1010
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1020
+ },
+ {
+  "shot": "c25",
+  "t": 1030
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1040
+ },
+ {
+  "eval": "__tut.wait('lesson:echo',120)",
+  "t": 1050
+ },
+ {
+  "eval": "(()=>{const t=__tut.log.filter(e=>e.ev==='caption').map(e=>e.data.text).join(' ');return {move:t.includes('[LS]'),attack:t.includes('[X]'),dash:t.includes('[A]'),rewind:t.includes('[LB]'),noKeyboard:!/\\[(Q|R|WASD|SPACE)\\]/.test(t)}})()",
+  "t": 1060
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 1070
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 1080
+ }
+]

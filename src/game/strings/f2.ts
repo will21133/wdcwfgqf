@@ -6,7 +6,8 @@ registerStrings('f2', {
   // solo Last Second (GDD2 §3.10)
   lastSecond: L('回溯！', 'REWIND!'),
   noSand: L('时砂不足', 'No sand left'),
-  lastSecondHint: L('回到刚才', 'Go back in time'),
+  // ONBOARD2 §1.6: the one sentence's words (F4a)
+  lastSecondHint: L('撤销刚才几秒', 'Undo the last seconds'),
   // stopped & revive (GDD2 §5.5); {n} = the stopped hand's numeral
   stopped: L('停摆', 'Stopped'),
   windUp: L('按住：上弦 {n}', 'Hold: wind up {n}'),

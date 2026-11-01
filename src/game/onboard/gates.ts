@@ -22,7 +22,8 @@ import { profile } from '../save';
 import { Flags } from '../meta/registry';
 import { Onboard, Tut } from './core';
 
-export type ShowId = 'culprit';
+/** 'culprit': the Culprit marks · 'shadow': the Shadow, its hairspring and labels (the prologue's L1–L2 hide it) */
+export type ShowId = 'culprit' | 'shadow';
 
 /**
  * A temporary override. Each function may return undefined to fall through to the next layer (and
@@ -38,6 +39,10 @@ export interface GateLayer {
   forkAllow?(p: Player): boolean | undefined;
   /** a real Fork press this layer refused (the prologue: "This lesson uses {@rewind}") */
   onForkDenied?(p: Player): void;
+  /** may this hand rewind at all? (the prologue's L1–L2: not yet) — pure, like forkAllow */
+  rewindAllow?(p: Player): boolean | undefined;
+  /** a real rewind press this layer refused */
+  onRewindDenied?(p: Player): void;
   shows?(p: Player | null, what: ShowId): boolean | undefined;
   hud?(id: string, p: Player | null): boolean | undefined;
 }
@@ -47,7 +52,7 @@ export const FORK_WINDOW = 3;
 /** D9: lifetime count of "holding = tap for now" lines (ONBOARD2 §6.5) */
 export const HOLD_HINT_MAX = 2, HOLD_HINT_T = 0.6;
 /** the base rules are live from the prologue on (F4a flips this when the prologue lands) */
-const GATES_LIVE = false;
+const GATES_LIVE = true;
 
 /**
  * What the gates say. onboard/index.ts wires these to the Stage, the Calm queue and the strings;
@@ -80,8 +85,8 @@ const forkWindows = new WeakMap<World, Map<number, number>>();
 const holdTold = new WeakSet<object>();
 
 /** the newest layer's answer for this hand (and the layer that gave it), or undefined */
-function ask<K extends 'tapOnly' | 'forkAllow'>(k: K, p: Player): boolean | undefined { return askLayer(k, p)?.v; }
-function askLayer<K extends 'tapOnly' | 'forkAllow'>(k: K, p: Player): { v: boolean; l: GateLayer } | undefined {
+function ask<K extends 'tapOnly' | 'forkAllow' | 'rewindAllow'>(k: K, p: Player): boolean | undefined { return askLayer(k, p)?.v; }
+function askLayer<K extends 'tapOnly' | 'forkAllow' | 'rewindAllow'>(k: K, p: Player): { v: boolean; l: GateLayer } | undefined {
   for (let i = layers.length - 1; i >= 0; i--) {
     const l = layers[i];
     if (l.p && l.p !== p) continue;
@@ -124,6 +129,16 @@ export const Gates = {
     return false;
   },
 
+  /**
+   * may this rewind press rewind? Only a layer ever says no (the prologue before L3); the base rules
+   * never hold rewind back. A refusal calls the layer's onRewindDenied.
+   */
+  rewindAllow(p: Player): boolean {
+    const a = askLayer('rewindAllow', p);
+    if (a && !a.v) { a.l.onRewindDenied?.(p); return false; }
+    return true;
+  },
+
   /** would a Fork press fork now? (forkAllow without its side effects: tests, __tut.gates) */
   wouldFork(p: Player): boolean {
     const v = ask('forkAllow', p);
@@ -142,6 +157,7 @@ export const Gates = {
       if (v !== undefined) return v;
     }
     if (!Gates.live) return true;
+    if (what === 'shadow') return true;
     if (what === 'culprit') {
       // no hand (a shared HUD area): the profile owner's progress decides
       const novice = p ? Onboard.isNovice(p) : Onboard.mode() === 'full';

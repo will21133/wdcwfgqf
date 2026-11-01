@@ -1,0 +1,39 @@
+[
+ {
+  "t": 0,
+  "url": "seed=2&floor=0&spawn=cogling&god=1&lang=zh",
+  "note": "ONBOARD2 §12.2 stage_dock: a hand under the top rail pushes a critical card to the bottom rail; an enemy winding up under the bottom rail too turns it into a chip in the pod; text never covers either"
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(1.5);const w=__G.scenes.current.world;for(const e of w.enemies){e.think=()=>{};e.speed=0;}const p=w.players[0];__tut.resetAudit&&0;return [p.x,p.y]})()",
+  "t": 10
+ },
+ {
+  "eval": "(async()=>{const w=__G.scenes.current.world,p=w.players[0];const top=__G.r.camY+70;p.y=Math.max(p.y-200,top);p.rec.clear();p.rec.prefill(p.x,p.y,p.rec.capacity,{hp:p.hp});await __tut.sleep(0.4);__tut.say({key:'dock.test',tier:'S',form:'card',critical:true,text:{zh:'刚挨打？按 {@rewind} 撤销',en:'Just hit? {@rewind} to undo'},sub:{zh:'拿回 +12 生命 · 花 100 时砂',en:'+12 health back · costs 100 Sand'},dur:30,slot:0});await __tut.sleep(0.5);window.__dk=[__tut.caption&&__tut.caption.dock];return [Math.round(p.y-__G.r.camY),__tut.caption]})()",
+  "t": 20
+ },
+ {
+  "shot": "bottom",
+  "t": 30
+ },
+ {
+  "eval": "(async()=>{const w=__G.scenes.current.world;const e=w.enemies[0];if(e){e.x=__G.r.camX+320;e.y=__G.r.camY+300;e.wind={state:'test',dur:99,interruptible:false,armored:false};e.state='test';}await __tut.sleep(0.6);__dk.push(__tut.caption&&__tut.caption.dock);return __tut.caption})()",
+  "t": 40
+ },
+ {
+  "shot": "chip",
+  "t": 50
+ },
+ {
+  "eval": "({docks:__dk,pass:__dk[0]==='bottom'&&__dk[1]==='pod'})",
+  "t": 60
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 70
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 80
+ }
+]

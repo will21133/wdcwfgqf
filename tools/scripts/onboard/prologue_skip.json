@@ -1,0 +1,51 @@
+[
+ {
+  "t": 0,
+  "url": "onboard=fresh&lang=zh",
+  "note": "ONBOARD2 §12.2 prologue_skip: title → first-launch card, choose B (I know how to play) → workshop → a run: Fork works at once, holding rewind scrubs"
+ },
+ {
+  "eval": "__tut.wait('where:title',30)",
+  "t": 10
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(1.8);await __tut.tap('Enter');return __tut.wait('where:p0',10)})()",
+  "t": 20
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(0.4);await __tut.tap('ArrowDown');await __tut.sleep(0.3);return 'down'})()",
+  "t": 30
+ },
+ {
+  "shot": "p0b",
+  "t": 40
+ },
+ {
+  "eval": "(async()=>{await __tut.tap('Enter');await __tut.sleep(1.5);for(let i=0;i<4&&__tut.where!=='hub';i++){await __tut.tap('Escape');await __tut.sleep(1.2);}return __tut.wait('where:hub',40)})()",
+  "t": 50
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(1);window.__sk={mode:__tut.gates&&__tut.gates.mode,prologueDone:__save.profile.prologueDone,skipped:__reg.Flags.get('onboard.skipped')};__G.scenes.current.hooks.startRun();return __tut.wait('where:run',30)})()",
+  "t": 60
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(1.6);__sk.gates=__tut.gates;await __tut.hold('KeyD',1.0);await __tut.hold('KeyQ',1.0);await __tut.sleep(0.8);__sk.rw=__tut.events.filter(e=>e.type==='rewind').pop();await __tut.sleep(1.2);const s0=__tut.me.sand;await __tut.tap('KeyR');await __tut.sleep(0.3);__sk.forked=__tut.events.filter(e=>e.type==='fork').length;__sk.sand=[s0,__tut.me.sand];return __sk})()",
+  "t": 70
+ },
+ {
+  "shot": "run",
+  "t": 80
+ },
+ {
+  "eval": "({pass: !!(__sk.gates&&__sk.gates.tapOnly===false&&__sk.gates.forkAllow===true&&__sk.rw&&__sk.rw.scrub===true&&__sk.forked===1), sk:__sk})",
+  "t": 90
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 100
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 110
+ }
+]

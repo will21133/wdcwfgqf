@@ -10,8 +10,11 @@
 //   Calm.addRule(rule)        F4a registers R1's fork / scrub; F4b's ladder.ts adds R2+ and the events
 //   Calm.spend(scene) / Calm.spent(scene)   the room's one new thing
 //
-// Interface day: the queue, the rules, isCalm and the room budget work; the CalmDirector that picks a
-// lesson at the quiet moment and starts it with a SoftHost lands F4a day 8.
+// The director (every Stage update, standard runs only, novice hands only): at the quiet moment it
+// takes ① the queue's head (a press, the pause page, the death card), ② a lesson owed from earlier
+// (postponed), ③ the first rule whose gate is open while the run has had fewer than LESSONS_PER_RUN
+// lessons — and starts it with a SoftHost where the hand stands. Walking out through a door
+// postpones it (Flags 'onboard.postpone.<id>'); postponed twice, a gated verb opens anyway (id:soft).
 import type { Player } from '../entities/player';
 import type { Run } from '../run';
 import type { GameScene } from '../scenes/game';
@@ -23,6 +26,11 @@ import { GameHooks } from '../hooks';
 import { OnboardHooks, Tut } from './core';
 import { GateHooks } from './gates';
 import { Lessons } from './lesson';
+import { Onboard, Tut as TutLog } from './core';
+import { Gates } from './gates';
+import { Flags } from '../meta/registry';
+import { SoftHost } from './host';
+import { Stage } from './stage';
 
 export interface CalmRule {
   id: LessonId;
@@ -35,6 +43,8 @@ export type CalmWhy = 'press' | 'guide' | 'death' | 'owed' | (string & {});
 
 /** after a clear (s), after entering a rest / shop room (s) */
 export const CALM_AFTER_CLEAR = 1.2, CALM_AFTER_ENTER = 1.5;
+/** lessons a run may start (ONBOARD2 §5.2: R1 = 2, R2–R4 = 2) and postponements before a gated verb opens anyway */
+export const LESSONS_PER_RUN = 2, POSTPONE_SOFT = 2;
 
 const rules: CalmRule[] = [];
 const queue: { id: LessonId; why: CalmWhy }[] = [];
@@ -79,6 +89,57 @@ export const Calm = {
   spend(scene: GameScene): void { if (scene.world) info(scene.world).spent = true; },
   spent(scene: GameScene): boolean { return !!scene.world && info(scene.world).spent; },
 };
+
+// ───────────────────────── the director ─────────────────────────
+type SceneLike = GameScene & { opt: { kind: string }; run: Run; world: World };
+/** pick the lesson for this quiet moment (null = nothing to teach: quiet is its own reward) */
+function pick(scene: SceneLike, p: Player): string | null {
+  const ok = (id: string) => { const d = Lessons.get(id); return !!d && d.where.includes('calm') && !Onboard.learned(p, d.teach); };
+  for (const q of queue) if (ok(q.id) && (q.why !== 'press' || ruleOpen(q.id, scene, p, true))) return q.id;
+  const run = scene.run;
+  if ((run.flags['onboard.lessons'] ?? 0) >= LESSONS_PER_RUN) return null;
+  for (const r of rules) if (ok(r.id) && r.eligible({ run, p, scene })) return r.id;
+  return null;
+}
+/** a press-requested lesson still waits for its prerequisites (Fork after the prologue's Paradox) */
+function ruleOpen(id: string, scene: SceneLike, p: Player, pressed: boolean): boolean {
+  const r = rules.find((x) => x.id === id);
+  if (!r) return true;
+  return pressed ? (r as CalmRule & { requires?: (p: Player) => boolean }).requires?.(p) ?? true : r.eligible({ run: scene.run, p, scene });
+}
+function tickDirector(): void {
+  const sc = G.scenes.current as unknown as SceneLike | null;
+  if (!sc || !sc.world || !sc.run || !sc.opt) return;
+  const kind = sc.opt.kind;
+  if (kind === 'prologue' || kind === 'rehearsal' || sc.run.config?.mode !== 'standard') return;
+  if (!Gates.live || Onboard.mode() !== 'full') return;
+  for (const p of sc.world.players) {
+    if (p.input?.kind === 'bot' || !Onboard.isNovice(p) || Lessons.active(p)) continue;
+    if (!Calm.isCalm(sc, p)) continue;
+    const id = pick(sc, p);
+    if (!id) continue;
+    Calm.take(id);
+    Calm.spend(sc);
+    sc.run.flags['onboard.lessons'] = (sc.run.flags['onboard.lessons'] ?? 0) + 1;
+    const host = new SoftHost(sc.world, p);
+    const run = Lessons.start(id, p, 'calm', host);
+    TutLog.log('calmStart', { id, room: sc.run.roomIndex });
+    Lessons.runner(run)?.onEnd((how) => {
+      if (how !== 'postpone') return;
+      const def = Lessons.get(id);
+      const n = Flags.get('onboard.postpone.' + id);
+      // put off twice: a gated verb opens anyway (the Hall board keeps it as "!"); else it is owed
+      if (n >= POSTPONE_SOFT) { if (def) Onboard.mark(p, def.teach, 'soft'); }
+      else Calm.request(id, 'owed');
+    });
+    return;
+  }
+}
+Stage.onUpdate(() => {
+  const sc = G.scenes.current as unknown as { overlays?: { blocks: boolean }[] } | null;
+  if (sc?.overlays?.some((o) => o.blocks)) return;
+  tickDirector();
+});
 
 // the gates queue the Fork lesson when a press is explained; covers() asks the queue
 GateHooks.request = (id, why) => Calm.request(id, why);

@@ -1,0 +1,75 @@
+[
+ {
+  "t": 0,
+  "url": "scene=prologue&lesson=strike&onboard=fresh&lang=zh",
+  "note": "ONBOARD2 §12.2 prologue_kbonly: keyboard-only (arrows, J, Space, L): L2's attack token becomes [J], L3's card shows [L]"
+ },
+ {
+  "eval": "__tut.wait('phase:try',30)",
+  "t": 10
+ },
+ {
+  "eval": "(async()=>{await __tut.hold('ArrowRight',0.55);await __tut.sleep(0.2);for(let i=0;i<3;i++){await __tut.tap('KeyJ');await __tut.sleep(0.2);}await __tut.sleep(0.4);window.__kb={l2:__tut.log.filter(e=>e.ev==='caption').map(e=>e.data.text)};return __tut.step})()",
+  "t": 20
+ },
+ {
+  "eval": "__tut.wait('caption',10)",
+  "t": 30
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(0.3);window.__kb.l2now=__tut.caption&&__tut.caption.text;return __kb.l2now})()",
+  "t": 40
+ },
+ {
+  "shot": "l2",
+  "t": 50
+ },
+ {
+  "eval": "(async()=>{await __tut.wait('phase:try',10);let n=0;while(__tut.step==='l2Nice'&&n++<60)await __tut.sleep(0.1);window.__kb.dashCap=__tut.caption&&__tut.caption.text;const k=(c,d)=>window.dispatchEvent(new KeyboardEvent(d?'keydown':'keyup',{code:c}));k('ArrowRight',true);await __tut.sleep(0.45);await __tut.tap('Space');await __tut.sleep(1.4);k('ArrowRight',false);return __tut.wait('lesson:undo',20)})()",
+  "t": 60
+ },
+ {
+  "eval": "__tut.wait('phase:try',60)",
+  "t": 70
+ },
+ {
+  "eval": "(async()=>{window.__kb.l3demo=__tut.log.filter(e=>e.ev==='caption'&&e.data.key==='demo.cap').map(e=>e.data.text);await __tut.hold('ArrowRight',0.9);await __tut.hold('ArrowLeft',0.9);await __tut.wait('caption',5);const k=(c,d)=>window.dispatchEvent(new KeyboardEvent(d?'keydown':'keyup',{code:c}));k('ArrowRight',true);await __tut.wait('hit',8);k('ArrowRight',false);await __tut.sleep(0.2);return __tut.caption&&__tut.caption.text})()",
+  "t": 80
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 90
+ },
+ {
+  "shot": "l3card",
+  "t": 100
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 110
+ },
+ {
+  "eval": "(async()=>{window.__kb.card=__tut.caption&&__tut.caption.text;await __tut.tap('KeyL');await __tut.wait('success',8);return __kb.card})()",
+  "t": 120
+ },
+ {
+  "eval": "__tut.sleep(0.3)",
+  "t": 130
+ },
+ {
+  "shot": "l3win",
+  "t": 140
+ },
+ {
+  "eval": "({attackJ:__kb.l2now&&false||(__kb.dashCap||'').length>0, l2:(window.__kb.l2now||''), j:(__tut.log.filter(e=>e.ev==='caption').some(e=>/\\[J\\]/.test(e.data.text))||/\\[J\\]/.test(window.__kb.l2now||'')), demoL:(__kb.l3demo||[]).some(t=>/\\[L\\]/.test(t)), cardL:/\\[L\\]/.test(__kb.card||''), card:__kb.card})",
+  "t": 150
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 160
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 170
+ }
+]

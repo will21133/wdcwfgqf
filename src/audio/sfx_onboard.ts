@@ -11,6 +11,15 @@
 //   spotPing     a spotlight ring / model-strip cell lights up
 //   windUp       the hand gets up in L1: a key winding
 //   coachTick    the coach's card appears: a light wooden tap (−12 dB)
+//   stampSlam    the success card's stamp word lands: a felt thump under a brass tick
+//   demoTick     the demo badge counts a second: a tiny escapement tick
+//   gearWhistle  a lesson gear starts to fall: a short falling whistle
+//   gearCrash    it lands: a heavy clank and a ring
+//   glassDing    a hit rings off the bell jar
+//   glassBreak   a paradox shatters it
+//   alarmBell    the jar's alarm: a small brass bell, twice
+//   clockStrike  the prologue's last stroke (11:59:59): one deep bell
+//   propPop      a lesson prop appears / goes away: a soft wooden pop
 import type { AudioEngine, SfxFn } from '../engine/audio/audio';
 
 export function registerOnboardSfx(a: AudioEngine): void {
@@ -52,4 +61,39 @@ export function registerOnboardSfx(a: AudioEngine): void {
     a.noise(out, t, { dur: 0.018, vol: 0.06, type: 'bandpass', f: 1200, q: 2.5 });
     a.tone(out, t, { type: 'sine', f: 700, f2: 620, dur: 0.05, vol: 0.025 });
   }, { minGap: 0.25 });
+  reg('stampSlam', (a, t, out) => {
+    a.tone(out, t, { type: 'sine', f: 140, f2: 70, dur: 0.12, vol: 0.12 });
+    a.noise(out, t, { dur: 0.04, vol: 0.1, type: 'lowpass', f: 900 });
+    a.bell(out, t + 0.01, 1318, { dur: 0.25, vol: 0.04, ratio: 2, index: 0.7 });
+  }, { minGap: 0.2 });
+  reg('demoTick', (a, t, out) => {
+    a.noise(out, t, { dur: 0.006, vol: 0.07, type: 'bandpass', f: 3200, q: 5 });
+  }, { minGap: 0.3 });
+  reg('gearWhistle', (a, t, out) => {
+    a.tone(out, t, { type: 'sine', f: 1800, f2: 700, dur: 0.6, vol: 0.035 });
+  }, { minGap: 0.2 });
+  reg('gearCrash', (a, t, out) => {
+    a.tone(out, t, { type: 'triangle', f: 180, f2: 90, dur: 0.18, vol: 0.12 });
+    a.noise(out, t, { dur: 0.08, vol: 0.18, type: 'bandpass', f: 1600, q: 1.2 });
+    a.bell(out, t + 0.02, 523, { dur: 0.5, vol: 0.06, ratio: 2.7, index: 2 });
+  }, { minGap: 0.1 });
+  reg('glassDing', (a, t, out) => {
+    a.bell(out, t, 2093, { dur: 0.6, vol: 0.07, ratio: 3.5, index: 1.5 });
+    a.noise(out, t, { dur: 0.01, vol: 0.06, type: 'highpass', f: 5000 });
+  }, { minGap: 0.08 });
+  reg('glassBreak', (a, t, out) => {
+    for (let i = 0; i < 7; i++) a.bell(out, t + i * 0.025, 1800 + ((i * 739) % 1400), { dur: 0.25, vol: 0.04, ratio: 3.1, index: 2 });
+    a.noise(out, t, { dur: 0.35, vol: 0.14, type: 'highpass', f: 2500, a: 0.005 });
+  }, { minGap: 0.2 });
+  reg('alarmBell', (a, t, out) => {
+    for (let i = 0; i < 2; i++) a.bell(out, t + i * 0.16, 1568, { dur: 0.3, vol: 0.07, ratio: 2.4, index: 1.4 });
+  }, { minGap: 0.5 });
+  reg('clockStrike', (a, t, out) => {
+    a.bell(out, t, 196, { dur: 2.6, vol: 0.16, ratio: 2.76, index: 2.2 });
+    a.bell(out, t, 392, { dur: 1.8, vol: 0.06, ratio: 2, index: 1 });
+  }, { minGap: 1 });
+  reg('propPop', (a, t, out) => {
+    a.tone(out, t, { type: 'sine', f: 420, f2: 620, dur: 0.07, vol: 0.05 });
+    a.noise(out, t, { dur: 0.02, vol: 0.05, type: 'bandpass', f: 1400, q: 2 });
+  }, { minGap: 0.05 });
 }

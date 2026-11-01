@@ -79,7 +79,8 @@ function tryGenerate(o: GenOpts, attempt: number): RoomMap | null {
     m.entry = { tx: cx - 1, ty: y1 + 1, dir: 's', w: 2 };
     for (let y = y1 + 1; y < h; y++) { m.set(cx - 1, y, T.DOOR); m.set(cx, y, T.DOOR); }
   }
-  if (o.exits > 0) {
+  // the prologue's stage has no way out (ONBOARD2 §2.0): the lessons move the hand on
+  if (o.exits > 0 && kind !== 'prologue') {
     const xs: number[] = [];
     for (let i = 0; i < o.exits; i++) xs.push(Math.round(x0 + (iw * (i + 1)) / (o.exits + 1)));
     for (const dx of xs) {

@@ -72,6 +72,10 @@ const seats = new Map<number, SeatRecord>();
 export const OnboardHooks = {
   /** is a lesson for this Teach id waiting in the Calm queue? (calm.ts) */
   queued: (_id: string): boolean => false,
+  /** the pocket-watch button ({@info}) belongs to a lesson right now ("watch again"); game.ts asks */
+  claimsInfo: (): boolean => false,
+  /** a tier-S teaching card is on screen (the floor card steps aside; game.ts asks) */
+  bigCard: (): boolean => false,
 };
 
 export const Onboard = {
@@ -153,7 +157,9 @@ export const Onboard = {
   /** the coach (F4b assigns the real one) */
   coach: {
     quiet() {}, scripted() {}, level: () => 0, busy: () => false,
-  } as CoachApi,
+    // the default stand-in (F4b replaces the whole object): the prologue shows its own card when it sees this
+    stub: true,
+  } as CoachApi & { stub?: boolean },
   /** the in-scene death card (F4b assigns the real one) */
   deathCard: { active: () => false, lastSnap: () => null } as DeathCardApi,
 };
@@ -172,6 +178,7 @@ let realT0 = -1;
 /** how many times each event was logged (never trimmed: __tut.wait counts on it) */
 export const tutCounts: Record<string, number> = {};
 
+const logFns: ((ev: string, data?: unknown) => void)[] = [];
 export const Tut = {
   /** hang `obj` on window.__tut[key] (F4b: coach, death, guide, hall) */
   register(key: string, obj: object): void {
@@ -187,6 +194,9 @@ export const Tut = {
     tut.log.push(e);
     if (tut.log.length > LOG_MAX) tut.log.splice(0, tut.log.length - LOG_MAX);
     if (G.debug.has('tutlog')) console.log('[tut]', ev, data ?? '');
+    for (const fn of logFns) { try { fn(ev, data); } catch { /* a listener never breaks the log */ } }
   },
+  /** listen to every log entry (autoplay's QA summary lines) */
+  onLog(fn: (ev: string, data?: unknown) => void): void { logFns.push(fn); },
 };
 try { (window as unknown as { __tut: unknown }).__tut = tut; } catch { /* not in a browser */ }

@@ -16,9 +16,17 @@ import { hintsHooks } from '../ui/hints';
 import { Callouts } from '../ui/callouts';
 import { RewindHudHooks } from '../ui/rewindHud';
 import { GateHooks } from './gates';
+import { OnboardHooks } from './core';
 import { Stage } from './stage';
 import { Lessons } from './lesson';
+import { G } from '../G';
+import './host';
+import './demo';
 import './calm';
+import './lessons/core';
+import './lessons/inrun';
+import './objective';
+import './firstLaunch';
 import './debug';
 import '../strings/onboard';
 
@@ -36,9 +44,12 @@ export { Beat } from './beat';
 export type { SuccessOpts } from './beat';
 export { Lessons } from './lesson';
 export type { LessonId, Where, LessonPhase, LessonState, CompleteHow, LessonEvent, LessonCtx, LessonStep, LessonDef, LessonRun } from './lesson';
-export { PUPPET_TINT } from './demo';
+export { PUPPET_TINT, DemoDirector, Demos } from './demo';
 export type { DemoClip, DemoStep, DemoEvent, DemoCaption, DemoDirectorApi } from './demo';
-export { WIPE_T, WIPE_RESET_AT } from './host';
+export { WIPE_T, WIPE_RESET_AT, RebuildHost, SoftHost, filmWipe, Wipe } from './host';
+export { FallingGear, PracticeDummy, GlassJar, AlarmTurret, PendulumBlade, Fence, MarkerRing, InesStand, FloorArrows, comboDamage, isLessonProp } from './props';
+export { LessonFlags, floorCentre, placeHand, helpFor } from './lesson';
+export type { StartOpts, FailResult, IntroBeat } from './lesson';
 export type { StageHost, HostKind } from './host';
 export { Calm, CALM_AFTER_CLEAR, CALM_AFTER_ENTER } from './calm';
 export type { CalmRule, CalmWhy } from './calm';
@@ -58,13 +69,21 @@ GateHooks.holdIsTap = (p) => {
   Stage.say({ key: 'gate.hold', tier: 'A', slot: p.slot, who: p.input, dur: 2.4, text: S('onboard', 'holdIsTap') });
 };
 
-// ── Ines's notes wait while the Stage teaches (tier S / A on screen) or a lesson runs (§4.6, §5.11) ──
+// ── Ines's notes wait while the Stage teaches (tier S / A on screen), a lesson runs or the prologue plays (§4.6, §5.11, §2.0) ──
+const inPrologue = () => (G.scenes.current as unknown as { opt?: { kind?: string } } | null)?.opt?.kind === 'prologue';
 const notesBusy = hintsHooks.busy;
-hintsHooks.busy = () => notesBusy() || Stage.busy(undefined, 'A') || !!Lessons.active();
+hintsHooks.busy = () => notesBusy() || Stage.busy(undefined, 'A') || !!Lessons.active() || inPrologue();
+
+// ── the pocket-watch button is "watch again" during a lesson; a tier-S card folds the floor card away ──
+OnboardHooks.claimsInfo = () => !!Lessons.active() || inPrologue();
+OnboardHooks.bigCard = () => Stage.bigCard();
 
 // ── a lesson teaches through the caption rail: the F3 world callouts and HUD plates stay quiet (§2.0) ──
-RewindHudHooks.muted = () => !!Lessons.active();
+RewindHudHooks.muted = () => !!Lessons.active() || inPrologue();
 Stage.onUpdate((dt) => {
-  Callouts.mute('lesson', !!Lessons.active());
+  Callouts.mute('lesson', !!Lessons.active() || inPrologue());
+  // a menu over the game (pause, a reward) holds every lesson where it is
+  const sc = G.scenes.current as unknown as { overlays?: { blocks: boolean }[] } | null;
+  if (sc?.overlays?.some((o) => o.blocks)) return;
   Lessons.tick(dt);
 });

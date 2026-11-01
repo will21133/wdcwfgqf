@@ -1,0 +1,183 @@
+[
+ {
+  "t": 0,
+  "url": "onboard=prologueDone&seed=2&floor=0&god=1&lang=zh&autoplay=onboard&speed=3",
+  "note": "ONBOARD2 §12.2 run1_lessons: room 1 — a Fork press is explained (no Sand); once cleared, the Fork lesson (demo, try, success); room 2 cleared → the Scrub lesson. The QA bot fights between lessons."
+ },
+ {
+  "eval": "__tut.wait('lesson:fork',240)",
+  "t": 10
+ },
+ {
+  "eval": "__tut.wait('phase:demo',30)",
+  "t": 20
+ },
+ {
+  "eval": "__tut.wait('caption',20)",
+  "t": 30
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 40
+ },
+ {
+  "shot": "fork_demo",
+  "t": 50
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 60
+ },
+ {
+  "eval": "__tut.wait('caption',20)",
+  "t": 70
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 80
+ },
+ {
+  "shot": "fork_demo2",
+  "t": 90
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 100
+ },
+ {
+  "eval": "__tut.wait('phase:try',40)",
+  "t": 110
+ },
+ {
+  "eval": "__tut.sleep(0.6)",
+  "t": 120
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 130
+ },
+ {
+  "shot": "fork_try",
+  "t": 140
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 150
+ },
+ {
+  "eval": "__tut.wait('success',60)",
+  "t": 160
+ },
+ {
+  "eval": "__tut.sleep(0.5)",
+  "t": 170
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 180
+ },
+ {
+  "shot": "fork_win",
+  "t": 190
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 200
+ },
+ {
+  "eval": "__tut.wait('lesson:scrub',400)",
+  "t": 210
+ },
+ {
+  "eval": "__tut.wait('phase:demo',30)",
+  "t": 220
+ },
+ {
+  "eval": "__tut.wait('caption',20)",
+  "t": 230
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 240
+ },
+ {
+  "shot": "scrub_demo",
+  "t": 250
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 260
+ },
+ {
+  "eval": "__tut.wait('caption',20)",
+  "t": 270
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 280
+ },
+ {
+  "shot": "scrub_demo2",
+  "t": 290
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 300
+ },
+ {
+  "eval": "__tut.wait('phase:try',40)",
+  "t": 310
+ },
+ {
+  "eval": "__tut.sleep(1.5)",
+  "t": 320
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 330
+ },
+ {
+  "shot": "scrub_try",
+  "t": 340
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 350
+ },
+ {
+  "eval": "__tut.wait('success',60)",
+  "t": 360
+ },
+ {
+  "eval": "__tut.sleep(0.5)",
+  "t": 370
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 380
+ },
+ {
+  "shot": "scrub_win",
+  "t": 390
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 400
+ },
+ {
+  "eval": "__tut.sleep(3)",
+  "t": 410
+ },
+ {
+  "eval": "({taught:['fork','scrub'].filter(t=>__save.profile.taught.includes(t)),successes:__tut.log.filter(e=>e.ev==='success').map(e=>e.data.id),forkPressesExplained:__tut.log.filter(e=>e.ev==='gated').length,lessonsThisRun:__G.scenes.current.run&&__G.scenes.current.run.flags['onboard.lessons'],pass:['fork','scrub'].every(t=>__save.profile.taught.includes(t))})",
+  "t": 420
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 430
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 440
+ }
+]

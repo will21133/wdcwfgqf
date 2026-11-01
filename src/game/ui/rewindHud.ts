@@ -40,6 +40,7 @@ import { S, term } from '../strings';
 import { ROMAN, SLOT_COLOR } from '../players';
 import { termCallout, Callouts, Caption } from './callouts';
 import { Gates } from '../onboard/gates';
+import { profile } from '../save';
 /** Sand per hourglass icon (run.ts SAND_PER_GLASS; not imported to keep this module off run.ts's import graph) */
 const SAND_PER_GLASS = 100;
 import '../strings/f3';
@@ -161,6 +162,8 @@ export function renderShadow(r: Renderer, p: Player) {
   const w = p.world;
   const rec = p.rec;
   if (rec.length < 2 || p.falling > 0) return;
+  // not shown before it is taught (the prologue's L1–L2; ONBOARD2 §5.4)
+  if (!Gates.shows(p, 'shadow')) return;
   const solo = w.playerCount <= 1;
   // a stopped hand shows where a rewind out of the stop would take it (solo Last Second), or where
   // a teammate's Pull Back will (co-op)
@@ -330,6 +333,8 @@ function scrubHelp(r: Renderer, p: Player, f: Frame, gain: number) {
   });
 }
 
+/** the Shadow's callout on first sight (s) */
+const SHADOW_FIRST_T = 4;
 /**
  * The Shadow's callout ("旧影 – 1.4 秒前的你 · 回溯会回到这里", the real distance back): at the start
  * of the first rooms, and when it starts to promise something (+N after a hit).
@@ -337,7 +342,9 @@ function scrubHelp(r: Renderer, p: Player, f: Frame, gain: number) {
 function shadowTerm(r: Renderer, p: Player, f: Frame, ok: boolean, gain: number, seconds: number, scrub: boolean) {
   if (scrub || !ok || p.state !== 'alive' || !Terms.showPlain('shadow') || RewindHudHooks.muted()) return;
   if (Math.hypot(f.x - p.x, f.y - p.y) < 20) return;
-  if (!(p.world.time < TERM_SECONDS || gain > 0)) return;
+  // first sight: 4 s; after that only when it promises something (+N after a hit) — 3 times in all
+  // (ONBOARD2 §10.2 #7; Terms.showPlain counts the sightings)
+  if (!(gain > 0 || (p.world.time < SHADOW_FIRST_T && !(profile.termSeen.shadow ?? 0)))) return;
   termCallout(r, p.world, 'shadow', f.x, f.y - 11, { prio: 1, hw: 7, hh: 13, plain: fill(S('f3', 'shadowLive'), '{s}', secs(seconds)) });
 }
 

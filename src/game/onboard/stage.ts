@@ -44,6 +44,9 @@ import { Rich } from './rich';
 import { ModelStrip, modelStripSize } from './modelStrip';
 import { Gates } from './gates';
 import { Tut } from './core';
+import { drawSprite } from '../../engine/gfx/sprite';
+import { inesHead } from '../../art/sprites/onboard';
+import { sfx } from '../G';
 
 export type Tier = 'S' | 'A' | 'B' | 'C';
 export type DockId = 'top' | 'bottom' | 'seat' | 'pod';
@@ -53,7 +56,7 @@ export interface Box { x0: number; y0: number; x1: number; y1: number }
  * tape or its newest red notch, the Sand number, the hand's newest armed echo's ◆, the paradox
  * preview ring, or any entity (its box + 6 px).
  */
-export type SpotRef = 'shadow' | 'shadowGain' | 'hpStripe' | 'tape' | 'tapeNotch' | 'sand' | 'armed' | 'preview' | Entity;
+export type SpotRef = 'shadow' | 'shadowGain' | 'hpStripe' | 'tape' | 'tapeNotch' | 'sand' | 'armed' | 'preview' | 'echo' | Entity;
 
 export interface SayOpts {
   /** a later say with the same key (on the same seat) replaces this one */
@@ -91,6 +94,10 @@ export interface SayOpts {
   color?: ColorKey;
   /** drop it unshown after waiting this long in the queue (s; default never) */
   maxWait?: number;
+  /** success card: the model-strip cells lit before this beat (the new ones light up at 0.8 s) */
+  stripPrev?: number;
+  /** the footer blinks (help level 1: "{@info} Watch again") */
+  footerBlink?: boolean;
 }
 export interface SayHandle { close(): void; update(o: Partial<SayOpts>): void }
 export interface StageCurrent { key: string; text: string; dock: DockId; rect: [number, number, number, number]; alpha: number; tier: string }
@@ -130,6 +137,8 @@ let seq = 0;
 /** frame audit (ONBOARD2 §4.10) */
 const audit: StageAudit = { frames: 0, overlapFrames: 0, worst: null };
 const updateHooks: ((dtReal: number) => void)[] = [];
+/** extra hard / soft obstacles (UI px) other modules add each frame (the demo bubble) */
+const obstacleFns: ((hard: Box[], soft: Box[]) => void)[] = [];
 
 // ───────────────────────── helpers ─────────────────────────
 const hit = (a: Box, b: Box) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
@@ -146,6 +155,11 @@ function textOf(e: Entry): string {
   const s = typeof t === 'function' ? t() : typeof t === 'string' ? t : tr(t);
   const v = typeof e.o.vars === 'function' ? e.o.vars() : e.o.vars;
   return Rich.fill(s, v ?? null);
+}
+/** a secondary line (sub, sub2, why, footer) with the entry's {placeholders} filled */
+function subOf(e: Entry, l: L10n): string {
+  const v = typeof e.o.vars === 'function' ? e.o.vars() : e.o.vars;
+  return Rich.fill(tr(l), v ?? null);
 }
 function whoOf(e: Entry): PromptDevice | null {
   if (e.o.who !== undefined) return e.o.who;
@@ -219,14 +233,21 @@ function buildObstacles(): Obs {
     const lp = w.players[0];
     if (lp && w.playerCount <= 1 && lp.state === 'stopped' && !lp.down.final && lp.down.lastSecond > 0) H({ x0: 210, y0: 100, x1: 430, y1: 164 }, 'lastSecond');
   }
+  for (const fn of obstacleFns) {
+    const hard: Box[] = [];
+    try { fn(hard, o.soft); } catch (err) { console.error('[stage]', err); }
+    for (const b of hard) H(b, 'demo');
+  }
   // Ines's note (bottom-left)
   if (Hints.active) { const b = hintsHooks.bottom(); H({ x0: 4, y0: b - HINT_H, x1: 244, y1: b + 2 }, 'note'); }
   // the floor card (its dark band across the screen)
   const sc = sceneOf();
   const tc = sc?.titleCard;
-  if (tc && tc.t < 3.2 && !sc?.overlays?.some((x) => x.blocks)) {
+  const bossCard = !!(sc as { boss?: unknown } | null)?.boss;
+  if (tc && tc.t < (bossCard ? 3.2 : 1.8) && !sc?.overlays?.some((x) => x.blocks)) {
+    // the floor card's band (game.ts: centred on y 78 in the top third; a boss's on y 123)
     const ls = Text.lineH('small'), lt = Text.lineH('title');
-    const h = Math.max(54, Math.ceil(4 + ls + lt + 6)), top = Math.round(123 - h / 2);
+    const h = Math.max(54, Math.ceil(4 + ls + lt + 6)), top = Math.round((bossCard ? 123 : 78) - h / 2);
     H({ x0: 0, y0: top - 2, x1: 640, y1: top + h + 2 }, 'floorCard');
   }
   obsCache = o; obsFrame = G.frame;
@@ -252,9 +273,9 @@ function measure(e: Entry, ch: number): Measured {
     const maxW = cap - CARD_PADX * 2;
     const t = Rich.measureWrapped(text, ch >= 0 ? 'body' : 'title', maxW, who, 2);
     let w = t.w, h = CARD_PADY * 2 + t.h;
-    if (e.o.sub) { const m = Rich.measureWrapped(tr(e.o.sub), 'body', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
-    if (e.o.sub2) { const m = Rich.measureWrapped(tr(e.o.sub2), 'small', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
-    if (e.o.footer) { const m = Rich.measureWrapped(tr(e.o.footer), 'small', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
+    if (e.o.sub) { const m = Rich.measureWrapped(subOf(e, e.o.sub), 'body', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
+    if (e.o.sub2) { const m = Rich.measureWrapped(subOf(e, e.o.sub2), 'small', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
+    if (e.o.footer) { const m = Rich.measureWrapped(subOf(e, e.o.footer), 'small', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
     if (e.o.timer) h += 4;
     return { w: Math.min(cap, w + CARD_PADX * 2), h, text, who, maxW };
   }
@@ -263,8 +284,9 @@ function measure(e: Entry, ch: number): Measured {
     const stamp = e.o.stamp ? tr(e.o.stamp) : text;
     const big = ch < 0 && Text.measure(stamp, 'title').w <= maxW;
     const sw = Text.measure(stamp, big ? 'title' : 'body').w;
-    const why = e.o.why ? Rich.measureWrapped(tr(e.o.why), 'body', maxW, who) : { w: 0, h: 0 };
+    const why = e.o.why ? Rich.measureWrapped(subOf(e, e.o.why), 'body', maxW, who) : { w: 0, h: 0 };
     let w = 20 + Math.max(sw, why.w), h = CARD_PADY * 2 + Math.ceil(Text.lineH(big ? 'title' : 'body')) + (why.h ? 2 + why.h : 0);
+    if (e.o.footer) { const f = Rich.measureWrapped(subOf(e, e.o.footer), 'small', maxW, who); w = Math.max(w, 20 + f.w); h += 1 + f.h; }
     if (e.o.strip !== undefined) { const s = modelStripSize(); w = Math.max(w, s.w); h += 4 + s.h; }
     return { w: Math.min(cap, Math.ceil(w) + CARD_PADX * 2), h, text: stamp, who, maxW };
   }
@@ -272,7 +294,8 @@ function measure(e: Entry, ch: number): Measured {
   const maxW = cap - PADX * 2 - icon - bar;
   const t = Rich.measureWrapped(text, 'body', maxW, who);
   let w = t.w, h = PADY * 2 + t.h;
-  if (e.o.footer) { const m = Rich.measureWrapped(tr(e.o.footer), 'small', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
+  if (e.o.footer) { const m = Rich.measureWrapped(subOf(e, e.o.footer), 'small', maxW, who); w = Math.max(w, m.w); h += 2 + m.h; }
+  if (e.o.strip !== undefined) { const sz = modelStripSize(); w = Math.max(w, sz.w - icon); h += 4 + sz.h; }
   if (e.o.timer) h += 3;
   return { w: Math.ceil(w) + PADX * 2 + icon + bar, h: Math.ceil(h), text, who, maxW };
 }
@@ -324,9 +347,11 @@ function chipBox(ch: number, m: Measured): Box {
 function drawSpeaker(ctx: CanvasRenderingContext2D, sp: 'ines' | 'sys' | number, x: number, cy: number) {
   x = Math.round(x); cy = Math.round(cy);
   if (sp === 'ines') {
-    // a small brass-framed portrait placeholder: her hair and the lamp-lit face
-    rect(ctx, x, cy - 6, 12, 12, 'B3'); rect(ctx, x + 1, cy - 5, 10, 10, 'K1');
-    rect(ctx, x + 3, cy - 4, 6, 3, 'O1'); rect(ctx, x + 4, cy - 1, 4, 4, 'O3'); rect(ctx, x + 3, cy + 3, 6, 2, 'R2');
+    // Ines's little head in a brass frame
+    rect(ctx, x - 1, cy - 7, 14, 14, 'B3'); rect(ctx, x, cy - 6, 12, 12, 'K1');
+    const s = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
+    drawSprite(ctx, inesHead(), x + 6, cy + 1);
+    ctx.imageSmoothingEnabled = s;
   } else if (sp === 'sys') {
     ctx.fillStyle = col('K8');
     for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; ctx.fillRect(Math.round(x + 6 + Math.cos(a) * 5), Math.round(cy + Math.sin(a) * 5), 1, 1); }
@@ -337,16 +362,20 @@ function drawSpeaker(ctx: CanvasRenderingContext2D, sp: 'ines' | 'sys' | number,
   }
 }
 function pressAgeFn(e: Entry): ((a: string) => number) | undefined {
-  if (!e.o.pressed) return undefined;
-  return (a) => { const t0 = e.press.get(a); return t0 === undefined ? -1 : G.time - t0; };
+  if (!e.o.pressed && !e.press.size) return undefined;
+  return (a) => { const t0 = e.press.get(a); return t0 === undefined || G.time - t0 > 0.6 && !e.o.pressed ? -1 : G.time - t0; };
 }
 function timerBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, k: number) {
   rect(ctx, x, y, w, 2, 'K2');
   rect(ctx, x, y, Math.round(w * Math.max(0, Math.min(1, k))), 2, 'C3');
 }
-function drawEntry(ctx: CanvasRenderingContext2D, e: Entry, b: Box, ch: number, m: Measured, alpha: number) {
+function drawEntry(ctx: CanvasRenderingContext2D, e: Entry, b0: Box, ch: number, m: Measured, alpha: number) {
   const a0 = ctx.globalAlpha;
   ctx.globalAlpha = a0 * alpha;
+  // cards and success cards drop 6 px into place as they fade in (ONBOARD2 §4.3)
+  const f = e.o.form ?? 'line';
+  const drop = (f === 'card' || f === 'success') && e.out <= 0 ? -Math.round(6 * (1 - Math.min(1, e.inT / 0.12))) : 0;
+  const b: Box = drop ? { x0: b0.x0, y0: b0.y0 + drop, x1: b0.x1, y1: b0.y1 + drop } : b0;
   const w = b.x1 - b.x0, h = b.y1 - b.y0;
   if (e.legacy) {
     const L = captionLayout(e.legacy, 0);
@@ -371,9 +400,9 @@ function drawEntry(ctx: CanvasRenderingContext2D, e: Entry, b: Box, ch: number, 
     let y = b.y0 + CARD_PADY;
     const tsz = ch >= 0 ? 'body' : 'title';
     y += Rich.draw(ctx, m.text, x, y, { size: tsz, color: 'C4', align: 'center', who: m.who, maxW: m.maxW, glyph: 2, pressAge }).h;
-    if (e.o.sub) y += 2 + Rich.draw(ctx, tr(e.o.sub), x, y + 2, { size: 'body', color: 'K9', align: 'center', who: m.who, maxW: m.maxW, pressAge }).h;
-    if (e.o.sub2) y += 2 + Rich.draw(ctx, tr(e.o.sub2), x, y + 2, { size: 'small', color: 'K8', align: 'center', who: m.who, maxW: m.maxW }).h;
-    if (e.o.footer) y += 2 + Rich.draw(ctx, tr(e.o.footer), x, y + 2, { size: 'small', color: 'K8', align: 'center', who: m.who, maxW: m.maxW }).h;
+    if (e.o.sub) y += 2 + Rich.draw(ctx, subOf(e, e.o.sub), x, y + 2, { size: 'body', color: 'K9', align: 'center', who: m.who, maxW: m.maxW, pressAge }).h;
+    if (e.o.sub2) y += 2 + Rich.draw(ctx, subOf(e, e.o.sub2), x, y + 2, { size: 'small', color: 'K8', align: 'center', who: m.who, maxW: m.maxW }).h;
+    if (e.o.footer) y += 2 + Rich.draw(ctx, subOf(e, e.o.footer), x, y + 2, { size: 'small', color: 'K8', align: 'center', who: m.who, maxW: m.maxW }).h;
     if (e.o.timer) timerBar(ctx, b.x0 + 10, b.y1 - 4, w - 20, e.o.timer());
   } else if (form === 'success') {
     const x0 = b.x0 + CARD_PADX;
@@ -386,17 +415,39 @@ function drawEntry(ctx: CanvasRenderingContext2D, e: Entry, b: Box, ch: number, 
     for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; ctx.fillRect(Math.round(x0 + 7 + Math.cos(a) * 6), Math.round(cy + Math.sin(a) * 6), 1, 1); }
     rect(ctx, x0 + 4, cy, 1, 1, 'G4'); rect(ctx, x0 + 5, cy + 1, 1, 1, 'G4'); rect(ctx, x0 + 6, cy + 2, 1, 1, 'G4');
     rect(ctx, x0 + 7, cy + 1, 1, 1, 'G4'); rect(ctx, x0 + 8, cy, 1, 1, 'G4'); rect(ctx, x0 + 9, cy - 1, 1, 1, 'G4'); rect(ctx, x0 + 10, cy - 2, 1, 1, 'G4');
-    Text.draw(ctx, m.text, x0 + 20, cy, { size: big ? 'title' : 'body', color: 'C4', valign: 'middle', outline: big ? false : 'C1' });
+    // the stamp slams down: a white flash a hair high, then it sits (drawStamp's feel), a brass ring kicks out
+    const slam = e.inT < 0.07;
+    Text.draw(ctx, m.text, x0 + 20, cy - (slam ? 2 : 0), { size: big ? 'title' : 'body', color: slam ? 'W' : 'C4', valign: 'middle', outline: big ? false : 'C1' });
+    if (e.inT < 0.3) {
+      const k = e.inT / 0.3, sw = Text.measure(m.text, big ? 'title' : 'body').w, g = Math.round(2 + 8 * k);
+      ctx.globalAlpha = a0 * alpha * (1 - k);
+      const rx0 = x0 + 20 - g, ry0 = Math.round(cy - lt / 2 - g), rw = Math.round(sw + g * 2), rh = Math.round(lt + g * 2);
+      rect(ctx, rx0, ry0, rw, 1, 'B5'); rect(ctx, rx0, ry0 + rh, rw, 1, 'B5'); rect(ctx, rx0, ry0, 1, rh, 'B5'); rect(ctx, rx0 + rw, ry0, 1, rh + 1, 'B5');
+      ctx.globalAlpha = a0 * alpha;
+    }
     y += lt;
-    if (e.o.why) y += 2 + Rich.draw(ctx, tr(e.o.why), x0 + 20, y + 2, { size: 'body', color: 'K10', who: m.who, maxW: m.maxW }).h;
-    if (e.o.strip !== undefined) ModelStrip.draw(ctx, b.x0 + w / 2, y + 4, e.o.strip);
+    if (e.o.why) y += 2 + Rich.draw(ctx, subOf(e, e.o.why), x0 + 20, y + 2, { size: 'body', color: 'K10', who: m.who, maxW: m.maxW }).h;
+    if (e.o.footer) y += 1 + Rich.draw(ctx, subOf(e, e.o.footer), x0 + 20, y + 1, { size: 'small', color: 'K8', who: m.who, maxW: m.maxW }).h;
+    if (e.o.strip !== undefined) {
+      // the strip shows at 0.8 s: what was lit before, then this lesson's cells light up (K5 → C4 → C3 + a white ring)
+      const st = e.inT - 0.8;
+      if (st >= 0) {
+        const prev = e.o.stripPrev ?? 0;
+        const fresh = e.o.strip & ~prev;
+        ctx.globalAlpha = a0 * alpha * Math.min(1, st / 0.15);
+        const lit = st >= 0.15 ? e.o.strip : prev;
+        ModelStrip.draw(ctx, b.x0 + w / 2, y + 4, lit, { pulse: st >= 0.15 && st < 0.6 ? fresh : 0, pulseK: (st - 0.15) / 0.45 });
+        ctx.globalAlpha = a0 * alpha;
+      }
+    }
   } else {
     let x = b.x0 + PADX + (ch >= 0 ? 3 : 0);
     const lineTop = b.y0 + PADY;
     if (e.o.speaker !== undefined) { drawSpeaker(ctx, e.o.speaker, x, lineTop + Math.ceil(Text.lineH('body')) / 2); x += 16; }
     const r = Rich.draw(ctx, m.text, x, lineTop, { size: 'body', color: e.o.color ?? 'K10', who: m.who, maxW: m.maxW, pressAge });
     let y = lineTop + r.h;
-    if (e.o.footer) y += 2 + Rich.draw(ctx, tr(e.o.footer), x, y + 2, { size: 'small', color: 'K8', who: m.who, maxW: m.maxW }).h;
+    if (e.o.footer) y += 2 + Rich.draw(ctx, subOf(e, e.o.footer), x, y + 2, { size: 'small', color: e.o.footerBlink && Math.floor(G.time * 3) % 2 ? 'B5' : 'K8', who: m.who, maxW: m.maxW }).h;
+    if (e.o.strip !== undefined) y += 4 + ModelStrip.draw(ctx, b.x0 + w / 2, y + 4, e.o.strip).h;
     if (e.o.timer) timerBar(ctx, b.x0 + PADX, b.y1 - 3, w - PADX * 2, e.o.timer());
   }
   ctx.globalAlpha = a0;
@@ -405,7 +456,7 @@ function drawEntry(ctx: CanvasRenderingContext2D, e: Entry, b: Box, ch: number, 
 // ───────────────────────── spotlights (ONBOARD2 §4.7) ─────────────────────────
 type Spot = { kind: 'ring'; x: number; y: number; r: number } | { kind: 'rect'; x: number; y: number; w: number; h: number };
 const SPOT_PART: Partial<Record<string, HudPart>> = { hpStripe: 'hpStripe', tape: 'tape', tapeNotch: 'notch', sand: 'sand' };
-const SPOT_TERM: Partial<Record<string, string>> = { shadow: 'shadow', shadowGain: 'shadow', hpStripe: 'hpPromise', tape: 'tape', tapeNotch: 'tape', sand: 'sand', armed: 'armed', preview: 'paradox' };
+const SPOT_TERM: Partial<Record<string, string>> = { echo: 'echo', shadow: 'shadow', shadowGain: 'shadow', hpStripe: 'hpPromise', tape: 'tape', tapeNotch: 'tape', sand: 'sand', armed: 'armed', preview: 'paradox' };
 function resolveSpot(ref: SpotRef, p: Player | null): Spot | null {
   const r = G.r;
   const cx = r ? r.camX : 0, cy = r ? r.camY : 0;
@@ -425,6 +476,10 @@ function resolveSpot(ref: SpotRef, p: Player | null): Spot | null {
     if (p.rec.length < 2) return null;
     const f = p.rec.at(p.rewindPreview().frame);
     return ref === 'shadow' ? { kind: 'ring', x: f.x - cx, y: f.y - 11 - cy, r: 12 } : { kind: 'ring', x: f.x - cx, y: f.y - 36 - cy, r: 11 };
+  }
+  if (ref === 'echo') {
+    for (let i = p.echoes.length - 1; i >= 0; i--) { const e = p.echoes[i]; if (!e.dead) return { kind: 'ring', x: e.x - cx, y: e.y - 12 - cy, r: 14 }; }
+    return null;
   }
   if (ref === 'armed') {
     for (let i = p.echoes.length - 1; i >= 0; i--) { const e = p.echoes[i]; if (!e.dead && e.armed) return { kind: 'ring', x: e.x - cx, y: e.y - 30 - cy, r: 7 }; }
@@ -455,10 +510,24 @@ function drawSpots(ctx: CanvasRenderingContext2D, e: Entry, b: Box, alpha: numbe
     const d = Math.hypot(ex - ax, ey - ay);
     if (d > 4) {
       ctx.globalAlpha = a0 * alpha * 0.6;
-      for (let k = 0; k <= d; k += 3) {
-        const x = Math.round(ax + ((ex - ax) * k) / d), y = Math.round(ay + ((ey - ay) * k) / d);
-        ctx.fillStyle = col('K0'); ctx.fillRect(x, y + 1, 1, 1);
-        ctx.fillStyle = col('C2'); ctx.fillRect(x, y, 2, 1);
+      // a leader that would cross a hand bends once, through a midpoint 16 px to the side (ONBOARD2 §4.7)
+      const pts: [number, number][] = [[ax, ay]];
+      const hand = buildObstacles().players.find((o) => segHits(ax, ay, ex, ey, o));
+      if (hand) {
+        const mx = (ax + ex) / 2, my = (ay + ey) / 2, nx = -(ey - ay) / d, ny = (ex - ax) / d;
+        const hx = (hand.x0 + hand.x1) / 2, hy = (hand.y0 + hand.y1) / 2;
+        const sgn = (mx - hx) * nx + (my - hy) * ny >= 0 ? 1 : -1;
+        const off = 16 + Math.max(hand.x1 - hand.x0, hand.y1 - hand.y0) / 2;
+        pts.push([mx + nx * off * sgn, my + ny * off * sgn]);
+      }
+      pts.push([ex, ey]);
+      for (let j = 0; j + 1 < pts.length; j++) {
+        const [x0, y0] = pts[j], [x1, y1] = pts[j + 1], dd = Math.hypot(x1 - x0, y1 - y0) || 1;
+        for (let k = 0; k <= dd; k += 3) {
+          const x = Math.round(x0 + ((x1 - x0) * k) / dd), y = Math.round(y0 + ((y1 - y0) * k) / dd);
+          ctx.fillStyle = col('K0'); ctx.fillRect(x, y + 1, 1, 1);
+          ctx.fillStyle = col('C2'); ctx.fillRect(x, y, 2, 1);
+        }
       }
     }
     ctx.globalAlpha = a0 * alpha * pulse;
@@ -474,6 +543,13 @@ function drawSpots(ctx: CanvasRenderingContext2D, e: Entry, b: Box, alpha: numbe
     }
   }
   ctx.globalAlpha = a0;
+}
+
+/** does the segment (x0,y0)–(x1,y1) cross box b? (sampled every 2 px: leaders are short) */
+function segHits(x0: number, y0: number, x1: number, y1: number, b: Box): boolean {
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  for (let k = 0; k <= d; k += 2) { const x = x0 + ((x1 - x0) * k) / (d || 1), y = y0 + ((y1 - y0) * k) / (d || 1); if (x > b.x0 && x < b.x1 && y > b.y0 && y < b.y1) return true; }
+  return false;
 }
 
 // ───────────────────────── placement (ONBOARD2 §4.5) ─────────────────────────
@@ -532,7 +608,11 @@ function render(ctx: CanvasRenderingContext2D) {
     placedNow.push(b);
     Callouts.avoidStage(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
     if (a > 0) { drawEntry(ctx, e, b, ch, m, a); drawSpots(ctx, e, b, a); }
-    if (!e.logged) { e.logged = true; Tut.log('shown', { key: e.key, dock, tier: e.o.tier }); }
+    if (!e.logged) {
+      e.logged = true;
+      Tut.log('shown', { key: e.key, dock, tier: e.o.tier });
+      if (e.o.form === 'success') sfx('stampSlam');
+    }
     if (dock !== 'pod' && a > 0.5) audited.push({ key: e.key, b });
   }
   // lines on their way out fade where they were
@@ -628,8 +708,21 @@ export const Stage = {
   update(dtReal: number): void { update(dtReal); },
   /** run fn on every Stage update (the lesson runner's tick) */
   onUpdate(fn: (dtReal: number) => void): void { updateHooks.push(fn); },
+  /** add obstacles every frame (UI px): fn pushes hard boxes (and may push soft ones) */
+  addObstacles(fn: (hard: Box[], soft: Box[]) => void): void { obstacleFns.push(fn); },
+  /** make a line's button tokens pulse (an idle nudge: "this one") */
+  nudge(key: string, slot?: number): void {
+    const e = find(key, slot);
+    if (!e) return;
+    const s = textOf(e);
+    const re = /\{@(\w+)\}/g;
+    let mm: RegExpExecArray | null;
+    while ((mm = re.exec(s))) e.press.set(mm[1], G.time);
+  },
   /** drop everything (a new room, the workshop) */
   reset(): void { entries.length = 0; Callouts.mute('stageS', false); },
+  /** a tier-S card is on screen right now (the floor card folds away; game.ts via OnboardHooks.bigCard) */
+  bigCard(): boolean { for (const e of currents().values()) if (e.o.tier === 'S' && e.placed) return true; return false; },
   /** every line queued or showing (debug) */
   list(): { key: string; tier: Tier; slot?: number; placed: boolean }[] { return entries.filter((e) => e.out <= 0).map((e) => ({ key: e.key, tier: e.o.tier, slot: e.o.slot, placed: !!e.placed })); },
 };

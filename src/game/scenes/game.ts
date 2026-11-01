@@ -50,7 +50,7 @@ import * as Down from '../systems/downed';
 import { coopCamera, renderCoopEdges, type CoopCam } from '../world/coopCamera';
 import { S } from '../strings';
 import '../strings/f2';
-import { Onboard } from '../onboard/core';
+import { Onboard, OnboardHooks } from '../onboard/core';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
 
@@ -60,6 +60,8 @@ hintsHooks.busy = () => {
   return s instanceof GameScene && !!s.boss && !s.boss.dead && !s.cleared;
 };
 const ALL_PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
+/** the floor card: seconds on screen and the centre of its band (ONBOARD2 §10.1, GDD2 §9.4) */
+export const FLOOR_CARD_T = 1.8, FLOOR_CARD_Y = 78;
 /** a co-op hand choosing a reward stands anchored: teammates bump off it instead of pushing it */
 const CHOOSER_MASS = 1000;
 
@@ -478,7 +480,14 @@ export class GameScene implements Scene, RoomHost {
     const p = w.player!;
     const out = w.players.every((q) => Down.isOut(q));
     this.run.time += dt;
-    if (this.titleCard) { this.titleCard.t += dt; if (this.titleCard.t > 3.2) this.titleCard = null; }
+    if (this.titleCard) {
+      // the floor card is short and stays in the top third (GDD2 §9.4, ONBOARD2 §10.1); it folds away
+      // at once (0.2 s) when a tier-S teaching card comes up. A boss's title card keeps its 3.2 s.
+      const life = this.boss ? 3.2 : FLOOR_CARD_T;
+      if (!this.boss && OnboardHooks.bigCard() && this.titleCard.t < life - 0.2) this.titleCard.t = life - 0.2;
+      this.titleCard.t += dt;
+      if (this.titleCard.t > life) this.titleCard = null;
+    }
     // a free device can join at any moment (it walks in at the next room); its press is consumed
     this.midRunJoin();
     this.banners.update(dt);
@@ -508,7 +517,7 @@ export class GameScene implements Scene, RoomHost {
       this.overlays.push(new PauseMenu(this));
       return;
     }
-    if (G.input.pressed('info') && !out) {
+    if (G.input.pressed('info') && !out && !OnboardHooks.claimsInfo()) {
       // the pocket-watch button: your own build (co-op: whoever pressed it, unless they are
       // holding it to read a choice card)
       const by = w.players.find((q) => q.input.pressed('info')) ?? p;
@@ -705,14 +714,17 @@ export class GameScene implements Scene, RoomHost {
 
   private renderTitleCard(ctx: CanvasRenderingContext2D) {
     const t = this.titleCard!.t;
-    const a = t < 0.5 ? ease.outCubic(t / 0.5) : t > 2.6 ? 1 - (t - 2.6) / 0.6 : 1;
+    const floor = !this.boss;
+    // floor card: 1.8 s (0.2 in, 0.3 out) in the top third; a boss's card: the 1.0 timing
+    const a = floor ? (t < 0.2 ? ease.outCubic(t / 0.2) : t > FLOOR_CARD_T - 0.3 ? 1 - (t - (FLOOR_CARD_T - 0.3)) / 0.3 : 1)
+      : (t < 0.5 ? ease.outCubic(t / 0.5) : t > 2.6 ? 1 - (t - 2.6) / 0.6 : 1);
     if (a <= 0) return;
-    const w = Math.round(220 * clamp(t / 0.6, 0, 1));
-    // floor card: 10px kicker + the floor name at 12px × 2 in a band centred on y 123
-    // (96–150 at 100% text; the band grows with the text so the rules never cut it)
+    const w = Math.round(220 * clamp(t / (floor ? 0.3 : 0.6), 0, 1));
+    // a 10px kicker + the name at 12px × 2 in a band (the band grows with the text so the rules never
+    // cut it): the floor card centred on y 78 (46–110), a boss's on y 123
     const ls = Text.lineH('small'), lt = Text.lineH('title');
     const H = Math.max(54, Math.ceil(4 + ls + lt + 6));
-    const top = Math.round(123 - H / 2);
+    const top = Math.round((floor ? FLOOR_CARD_Y : 123) - H / 2);
     ctx.globalAlpha = a * 0.55;
     ctx.fillStyle = col('K0');
     ctx.fillRect(0, top - 2, 640, H + 4);

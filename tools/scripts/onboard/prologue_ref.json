@@ -1,0 +1,1171 @@
+[
+ {
+  "t": 0,
+  "url": "onboard=fresh&lang=zh&autoplay=onboard&speed=2",
+  "note": "ONBOARD2 §12.2 prologue_ref: title → first-launch card (A) → L1…L6 → report → epilogue → workshop; a screenshot at every caption. The lessons are driven by their own step scripts (autoplay); the title and the card by keys."
+ },
+ {
+  "eval": "__tut.wait('where:title',30)",
+  "t": 10
+ },
+ {
+  "eval": "(async()=>{await __tut.sleep(1.8);await __tut.tap('Enter');return __tut.wait('where:p0',10)})()",
+  "t": 20
+ },
+ {
+  "eval": "__tut.sleep(0.6)",
+  "t": 30
+ },
+ {
+  "shot": "p0",
+  "t": 40
+ },
+ {
+  "eval": "(async()=>{await __tut.tap('Enter');await __tut.sleep(1.5);for(let i=0;i<4&&__tut.where!=='prologue';i++){await __tut.tap('Escape');await __tut.sleep(1.2);}return __tut.wait('where:prologue',40)})()",
+  "t": 50
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 60
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 70
+ },
+ {
+  "shot": "c00",
+  "t": 80
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 90
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 100
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 110
+ },
+ {
+  "shot": "c01",
+  "t": 120
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 130
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 140
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 150
+ },
+ {
+  "shot": "c02",
+  "t": 160
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 170
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 180
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 190
+ },
+ {
+  "shot": "c03",
+  "t": 200
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 210
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 220
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 230
+ },
+ {
+  "shot": "c04",
+  "t": 240
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 250
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 260
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 270
+ },
+ {
+  "shot": "c05",
+  "t": 280
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 290
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 300
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 310
+ },
+ {
+  "shot": "c06",
+  "t": 320
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 330
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 340
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 350
+ },
+ {
+  "shot": "c07",
+  "t": 360
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 370
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 380
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 390
+ },
+ {
+  "shot": "c08",
+  "t": 400
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 410
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 420
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 430
+ },
+ {
+  "shot": "c09",
+  "t": 440
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 450
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 460
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 470
+ },
+ {
+  "shot": "c10",
+  "t": 480
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 490
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 500
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 510
+ },
+ {
+  "shot": "c11",
+  "t": 520
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 530
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 540
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 550
+ },
+ {
+  "shot": "c12",
+  "t": 560
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 570
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 580
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 590
+ },
+ {
+  "shot": "c13",
+  "t": 600
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 610
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 620
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 630
+ },
+ {
+  "shot": "c14",
+  "t": 640
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 650
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 660
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 670
+ },
+ {
+  "shot": "c15",
+  "t": 680
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 690
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 700
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 710
+ },
+ {
+  "shot": "c16",
+  "t": 720
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 730
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 740
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 750
+ },
+ {
+  "shot": "c17",
+  "t": 760
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 770
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 780
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 790
+ },
+ {
+  "shot": "c18",
+  "t": 800
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 810
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 820
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 830
+ },
+ {
+  "shot": "c19",
+  "t": 840
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 850
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 860
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 870
+ },
+ {
+  "shot": "c20",
+  "t": 880
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 890
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 900
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 910
+ },
+ {
+  "shot": "c21",
+  "t": 920
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 930
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 940
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 950
+ },
+ {
+  "shot": "c22",
+  "t": 960
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 970
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 980
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 990
+ },
+ {
+  "shot": "c23",
+  "t": 1000
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1010
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1020
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1030
+ },
+ {
+  "shot": "c24",
+  "t": 1040
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1050
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1060
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1070
+ },
+ {
+  "shot": "c25",
+  "t": 1080
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1090
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1100
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1110
+ },
+ {
+  "shot": "c26",
+  "t": 1120
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1130
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1140
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1150
+ },
+ {
+  "shot": "c27",
+  "t": 1160
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1170
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1180
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1190
+ },
+ {
+  "shot": "c28",
+  "t": 1200
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1210
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1220
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1230
+ },
+ {
+  "shot": "c29",
+  "t": 1240
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1250
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1260
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1270
+ },
+ {
+  "shot": "c30",
+  "t": 1280
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1290
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1300
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1310
+ },
+ {
+  "shot": "c31",
+  "t": 1320
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1330
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1340
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1350
+ },
+ {
+  "shot": "c32",
+  "t": 1360
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1370
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1380
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1390
+ },
+ {
+  "shot": "c33",
+  "t": 1400
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1410
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1420
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1430
+ },
+ {
+  "shot": "c34",
+  "t": 1440
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1450
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1460
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1470
+ },
+ {
+  "shot": "c35",
+  "t": 1480
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1490
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1500
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1510
+ },
+ {
+  "shot": "c36",
+  "t": 1520
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1530
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1540
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1550
+ },
+ {
+  "shot": "c37",
+  "t": 1560
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1570
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1580
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1590
+ },
+ {
+  "shot": "c38",
+  "t": 1600
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1610
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1620
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1630
+ },
+ {
+  "shot": "c39",
+  "t": 1640
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1650
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1660
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1670
+ },
+ {
+  "shot": "c40",
+  "t": 1680
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1690
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1700
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1710
+ },
+ {
+  "shot": "c41",
+  "t": 1720
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1730
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1740
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1750
+ },
+ {
+  "shot": "c42",
+  "t": 1760
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1770
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1780
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1790
+ },
+ {
+  "shot": "c43",
+  "t": 1800
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1810
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1820
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1830
+ },
+ {
+  "shot": "c44",
+  "t": 1840
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1850
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1860
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1870
+ },
+ {
+  "shot": "c45",
+  "t": 1880
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1890
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1900
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1910
+ },
+ {
+  "shot": "c46",
+  "t": 1920
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1930
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1940
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1950
+ },
+ {
+  "shot": "c47",
+  "t": 1960
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 1970
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 1980
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 1990
+ },
+ {
+  "shot": "c48",
+  "t": 2000
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2010
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2020
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2030
+ },
+ {
+  "shot": "c49",
+  "t": 2040
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2050
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2060
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2070
+ },
+ {
+  "shot": "c50",
+  "t": 2080
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2090
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2100
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2110
+ },
+ {
+  "shot": "c51",
+  "t": 2120
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2130
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2140
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2150
+ },
+ {
+  "shot": "c52",
+  "t": 2160
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2170
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2180
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2190
+ },
+ {
+  "shot": "c53",
+  "t": 2200
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2210
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2220
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2230
+ },
+ {
+  "shot": "c54",
+  "t": 2240
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2250
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2260
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2270
+ },
+ {
+  "shot": "c55",
+  "t": 2280
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2290
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2300
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2310
+ },
+ {
+  "shot": "c56",
+  "t": 2320
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2330
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2340
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2350
+ },
+ {
+  "shot": "c57",
+  "t": 2360
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2370
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2380
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2390
+ },
+ {
+  "shot": "c58",
+  "t": 2400
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2410
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2420
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2430
+ },
+ {
+  "shot": "c59",
+  "t": 2440
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2450
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2460
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2470
+ },
+ {
+  "shot": "c60",
+  "t": 2480
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2490
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2500
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2510
+ },
+ {
+  "shot": "c61",
+  "t": 2520
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2530
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2540
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2550
+ },
+ {
+  "shot": "c62",
+  "t": 2560
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2570
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2580
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2590
+ },
+ {
+  "shot": "c63",
+  "t": 2600
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2610
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2620
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2630
+ },
+ {
+  "shot": "c64",
+  "t": 2640
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2650
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2660
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2670
+ },
+ {
+  "shot": "c65",
+  "t": 2680
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2690
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2700
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2710
+ },
+ {
+  "shot": "c66",
+  "t": 2720
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2730
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2740
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2750
+ },
+ {
+  "shot": "c67",
+  "t": 2760
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2770
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2780
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2790
+ },
+ {
+  "shot": "c68",
+  "t": 2800
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2810
+ },
+ {
+  "eval": "__tut.where==='hub'?'hub':__tut.wait('caption',45)",
+  "t": 2820
+ },
+ {
+  "eval": "__tut.freeze()",
+  "t": 2830
+ },
+ {
+  "shot": "c69",
+  "t": 2840
+ },
+ {
+  "eval": "__tut.thaw()",
+  "t": 2850
+ },
+ {
+  "eval": "__tut.wait('where:hub',120)",
+  "t": 2860
+ },
+ {
+  "eval": "__tut.sleep(1.2)",
+  "t": 2870
+ },
+ {
+  "shot": "hub",
+  "t": 2880
+ },
+ {
+  "eval": "(()=>{const ends=__tut.log.filter(e=>e.ev==='lessonEnd').map(e=>e.data);const pd=__tut.log.find(e=>e.ev==='prologueDone');return {where:__tut.where,prologueDone:__save.profile.prologueDone,taught:['undo','echo','paradox'].every(t=>__save.profile.taught.includes(t)),lessons:ends.map(d=>d.lesson+':'+d.how+':'+d.sim+'s'),simTotal:pd&&pd.data.sim,onePass:ends.every(d=>Object.values(d.attempts||{}).every(n=>n<=1))}})()",
+  "t": 2890
+ },
+ {
+  "eval": "__tut.audit()",
+  "t": 2900
+ },
+ {
+  "eval": "__tut.log.filter(e=>e.ev==='demo-desync').length",
+  "t": 2910
+ }
+]

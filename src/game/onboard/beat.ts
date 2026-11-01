@@ -26,6 +26,10 @@ export interface SuccessOpts {
   why: L10n;
   /** model-strip cells to show lit under it (prologue and core lessons only) */
   strip?: number;
+  /** the cells already lit before (the new ones light up at 0.8 s) */
+  stripPrev?: number;
+  /** a small grey line under the why ("−100 Sand · 3 seconds back") */
+  sub?: L10n;
   /** seconds (default 2.4; the coach's 2.0) */
   dur?: number;
 }
@@ -41,7 +45,7 @@ export const Beat = {
     p?.input?.rumble(0.25, 0.4, 120);
     const h = Stage.say({
       key: 'onboard.success', tier: 'A', form: 'success', slot: p?.slot,
-      text: o.stamp, stamp: o.stamp, why: o.why, strip: o.strip, dur: o.dur ?? 2.4,
+      text: o.stamp, stamp: o.stamp, why: o.why, strip: o.strip, stripPrev: o.stripPrev, footer: o.sub, dur: o.dur ?? 2.4,
     });
     w?.bus.emit('custom', { id: 'onboard.success', player: p ?? undefined, data: { id: o.id ?? null } });
     Tut.log('success', { id: o.id ?? null, slot: p?.slot ?? 0 });
