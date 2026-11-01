@@ -9,7 +9,7 @@ import { SummaryScene } from './scenes/summary';
 import { CutsceneScene, CreditsScene } from './scenes/cutscene';
 import { profile, saveProfile, metaBonus, nodeLevel, markSeen } from './save';
 import type { Patron } from './progression/memories';
-import { LedgerOverlay } from './ui/metaPanels';
+import { LedgerOverlay, SeatWeapons } from './ui/metaPanels';
 import { GameHooks, Cutscenes } from './hooks';
 
 // the 1.0 story scenes are the default cutscenes (P7 re-registers these ids with the 2.0 versions)
@@ -36,12 +36,12 @@ export const Flow = {
     G.scenes.go(() => new HubScene({ startRun: (config?: RunConfig) => Flow.startRun(config), title: () => Flow.title() }, context), 'clock', 0.6);
   },
 
-  /** the seated hands as a run config (solo: slot I with your workshop weapon) */
+  /** the seated hands as a run config (each with the weapon it took from the rack; solo: yours) */
   configFromSeats(seed = (Math.random() * 2 ** 31) | 0): RunConfig {
     const seats = ensurePlayers();
     return {
       mode: 'standard', seed, contracts: {},
-      players: seats.map((inp) => ({ slot: inp.slot, device: inp.device, hand: 'tick', weapon: profile.weapon })),
+      players: seats.map((inp) => ({ slot: inp.slot, device: inp.device, hand: 'tick', weapon: SeatWeapons.get(inp.slot) })),
     };
   },
 

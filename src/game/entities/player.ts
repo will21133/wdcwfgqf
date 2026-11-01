@@ -155,7 +155,8 @@ export class Player extends Actor implements Wielder {
         this.world.fx.ring(this.x, this.y - 8, 3, 26, 0.45, this.color, 2);
         this.world.fx.banner(this.x, this.y - 38, tr(S('f2', 'roomRevive')), this.color, 1.4);
       }, this);
-      this.world.bus.emit('revived', { player: this, by: null, source: 'room' });
+      // told on the room's first tick, once every hand's hooks and the room-start hooks are listening
+      this.world.after(0, () => this.world.bus.emit('revived', { player: this, by: null, source: 'room' }), this);
     }
     this.dashCharges = this.mods.dashCharges;
     this.recorder.setWindow(this.mods.rewindWindow);
@@ -198,9 +199,10 @@ export class Player extends Actor implements Wielder {
     const attackPressed = !this.locked && inp.pressed('attack');
     const specialPressed = !this.locked && inp.pressed('special');
     const dashPressed = !this.locked && inp.pressed('dash');
-    // F2a stopgap until F3 implements fork: the fork button (RB / R / I) rewinds too, so a 1.0
-    // pad player's RB still rewinds (GDD2 §2.1 moved fork onto RB)
-    const rewindPressed = !this.locked && (inp.pressed('rewind') || inp.pressed('fork'));
+    // F2a stopgap until F3 implements fork: a pad's fork button (RB) rewinds too, so a 1.0 pad
+    // player's RB still rewinds (GDD2 §2.1 moved fork onto RB). Keyboard R / I (fork) do nothing
+    // yet: neither rewound in 1.0.
+    const rewindPressed = !this.locked && (inp.pressed('rewind') || inp.pressedOnPad('fork'));
 
     if (rewindPressed) this.tryRewind();
     if (this.rewinding) return;
@@ -431,6 +433,9 @@ export class Player extends Actor implements Wielder {
 
   // ───────────────────────── recording & rewind ─────────────────────────
   private record() {
+    // never tape a spot a rewind could not stand on: the entry walk (collision off, still inside
+    // the sealed doorway) or anything else lodged in a wall would rewind the hand into the wall
+    if (!this.collides || !this.world.boxFree(this.x, this.y, this.r)) return;
     const pose = this.weapon.pose(this.aim);
     this.recorder.push({
       x: this.x, y: this.y, dir: this.dir === 'down' ? 0 : this.dir === 'up' ? 1 : 2, flip: this.flip,

@@ -174,7 +174,8 @@ export class Loadout {
     return {
       w, run: this.run, lo: this, p,
       on: (k, fn) => w.bus.on(k, fn, owner),
-      onMine: (k, fn) => w.bus.on(k, (e) => { if ((e as { player?: Player }).player === p) fn(e); }, owner),
+      // a ghost hand's 1-damage taps are not its build's hits / kills (no bell every 12 taps)
+      onMine: (k, fn) => w.bus.on(k, (e) => { if ((e as { player?: Player }).player === p && p.state !== 'ghost') fn(e); }, owner),
     };
   }
   /** hook context for content granted mid-room (memory picked, part bought …) */
@@ -271,8 +272,10 @@ export class Run {
     for (const pc of this.config.players) this.lo(pc.slot);
   }
 
-  /** seated hands in this run */
-  get playerCount() { return Math.max(1, this.loadouts.filter(Boolean).length); }
+  /** slots whose hand left mid-run (their build is kept for a rejoin, but they do not count) */
+  away = new Set<number>();
+  /** seated hands in this run (a hand that left does not count: echo cap, offers, door weights) */
+  get playerCount() { let n = 0; for (const l of this.loadouts) if (l && !this.away.has(l.slot)) n++; return Math.max(1, n); }
   /** every loadout in slot order */
   get all(): Loadout[] { return this.loadouts.filter(Boolean); }
 

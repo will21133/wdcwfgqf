@@ -17,6 +17,7 @@ import { Text } from '../ui/text';
 import { frand } from '../../engine/rng';
 import { GameHooks } from '../hooks';
 import { JoinPanel, leaveSeat } from '../ui/joinPanel';
+import { devices } from '../../engine/devices';
 import { S } from '../strings';
 
 export interface TitleHooks { start(): void; credits(): void; ledger(): void }
@@ -213,6 +214,8 @@ export class TitleScene implements Scene {
   update(dt: number) {
     this.t += dt;
     this.secT += dt;
+    // a seated pad that went away elsewhere (summary, credits): on the title it simply leaves
+    for (const slot of devices.lostSlots()) leaveSeat(slot);
     if (this.overlays.length) {
       const o = this.overlays[this.overlays.length - 1];
       if (!o.update(dt)) this.overlays.pop();

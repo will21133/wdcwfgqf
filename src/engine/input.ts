@@ -271,23 +271,37 @@ function kbHas(s: Src, a: Action, set: Set<Binding>): boolean {
   for (const b of s.kb[a]) if (set.has(b) && (s.mouse || !b.startsWith('Mouse'))) return true;
   return false;
 }
+/** does any of this source's pads have one of `btn` in its held / pressed / released set
+ *  (plain loops: this runs for every action of every view every tick, so no closures) */
+const HELD = 0, PRESSED = 1, RELEASED = 2;
+function padSet(p: PadState, which: number): Set<number> { return which === HELD ? p.held : which === PRESSED ? p.pressed : p.released; }
+function padAny(s: Src, btn: number[], which: number): boolean {
+  if (s.pads === 'all') {
+    for (const p of raw.pads) if (p?.connected) { const set = padSet(p, which); for (const i of btn) if (set.has(i)) return true; }
+    return false;
+  }
+  for (const pi of s.pads) {
+    const p = raw.pads[pi];
+    if (!p?.connected) continue;
+    const set = padSet(p, which);
+    for (const i of btn) if (set.has(i)) return true;
+  }
+  return false;
+}
 function srcDown(s: Src, a: Action): boolean {
   if (s.bot) return !!s.bot()?.held.has(a);
   if (kbHas(s, a, raw.held)) return true;
-  const btn = padButtons(a);
-  return eachPad(s, (p) => btn.some((i) => p.held.has(i)));
+  return padAny(s, padButtons(a), HELD);
 }
 function srcPressed(s: Src, a: Action): boolean {
   if (s.bot) return !!s.bot()?.pressed.has(a);
   if (kbHas(s, a, raw.pressed)) return true;
-  const btn = padButtons(a);
-  return eachPad(s, (p) => btn.some((i) => p.pressed.has(i)));
+  return padAny(s, padButtons(a), PRESSED);
 }
 function srcReleased(s: Src, a: Action): boolean {
   if (s.bot) return false; // bots: derived from the previous tick (InputView.prevBot)
   if (kbHas(s, a, raw.released)) return true;
-  const btn = padButtons(a);
-  return eachPad(s, (p) => btn.some((i) => p.released.has(i)));
+  return padAny(s, padButtons(a), RELEASED);
 }
 function srcConsume(s: Src, a: Action) {
   if (s.bot) { s.bot()?.pressed.delete(a); return; }
@@ -295,10 +309,16 @@ function srcConsume(s: Src, a: Action) {
   const btn = padButtons(a);
   eachPad(s, (p) => { for (const i of btn) p.pressed.delete(i); return false; });
 }
+const NO_STICK = Object.freeze({ x: 0, y: 0 });
 function srcStick(s: Src, right: boolean): { x: number; y: number } {
-  let x = 0, y = 0;
-  eachPad(s, (p) => { const px = right ? p.rx : p.lx, py = right ? p.ry : p.ly; if (px || py) { x = px; y = py; return true; } return false; });
-  return { x, y };
+  const list = s.pads === 'all' ? raw.pads : s.pads;
+  for (const e of list) {
+    const p = typeof e === 'number' ? raw.pads[e] : e;
+    if (!p?.connected) continue;
+    const px = right ? p.rx : p.lx, py = right ? p.ry : p.ly;
+    if (px || py) return { x: px, y: py };
+  }
+  return NO_STICK;
 }
 
 /** every live view; endTick advances their hold timers */
@@ -328,6 +348,11 @@ abstract class InputView {
   released(a: Action): boolean {
     for (const s of this.srcs()) if (srcReleased(s, a)) return true;
     if (this.prevBot.has(a)) { let now = false; for (const s of this.srcs()) if (s.bot && srcDown(s, a)) now = true; return !now; }
+    return false;
+  }
+  /** pressed this tick on one of this view's pads (not the keyboard) */
+  pressedOnPad(a: Action): boolean {
+    for (const s of this.srcs()) if (!s.bot && padAny(s, padButtons(a), PRESSED)) return true;
     return false;
   }
   /** consume a single press so two systems don't both react; returns whether it was pressed */
@@ -420,6 +445,7 @@ export class PlayerInput extends InputView {
   }
 
   rebuild() {
+    if (this.disposed) return;
     const k = this.kind;
     if (k === 'bot') this.src = { kb: null, mouse: false, pads: [], bot: () => this.bot };
     else if (this.merged) this.src = { kb: KB.kbm, mouse: true, pads: 'all' };
@@ -482,7 +508,17 @@ export class PlayerInput extends InputView {
     if (this.kind === 'pad') rumblePad(padIndex(this.device), strong, weak, ms);
   }
 
-  dispose() { views.delete(this); bumpSources(); }
+  /** the seat was released: this input reads nothing from now on (a stale Player keeps a dead input) */
+  private disposed = false;
+  dispose() {
+    this.disposed = true;
+    views.delete(this);
+    this.merged = false;
+    this.src = { kb: null, mouse: false, pads: [] };
+    this.list = [this.src];
+    this.bot = undefined;
+    bumpSources();
+  }
 }
 
 // ───────────────────────── menu aggregate (G.input) ─────────────────────────

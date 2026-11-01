@@ -55,6 +55,8 @@ export class ControlsPanel implements Overlay {
   /** which keyboard layout the rows show and rebind */
   prof: KbProfile = 'kbm';
   private rows: Row[] = [...REBINDABLE, 'swap', 'reset', 'back'];
+  /** seconds left on "that key belongs to the other half" */
+  private warnT = 0;
 
   private switchProfile(d: number) {
     this.prof = PROFILES[(PROFILES.indexOf(this.prof) + d + PROFILES.length) % PROFILES.length];
@@ -63,6 +65,7 @@ export class ControlsPanel implements Overlay {
 
   update(dt: number) {
     this.t += dt;
+    if (this.warnT > 0) this.warnT -= dt;
     const inp = G.input;
     if (this.capture) {
       const code = inp.lastPressedCode;
@@ -70,6 +73,16 @@ export class ControlsPanel implements Overlay {
         // the split halves have no mouse: ignore clicks and keep listening
         if (this.prof !== 'kbm' && code.startsWith('Mouse')) { inp.lastPressedCode = null; return true; }
         const a = this.rows[this.sel] as Action;
+        // the two halves share one keyboard: a key the other half already uses would drive both
+        const other: KbProfile | null = this.prof === 'kbL' ? 'kbR' : this.prof === 'kbR' ? 'kbL' : null;
+        const taken = other && code !== 'Escape' && !code.startsWith('Pad') && (Object.keys(KB[other]) as Action[]).some((k) => KB[other][k].includes(code));
+        if (taken) {
+          sfx('denied');
+          this.warnT = 2;
+          this.capture = false;
+          inp.lastPressedCode = null;
+          return true;
+        }
         if (code !== 'Escape' && !code.startsWith('Pad')) {
           const cur = KB[this.prof][a];
           const next = [code, ...cur.filter((c) => c !== code)].slice(0, 2);
@@ -168,7 +181,9 @@ export class ControlsPanel implements Overlay {
       }
       Text.draw(ctx, NAMES[row], 74, cy, { color: sel ? 'K10' : 'K8', valign: 'middle' });
       const b = B[row];
-      if (sel && this.capture) {
+      if (sel && !this.capture && this.warnT > 0) {
+        Text.draw(ctx, L('另一半键盘在用这个键', 'The other half uses that key'), 330, cy, { size: 'small', align: 'right', color: 'R4', valign: 'middle' });
+      } else if (sel && this.capture) {
         Text.draw(ctx, L('请按下新按键…（ESC 取消）', 'Press a key... (ESC cancels)'), 330, cy, { size: 'small', align: 'right', color: Math.floor(this.t * 4) % 2 ? 'B5' : 'B3', valign: 'middle' });
       } else {
         let x = 330;

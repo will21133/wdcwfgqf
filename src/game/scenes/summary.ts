@@ -1,4 +1,5 @@
 // End-of-run report: what you achieved, what you bank.
+import { drawSlotBadge } from '../players';
 import type { Scene } from '../../engine/scene';
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Run } from '../run';
@@ -77,13 +78,26 @@ export class SummaryScene implements Scene {
       Text.draw(ctx, label, 130, y, { color: 'K8' });
       Text.draw(ctx, v, 318, y, { align: 'right', color: 'K10' });
     });
-    // build icons
-    const icons: [import('../../engine/gfx/sprite').Sprite, string][] = [];
-    for (const m of run.lo(0).memories) { const d = MEMORIES[m.id]; if (d) icons.push([patronSigil(d.patron), d.id]); }
-    for (const id of run.lo(0).parts) { const p = PARTS_BY_ID[id]; if (p) icons.push([partLook(p).icon, id]); }
+    // build icons (co-op: one row per hand, led by its badge; never creates a loadout)
+    const los = run.all;
+    const iconsOf = (lo: import('../run').Loadout) => {
+      const icons: import('../../engine/gfx/sprite').Sprite[] = [];
+      for (const m of lo.memories) { const d = MEMORIES[m.id]; if (d) icons.push(patronSigil(d.patron)); }
+      for (const id of lo.parts) { const p = PARTS_BY_ID[id]; if (p) icons.push(partLook(p).icon); }
+      return icons;
+    };
     Text.draw(ctx, L('本局构筑', 'Build'), 330, rowsY, { size: 'small', color: 'K8' });
-    icons.slice(0, 24).forEach(([ic], i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, rowsY + 22 + Math.floor(i / 8) * 22, 1, k); });
-    const wi = WEAPON_INFO.find((x) => x.id === run.lo(0).weapon);
+    if (los.length > 1) {
+      los.forEach((lo, r) => {
+        const cy = rowsY + 22 + r * 22;
+        if (this.t <= 0.8 + r * 0.1) return;
+        drawSlotBadge(ctx, lo.slot, 336, cy);
+        iconsOf(lo).slice(0, 7).forEach((ic, i) => drawScaled(ctx, ic, 352 + i * 22, cy, 1, k));
+      });
+    } else if (los[0]) {
+      iconsOf(los[0]).slice(0, 24).forEach((ic, i) => { if (this.t > 0.8 + i * 0.04) drawScaled(ctx, ic, 342 + (i % 8) * 22, rowsY + 22 + Math.floor(i / 8) * 22, 1, k); });
+    }
+    const wi = los.length === 1 ? WEAPON_INFO.find((x) => x.id === los[0].weapon) : undefined;
     if (wi && this.t > 0.6) {
       const wy = ruleY - 40;
       Text.draw(ctx, L('武器', 'Weapon'), 330, wy, { size: 'small', color: 'K8' });

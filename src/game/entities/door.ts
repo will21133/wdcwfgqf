@@ -145,7 +145,10 @@ export class Door extends Entity {
       const tw = Math.ceil(G.digits.measure(text));
       const bw = slots.length * 8;
       const W = Math.max(tw + 6 + bw, 28), H = Math.max(13, Math.ceil(9 * Text.k) + 4);
-      const x0 = Math.round(q.x + 4), y0 = Math.round(q.y - H / 2);
+      // kept on screen and clear of the co-op pods / purse along the top edge (a door near the top
+      // of a tall room would otherwise put it under them)
+      const x0 = Math.round(Math.min(Math.max(q.x + 4, 6), 640 - W - 9));
+      const y0 = Math.round(Math.min(Math.max(q.y - H / 2, 42), 360 - H - 12));
       ctx.globalAlpha = 0.85;
       rect(ctx, x0 - 3, y0 - 2, W + 6, H + 4, 'K0');
       ctx.globalAlpha = 1;

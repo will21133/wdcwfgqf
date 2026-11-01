@@ -1,11 +1,13 @@
 // Co-op join flow (GDD2 §5.1) with virtual Xbox pads + the keyboard:
 //   1. title → "Together" panel: Enter seats the keyboard (I), pad1 A seats II, both ready → workshop
-//   2. workshop hot join: pad2 A → a grandfather clock opens, hand III steps out, its pod drops in
+//   2. workshop hot join next to a solo hand: a tap of A on pad2 seats nobody (it is still the solo
+//      hand's dash, 1.0); holding A (devices.JOIN_HOLD) → a grandfather clock opens, hand II steps
+//      out, its pod drops in
 //   3. pad2 holds View 1.6 s → hand III leaves
 //   4. pad1 unplugged → the game pauses with "reconnect or continue"; plug it back → resumes;
 //      unplug again, Esc → hand II is dropped
-//   5. mid-run join (?seed=…&devices=kbm): pad3 A → pending pod; next room hand II walks in and
-//      gets its catch-up memory pick (floor 2 → 1 pick)
+//   5. mid-run join (?seed=…&devices=pad0): pad3 holds A → pending pod; next room hand II walks in
+//      and gets its catch-up memory pick (floor 2 → 1 pick)
 // usage: node tools/jointest.cjs [outPrefix]   (exit code 1 on any failed check)
 const { chromium } = require('playwright');
 (async () => {
@@ -39,6 +41,15 @@ const { chromium } = require('playwright');
   const seats = (p) => p.evaluate(() => window.__G.players.map((q) => `${q.slot}:${q.device}`).join(' '));
   const scene = (p) => p.evaluate(() => window.__G.scenes.current.constructor.name);
   const until = async (p, fn, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await p.evaluate(fn)) return true; await p.waitForTimeout(150); } return false; };
+  /** next to a solo hand a pad joins by holding A: hold until a seat is taken (or 4 s), then let go */
+  const holdJoin = async (p, pi) => {
+    const n0 = await p.evaluate(() => window.__G.players.length);
+    await p.evaluate((pi) => window.__press(pi, 0, true), pi);
+    const ok = await until(p, new Function(`return window.__G.players.length > ${n0}`), 4000);
+    await p.evaluate((pi) => window.__press(pi, 0, false), pi);
+    await p.waitForTimeout(250);
+    return ok;
+  };
 
   // ── 1. title → Together ──
   {
@@ -78,8 +89,16 @@ const { chromium } = require('playwright');
     for (let i = 0; i < 16; i++) { if (await p.evaluate(() => !window.__G.scenes.current.overlays.length)) break; await tap(p, 0, 0); await p.waitForTimeout(300); }
     // the solo hand has used its pad (until then, the first press anywhere counts as theirs)
     await tap(p, 0, 13);
+    // a tap of A on another pad is the solo hand's own dash (1.0), not a join
+    await tap(p, 2, 0);
+    check((await seats(p)) === '0:pad0', `a tap of A on a free pad seats nobody next to a solo hand (${await seats(p)})`);
+    await tap(p, 0, 13);
+    // holding A: the join plate fills, then the clock opens
     await p.evaluate(() => window.__press(2, 0, true));
-    await p.waitForTimeout(260);
+    await p.waitForTimeout(450);
+    await p.screenshot({ path: `${out}_hold.png` });
+    await until(p, () => window.__G.players.length === 2, 4000);
+    await p.waitForTimeout(200);
     await p.screenshot({ path: `${out}_door1.png` });
     await p.evaluate(() => window.__press(2, 0, false));
     await p.waitForTimeout(300);
@@ -87,7 +106,7 @@ const { chromium } = require('playwright');
     await p.waitForTimeout(900);
     await p.screenshot({ path: `${out}_door3.png` });
     const s2 = await seats(p);
-    check(s2.includes('1:pad2'), `pad2 A hot-joins the workshop as II (${s2})`);
+    check(s2.includes('1:pad2') && s2.includes('0:pad0'), `holding A on pad2 hot-joins the workshop as II (${s2})`);
     check(await p.evaluate(() => window.__G.scenes.current.world.players.length === 2), 'hand II stepped out of a clock');
     // leave: hold View 1.6 s
     await p.evaluate(() => window.__press(2, 8, true));
@@ -97,8 +116,9 @@ const { chromium } = require('playwright');
     await p.evaluate(() => window.__press(2, 8, false));
     await p.waitForTimeout(500);
     check(!(await seats(p)).includes('pad2'), `holding View leaves (${await seats(p)})`);
-    // disconnect: join pad1, unplug it → paused; plug back → resumes
-    await tap(p, 1, 0);
+    // disconnect: join pad1 (solo again, so it holds A), unplug it → paused; plug it back → resumes
+    await tap(p, 0, 13);
+    check(await holdJoin(p, 1), `pad1 joins by holding A (${await seats(p)})`);
     await p.waitForTimeout(1200);
     await p.evaluate(() => window.__plug(1, false));
     await p.waitForTimeout(600);
@@ -123,10 +143,9 @@ const { chromium } = require('playwright');
     await p.goto(base + '?seed=4&floor=1&devices=pad0&god=1&room=shop');
     await p.waitForTimeout(4500);
     await tap(p, 0, 13);
-    await tap(p, 3, 0);
-    await p.waitForTimeout(500);
+    await holdJoin(p, 3);
     const s5 = await seats(p);
-    check(s5.includes('1:pad3'), `pad3 A joins mid-run (${s5})`);
+    check(s5.includes('1:pad3'), `pad3 holding A joins mid-run (${s5})`);
     check(await p.evaluate(() => window.__G.scenes.current.world.players.length === 1 && window.__G.scenes.current.hud.pending.includes(1)), 'the hand waits for the next room (pending pod)');
     await p.screenshot({ path: `${out}_pending.png` });
     // walk out through a door: teleport pad0's hand into the first door

@@ -1,7 +1,8 @@
 // Shared camera for 2–4 hands (GDD2 §5.3): follow the midpoint of everyone standing (no aim
 // look-ahead), keep every hand inside a 600×340 tether box around the view centre (the edge
 // glows in the colour of whoever pushes it), show arrows for anyone off screen, and pull a hand
-// that has been off screen for 2 s back to the nearest teammate (catch-up rewind: free, no echo).
+// that has been off screen — or stuck (lodged in a wall, or boxed in on all four sides) — for 2 s
+// back to the nearest teammate (catch-up rewind: free, no echo).
 // Solo play never comes here — its camera is 1.0's.
 import type { World } from './world';
 import type { Player } from '../entities/player';
@@ -17,7 +18,13 @@ export const TETHER_HW = 300, TETHER_HH = 170;
 export const CATCH_UP_AFTER = 2;
 
 interface Glow { slot: number; side: 'l' | 'r' | 't' | 'b'; at: number; a: number }
-export interface CoopCam { glow: Glow[]; away: number[] }
+export interface CoopCam { glow: Glow[]; away: number[]; stuck?: number[] }
+
+/** a hand that cannot move: inside solid ground, or every 3 px step blocked */
+function trapped(w: World, p: Player): boolean {
+  if (!w.boxFree(p.x, p.y, p.r)) return true;
+  return !w.boxFree(p.x + 3, p.y, p.r) && !w.boxFree(p.x - 3, p.y, p.r) && !w.boxFree(p.x, p.y + 3, p.r) && !w.boxFree(p.x, p.y - 3, p.r);
+}
 
 /** per-tick camera + tether (GameScene.update, co-op only) */
 export function coopCamera(w: World, st: CoopCam, dt: number) {
@@ -47,12 +54,16 @@ export function coopCamera(w: World, st: CoopCam, dt: number) {
       if (dx) glow(st, p.slot, dx > 0 ? 'l' : 'r', p.y - v.y);
       if (dy) glow(st, p.slot, dy > 0 ? 't' : 'b', p.x - v.x);
     }
-    // catch-up: off screen for 2 s (walls, a teleport, the camera lagging behind)
+    // catch-up: off screen for 2 s (walls, a teleport, the camera lagging behind), or stuck for 2 s
+    // (GDD2 §5.3) — e.g. lodged in a wall, which would otherwise hold the whole team at the door
     const v = w.cam.view();
     const off = p.x < v.x - 4 || p.x > v.x + VIEW_W + 4 || p.y - 8 < v.y - 4 || p.y > v.y + VIEW_H + 12;
     st.away[p.slot] = off ? (st.away[p.slot] ?? 0) + dt : 0;
-    if (st.away[p.slot] >= CATCH_UP_AFTER && standing.length) {
+    const stuck = (st.stuck ??= []);
+    stuck[p.slot] = !p.locked && p.dashT <= 0 && trapped(w, p) ? (stuck[p.slot] ?? 0) + dt : 0;
+    if ((st.away[p.slot] >= CATCH_UP_AFTER || stuck[p.slot] >= CATCH_UP_AFTER) && standing.some((q) => q !== p)) {
       st.away[p.slot] = 0;
+      stuck[p.slot] = 0;
       catchUp(w, p);
     }
   }
@@ -121,9 +132,14 @@ function drawArrow(ctx: CanvasRenderingContext2D, cx: number, cy: number, ang: n
 
 /** arrows keep clear of the HUD: the corner pods (132×32), the purse and the boss bar */
 const INSET = { l: 16, r: 16, t: 46, b: 46 };
+/** bottom inset while the boss bar (y 334) and its name above it are on screen */
+const INSET_BOSS = 60;
 
-/** tether glow on the screen edges + arrows to hands off screen (UI layer, 640×360 logical) */
-export function renderCoopEdges(ctx: CanvasRenderingContext2D, w: World, st: CoopCam) {
+/**
+ * tether glow on the screen edges + arrows to hands off screen (UI layer, 640×360 logical);
+ * `boss`: the boss bar and its name are up, so arrows stay above them
+ */
+export function renderCoopEdges(ctx: CanvasRenderingContext2D, w: World, st: CoopCam, o: { boss?: boolean } = {}) {
   // tether glow: a soft band in the pusher's colour where they meet the edge, brightest at the rim
   const A = [0.9, 0.6, 0.35, 0.15];
   for (const g of st.glow) {
@@ -149,7 +165,7 @@ export function renderCoopEdges(ctx: CanvasRenderingContext2D, w: World, st: Coo
     const cx = VIEW_W / 2, cy = VIEW_H / 2;
     const dx = sx - cx, dy = sy - cy;
     const hx = dx < 0 ? cx - INSET.l : VIEW_W - INSET.r - cx;
-    const hy = dy < 0 ? cy - INSET.t : VIEW_H - INSET.b - cy;
+    const hy = dy < 0 ? cy - INSET.t : VIEW_H - (o.boss ? INSET_BOSS : INSET.b) - cy;
     const k = Math.min(hx / Math.max(1e-3, Math.abs(dx)), hy / Math.max(1e-3, Math.abs(dy)));
     const ax = cx + dx * k, ay = cy + dy * k;
     const urgent = p.state === 'stopped';

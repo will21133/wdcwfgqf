@@ -7,6 +7,9 @@ import { G, sfx } from '../G';
 import { tr, L, L10n } from '../i18n';
 import { profile, saveProfile, NODES, NodeDef, nodeLevel } from '../save';
 import { drawHint } from './prompts';
+import { devices } from '../../engine/devices';
+import type { PlayerInput } from '../../engine/input';
+import { drawSlotTag } from '../players';
 import { Text } from './text';
 import { col } from '../../art/palette';
 import { gearFrames, BRASS_GEAR, IRON_GEAR } from '../../art/gear';
@@ -148,24 +151,44 @@ export const WEAPON_INFO: { id: string; name: L10n; desc: L10n; sprite: Sprite }
   { id: 'chakram', sprite: GEAR_BLADE, name: L('齿轮回旋镖', 'Gear Chakram'), desc: L('掷出往返的锯齿齿轮。特技：把齿轮嵌进地面变成炮台。残响的齿轮一分为二。', 'Throw a returning sawtooth gear. Special: embed it as a turret. Echo gears split in two.') },
 ];
 
+/**
+ * Each seat's weapon for the next run (PLAN2 F2: the rack is per player). Slot I is the save's
+ * own weapon (profile.weapon, 1.0); the other hands' picks last for the session.
+ */
+export const SeatWeapons = {
+  guests: new Map<number, string>(),
+  get(slot: number): string { return slot === 0 ? profile.weapon : this.guests.get(slot) ?? profile.weapon; },
+  set(slot: number, id: string) {
+    if (slot === 0) { profile.weapon = id; saveProfile(); } else this.guests.set(slot, id);
+  },
+};
+
 export class WeaponOverlay implements Overlay {
   blocks = true;
   /** Ines's notes stay hidden (and paused) while this is open */
   hidesNotes = true;
-  sel = Math.max(0, WEAPON_INFO.findIndex((w) => w.id === profile.weapon));
+  sel: number;
   t = 0;
-  constructor() { sfx('uiOpen'); }
+  private slot: number;
+  /** co-op: the hand that walked up to the rack (its own device drives the rack, its pick is its own) */
+  constructor(private by: PlayerInput | null = null) {
+    sfx('uiOpen');
+    this.slot = by?.slot ?? 0;
+    this.sel = Math.max(0, WEAPON_INFO.findIndex((w) => w.id === SeatWeapons.get(this.slot)));
+  }
+  /** co-op: the opener's own device; solo: every device (1.0) */
+  private get coop(): boolean { return !!this.by && devices.humans.length > 1; }
   update(dt: number) {
     this.t += dt;
-    const inp = G.input;
+    const inp = this.coop ? this.by! : G.input;
     if (inp.pressed('cancel') || inp.pressed('pause')) { inp.consume('pause'); sfx('uiBack'); return false; }
     const nav = inp.nav(dt);
     if (nav.x) { this.sel = (this.sel + nav.x + WEAPON_INFO.length) % WEAPON_INFO.length; sfx('uiMove'); }
-    if (inp.pressed('confirm') || (inp.pressed('attack') && inp.mouseAim)) {
+    const mouse = this.coop ? this.by!.usesMouse && this.by!.mouseAim : G.input.mouseAim;
+    if (inp.pressed('confirm') || (inp.pressed('attack') && mouse)) {
       const w = WEAPON_INFO[this.sel];
       if (!profile.weapons.includes(w.id)) { sfx('denied'); return true; }
-      profile.weapon = w.id;
-      saveProfile();
+      SeatWeapons.set(this.slot, w.id);
       sfx('uiSelect');
       return false;
     }
@@ -176,6 +199,9 @@ export class WeaponOverlay implements Overlay {
     ctx.globalAlpha = 0.8; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
     panel(ctx, 60, 50, 520, 250);
     G.font.draw(ctx, tr(L('武器架', 'Weapon Rack')), 320, 60, { align: 'center', color: 'B5' });
+    // co-op: whose rack this is
+    if (this.coop) drawSlotTag(ctx, this.slot, 72, 64);
+    const mine = SeatWeapons.get(this.slot);
     WEAPON_INFO.forEach((w, i) => {
       const x = 120 + i * 133, y = 130;
       const un = profile.weapons.includes(w.id);
@@ -186,13 +212,13 @@ export class WeaponOverlay implements Overlay {
       ctx.globalAlpha = 1;
       // name / "equipped" sit inside the card's bottom / top edge at any text size
       const ih = Text.inkH('small');
-      Text.draw(ctx, un ? tr(w.name) : '???', x, y + 41 - ih / 2, { size: 'small', align: 'center', color: un ? (profile.weapon === w.id ? 'B5' : 'K9') : 'K7', valign: 'middle' });
-      if (profile.weapon === w.id) Text.draw(ctx, L('装备中', 'Equipped'), x, y - 41 + ih / 2, { size: 'small', align: 'center', color: 'G4', valign: 'middle' });
+      Text.draw(ctx, un ? tr(w.name) : '???', x, y + 41 - ih / 2, { size: 'small', align: 'center', color: un ? (mine === w.id ? 'B5' : 'K9') : 'K7', valign: 'middle' });
+      if (mine === w.id) Text.draw(ctx, L('装备中', 'Equipped'), x, y - 41 + ih / 2, { size: 'small', align: 'center', color: 'G4', valign: 'middle' });
     });
     const w = WEAPON_INFO[this.sel];
     const un = profile.weapons.includes(w.id);
     G.font.draw(ctx, un ? tr(w.desc) : tr(L('在发条台解锁。', 'Unlock it at the Mainspring.')), 80, 196, { color: 'K9', wrap: 480, lineH: 15 });
-    drawHint(ctx, 320, 282, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('装备', 'Equip'))], ['cancel', tr(L('返回', 'Back'))]]);
+    drawHint(ctx, 320, 282, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('装备', 'Equip'))], ['cancel', tr(L('返回', 'Back'))]], this.coop ? this.by : undefined);
   }
 }
 

@@ -32,7 +32,7 @@ import { devices } from '../../engine/devices';
 import type { PlayerInput } from '../../engine/input';
 import { ensurePlayers, slotColor, ROMAN } from '../players';
 import { GameHooks } from '../hooks';
-import { joinSeat, leaveSeat, slotText, DisconnectOverlay } from '../ui/joinPanel';
+import { joinSeat, leaveSeat, slotText, DisconnectOverlay, renderJoinHold, SlotBanners, flushJoinEvents } from '../ui/joinPanel';
 import { promptH, promptW, drawPrompt } from '../ui/widgets';
 import { rect } from '../ui/draw';
 import { S } from '../strings';
@@ -78,9 +78,10 @@ class Ines extends Interactable {
 }
 
 class Station extends Interactable {
-  constructor(x: number, y: number, private spr: Sprite, private label: () => string, private open: () => void, private light = 'O3') { super(); this.x = x; this.y = y; this.range = 26; }
+  /** `open` gets the hand that pressed interact (the weapon rack is that hand's own) */
+  constructor(x: number, y: number, private spr: Sprite, private label: () => string, private open: (by: Player | null) => void, private light = 'O3') { super(); this.x = x; this.y = y; this.range = 26; }
   prompt() { return this.label(); }
-  interact() { this.open(); }
+  interact() { this.open(this.user); }
   renderGround(r: Renderer) { r.w.fillStyle = 'rgba(11,10,20,0.4)'; r.w.fillRect(Math.round(this.x - this.spr.w / 2), Math.round(this.y) - 1, this.spr.w, 3); }
   render(r: Renderer) { drawSprite(r.w, this.spr, this.x, this.y); r.lightAt(this.x, this.y - 14, 50, this.light, 0.35); }
 }
@@ -359,7 +360,7 @@ export class HubScene implements Scene {
     // furniture
     w.add(new Ines(c.x - 60, c.y - 30, this));
     w.add(new Station(c.x + 70, c.y - 34, MAINSPRING_BENCH, () => tr(L('发条台', 'Mainspring')), () => this.overlays.push(new MainspringOverlay()), 'B5'));
-    w.add(new Station(c.x - 150, c.y + 10, WEAPON_RACK, () => tr(L('武器架', 'Weapon Rack')), () => this.overlays.push(new WeaponOverlay())));
+    w.add(new Station(c.x - 150, c.y + 10, WEAPON_RACK, () => tr(L('武器架', 'Weapon Rack')), (by) => this.overlays.push(new WeaponOverlay(by?.input ?? null))));
     w.add(new Station(c.x + 150, c.y + 14, LEDGER_STAND, () => tr(L('账簿', 'Ledger')), () => this.overlays.push(new LedgerOverlay())));
     w.add(new Cat(c.x - 20, c.y + 40));
     if (profile.maxOverwind > 0) w.add(new OverwindLever(c.x + 40, c.y - 40));
@@ -387,6 +388,8 @@ export class HubScene implements Scene {
     G.r.params.lighting = true;
     // first visit: Ines speaks up shortly after you arrive
     if (this.context === 'start' && this.hasStory() && profile.ines === 0) this.talkIn = 0.9;
+    // hands that sat down on the title's Together panel announce themselves here
+    flushJoinEvents(w);
     GameHooks.fire.hub(this);
   }
 
@@ -397,18 +400,24 @@ export class HubScene implements Scene {
 
   /** the two grandfather clocks a newly joined hand steps out of */
   private clocks: GrandClock[] = [];
-  /** hands stepping out of a clock: walk down onto the floor, then they are free */
-  private emerging: { p: Player; t: number; y0: number }[] = [];
+  /** hands stepping out of a clock: walk down onto the floor (and aside), then they are free */
+  private emerging: { p: Player; t: number; x0: number; y0: number; dx: number }[] = [];
+  /** "Hand II wakes" / "has left" plates (UI layer, top-centre) */
+  private banners = new SlotBanners();
   /** co-op: seconds each hand has held the leave button */
   private leaveT = new Map<Player, number>();
 
   /**
    * Hot join (GDD2 §5.1): a free pad pressing A / Start, or Enter on a free keyboard, seats a new
-   * hand. A grandfather clock's case door swings open and the hand steps out; a banner names it and
-   * its pod drops into its corner. (The split-keyboard keys F / K are 1.0 alternate keys in the
-   * workshop, so the half keyboards join from the title's Together panel.)
+   * hand (next to a solo player the button is held for devices.JOIN_HOLD — a tap is still the solo
+   * player's dash / confirm, as in 1.0). A grandfather clock's case door swings open and the hand
+   * steps out; a banner names it and its pod drops into its corner. (The split-keyboard keys F / K
+   * are 1.0 alternate keys in the workshop, so the half keyboards join from the title's Together
+   * panel.)
    */
   private hotJoin() {
+    // a lost pad's "continue without them" (Start) is not a join
+    if (this.overlays.some((o) => o instanceof DisconnectOverlay)) return;
     const id = devices.joinPressed({ split: false });
     if (!id) return;
     const slot = devices.freeSlot();
@@ -419,18 +428,26 @@ export class HubScene implements Scene {
 
   private spawnJoined(inp: PlayerInput) {
     const w = this.world;
-    // II and IV step out of the left clock, III out of the right one
+    // II and IV step out of the left clock, III out of the right one; whoever already stands at a
+    // clock's foot makes the next hand step out further aside (II and IV never stack)
     const left = inp.slot % 2 === 1;
     const clock = this.clocks[left ? 0 : 1];
     const k = clock ?? { x: w.map.pw / 2, y: w.map.ph / 2 };
     const p = w.add(new Player(k.x, k.y - 1, inp));
     w.flushAdds();
+    const side = left ? 1 : -1;
+    let dx = 0;
+    for (let i = 0; i < 3; i++) {
+      const tx = k.x + dx, ty = k.y + 15;
+      if (!w.players.some((q) => q !== p && Math.hypot(q.x - tx, q.y - ty) < 12)) break;
+      dx += 16 * side;
+    }
     p.invuln = 1.2;
     p.locked = true;
     p.dir = 'down';
     clock?.openDoor(inp.slot);
-    this.emerging.push({ p, t: 0, y0: k.y - 1 });
-    w.fx.banner(k.x, k.y - 52, tr(slotText('joined', inp.slot)), slotColor(inp.slot), 2);
+    this.emerging.push({ p, t: 0, x0: k.x, y0: k.y - 1, dx });
+    this.banners.show(inp.slot, slotText('joined', inp.slot));
     sfx('cogWind');
     inp.rumble(0.3, 0.3, 140);
   }
@@ -442,10 +459,10 @@ export class HubScene implements Scene {
     if (p) {
       w.fx.ring(p.x, p.y - 8, 3, 24, 0.4, p.color, 2);
       w.fx.burst(p.x, p.y - 10, 14, ['W', p.color], 90, 0.4);
-      w.fx.banner(p.x, p.y - 34, tr(slotText('left', slot)), 'K8', 1.6);
       p.kill();
       this.leaveT.delete(p);
     }
+    this.banners.show(slot, slotText('left', slot), 2.2, true);
     leaveSeat(slot);
     sfx('uiBack');
   }
@@ -486,6 +503,9 @@ export class HubScene implements Scene {
     // anyone can sit down at any time, even while Ines talks or a station is open (the press that
     // joins is consumed, so it does not also turn the page)
     this.hotJoin();
+    this.banners.update(dt);
+    // a seated pad that went away while no scene could pause for it (summary, cutscene, credits)
+    for (const slot of devices.lostSlots()) this.onDeviceLost(slot);
     if (this.overlays.length) {
       const o = this.overlays[this.overlays.length - 1];
       if (!o.update(dt)) this.overlays.pop();
@@ -510,7 +530,10 @@ export class HubScene implements Scene {
       const k = clamp((e.t - 0.25) / 0.55, 0, 1);
       e.p.y = e.y0 + Math.round(ease.outCubic(k) * 16);
       e.p.moveY = k > 0 && k < 1 ? 1 : 0;
-      if (e.t > 0.85) { e.p.locked = false; this.emerging.splice(i, 1); }
+      // then a few steps aside if a hand already stands at this clock
+      const k2 = clamp((e.t - 0.7) / 0.35, 0, 1);
+      if (e.dx) { e.p.x = e.x0 + Math.round(ease.inOutQuad(k2) * e.dx); e.p.moveX = k2 > 0 && k2 < 1 ? Math.sign(e.dx) : 0; if (k2 > 0) e.p.moveY = 0; }
+      if (e.t > (e.dx ? 1.1 : 0.85)) { e.p.locked = false; e.p.moveX = 0; this.emerging.splice(i, 1); }
     }
     w.update(dt);
     this.hud.update(dt, w);
@@ -533,7 +556,9 @@ export class HubScene implements Scene {
     const th = HUB_THEME;
     pp.tint = th.grade.tint; pp.lift = th.grade.lift; pp.saturation = th.grade.sat * (this.overlays.length ? 0.6 : 1); pp.contrast = th.grade.contrast;
     pp.vignette = 0.45; pp.bloom = 0.5; pp.bloomThreshold = 0.6; pp.lighting = true; pp.hurt = 0; pp.fade = 0;
-    // co-op: a hand holding the leave button gets a ring that fills over its head
+    this.world.render(r);
+    // co-op: a hand holding the leave button gets a bar that fills over its head (queued after
+    // world.render, whose r.begin() empties the world-label queue)
     for (const [p, t] of this.leaveT) {
       const k = Math.min(1, t / LEAVE_HOLD), px = p.x, py = p.y - 34, c = p.color;
       r.worldUi((ctx, toUi) => {
@@ -546,7 +571,6 @@ export class HubScene implements Scene {
         Text.draw(ctx, label, q.x, y + 2 + Text.inkMid('small'), { size: 'small', align: 'center', color: 'K10', valign: 'middle' });
       });
     }
-    this.world.render(r);
     r.flushWorldUi();
     const ctx = r.ui2;
     // workshop name and shard counter; the full-screen station panels draw their own header over this area
@@ -578,6 +602,9 @@ export class HubScene implements Scene {
         Text.draw(ctx, label, hx + promptW('info') + 4, hy + promptH() / 2, { size: 'small', color: 'K8', valign: 'middle' });
       }
     }
+    this.banners.render(ctx, this.world.playerCount > 1 ? 22 : 30);
     for (const o of this.overlays) o.render(r);
+    // a free device holding its join button next to a solo player (a tap shows the hint briefly)
+    renderJoinHold(ctx, { cy: 62, hint: true });
   }
 }

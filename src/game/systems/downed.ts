@@ -82,8 +82,8 @@ export interface DownState {
 export const newDownState = (): DownState => ({ t: 0, lastSecond: 0, final: false, wind: 0, windBy: null });
 
 const solo = (w: World) => w.playerCount <= 1;
-// F2a stopgap until F3 builds fork: the fork button rewinds too (see Player.update)
-const rewindPressed = (p: Player) => p.input.pressed('rewind') || p.input.pressed('fork');
+// F2a stopgap until F3 builds fork: a pad's fork button (RB) rewinds too (see Player.update)
+const rewindPressed = (p: Player) => p.input.pressed('rewind') || p.input.pressedOnPad('fork');
 
 /** HP reached 0 (after the 1.0 saves) */
 export function stop(p: Player) {
@@ -104,7 +104,8 @@ export function stop(p: Player) {
   }
   sfx('playerDeath');
   w.fx.ring(p.x, p.y - 8, 3, 30, 0.45, p.color, 2);
-  w.fx.banner(p.x, p.y - 48, tr(S('f2', 'stopped')), p.color, 1.4);
+  // above where the killing blow's damage number peaks (it rises ~32 px from y − 26)
+  w.fx.banner(p.x, p.y - 64, tr(S('f2', 'stopped')), p.color, 1.4);
   p.input.rumble(0.9, 1, 400);
   w.bus.emit('downed', { player: p });
 }
@@ -173,6 +174,19 @@ export function updateStopped(p: Player, dt: number) {
   if (d.t >= STOP_TIME) toGhost(p);
 }
 
+/**
+ * The team shrank to this one hand (its teammate left mid-run): a stopped hand gets the solo
+ * Last Second instead of dying on the spot; a ghost is wound up at the room-start share.
+ */
+export function nowSolo(p: Player) {
+  if (p.state === 'ghost') { p.revive(ROOM_REVIVE_HP, null, 'room'); return; }
+  if (p.state !== 'stopped' || p.down.final) return;
+  p.down = newDownState();
+  p.down.lastSecond = LAST_SECOND;
+  p.world.slowmo(LAST_SECOND_SCALE, LAST_SECOND);
+  sfx('heartbeat', { vol: 0.9 });
+}
+
 /** the 15 s ran out */
 export function toGhost(p: Player) {
   const w = p.world;
@@ -202,7 +216,8 @@ export function isOut(p: Player): boolean {
 }
 
 // ───────────────────────── rendering ─────────────────────────
-const TICK_RX = 13, TICK_RY = 6;
+/** the ring of 12 ticks on the floor: wide enough that the body hides none of them */
+const TICK_RX = 19, TICK_RY = 8;
 
 /** ground: the ring of 12 ticks (co-op) */
 export function renderStoppedGround(r: Renderer, p: Player) {
@@ -213,7 +228,10 @@ export function renderStoppedGround(r: Renderer, p: Player) {
   const wound = Math.floor(d.wind * STOP_TICKS);
   const blink = Math.floor(p.world.time * 6) % 2 === 0;
   const cx = Math.round(p.x), cy = Math.round(p.y);
-  // the dial's rim: a dark ellipse the ticks sit on, so they read as one clock face
+  // the dial: a dark face on the floor with a rim, so the ticks read as one clock face
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = col('K0');
+  ctx.beginPath(); ctx.ellipse(cx + 0.5, cy + 0.5, TICK_RX, TICK_RY, 0, 0, TAU); ctx.fill();
   ctx.globalAlpha = 0.55;
   ctx.strokeStyle = col('K0');
   ctx.lineWidth = 3;
@@ -232,8 +250,10 @@ export function renderStoppedGround(r: Renderer, p: Player) {
     let c = lit ? p.color : 'K4';
     if (lit && i === left - 1 && left < STOP_TICKS + 1 && blink && d.t % (STOP_TIME / STOP_TICKS) > STOP_TIME / STOP_TICKS - 0.4) c = 'K6';
     if (i < wound && d.windBy) c = d.windBy.color;
-    rect(ctx, x - 1, y - 1, big ? 3 : 2, big ? 3 : 2, 'K0');
-    rect(ctx, x, y, big ? 2 : 1, big ? 2 : 1, c);
+    // quarter ticks 3×3, the others 2×2, each with a K0 outline
+    const sz = big ? 3 : 2, o = big ? 1 : 0;
+    rect(ctx, x - o - 1, y - o - 1, sz + 2, sz + 2, 'K0');
+    rect(ctx, x - o, y - o, sz, sz, c);
   }
 }
 
@@ -297,25 +317,37 @@ export function renderStoppedLabel(r: Renderer, p: Player) {
   });
 }
 
-/** solo Last Second: centre-screen "REWIND!" with the rewind button (UI layer, 640×360 logical) */
+/**
+ * solo Last Second: centre-screen "REWIND!" in big letters, and under it the hand's own rewind
+ * button with a 12px line (the key sits next to text of its own size, not dwarfed by the title).
+ * Without sand only "No sand left" shows: no button that would do nothing. UI layer, 640×360.
+ */
 export function renderLastSecondUi(ctx: CanvasRenderingContext2D, p: Player) {
   if (!solo(p.world) || p.state !== 'stopped' || p.down.final || p.down.lastSecond <= 0) return;
   const can = DownedHooks.canRewindOut(p);
   const k = p.down.lastSecond / LAST_SECOND;
   const pulse = Math.floor(G.time * 8) % 2 === 0;
   const text = tr(S('f2', can ? 'lastSecond' : 'noSand'));
+  const sub = tr(S('f2', 'lastSecondHint'));
+  const lt = Math.ceil(Text.lineH('title')), ph = promptH();
   const tw = Math.ceil(Text.measure(text, 'title').w);
-  const iw = promptW('rewind', p.input);
-  const total = iw + 6 + tw;
-  const lh = Math.max(promptH(), Math.ceil(Text.lineH('title')));
-  const x0 = Math.round(320 - total / 2), y0 = 118;
+  const iw = promptW('rewind', p.input), sw = Math.ceil(Text.measure(sub, 'body').w);
+  const row2 = can ? iw + 5 + sw : 0;
+  const W = Math.max(tw, row2) + 28;
+  const H = lt + (can ? 4 + Math.max(ph, Math.ceil(Text.lineH('body'))) : 0) + 14;
+  const x0 = Math.round(320 - W / 2), y0 = Math.round(132 - H / 2);
   ctx.globalAlpha = 0.85;
-  rect(ctx, x0 - 10, y0 - 6, total + 20, lh + 12, 'K0');
+  rect(ctx, x0, y0, W, H, 'K0');
   ctx.globalAlpha = 1;
-  rect(ctx, x0 - 10, y0 - 6, Math.round((total + 20) * k), 1, can ? 'C3' : 'K6');
-  rect(ctx, x0 - 10, y0 + lh + 5, Math.round((total + 20) * k), 1, can ? 'C3' : 'K6');
-  drawPrompt(ctx, 'rewind', x0, y0 + Math.round((lh - promptH()) / 2), p.input);
-  Text.draw(ctx, text, x0 + iw + 6, y0 + lh / 2, { size: 'title', color: can ? (pulse ? 'C4' : 'C3') : 'K7', outline: 'K0', valign: 'middle' });
+  // the window running out: both rims shrink toward the centre
+  const rw = Math.round(W * k), rx = Math.round(320 - rw / 2);
+  rect(ctx, rx, y0, rw, 1, can ? 'C3' : 'K6');
+  rect(ctx, rx, y0 + H - 1, rw, 1, can ? 'C3' : 'K6');
+  Text.draw(ctx, text, 320, y0 + 7 + lt / 2, { size: 'title', align: 'center', color: can ? (pulse ? 'C4' : 'C3') : 'K7', outline: 'K0', valign: 'middle' });
+  if (!can) return;
+  const by = y0 + 7 + lt + 4, bx = Math.round(320 - row2 / 2);
+  drawPrompt(ctx, 'rewind', bx, by, p.input);
+  Text.draw(ctx, sub, bx + iw + 5, by + ph / 2, { color: 'K9', valign: 'middle' });
 }
 
 /** colour of a slot for UI that only has a slot number */

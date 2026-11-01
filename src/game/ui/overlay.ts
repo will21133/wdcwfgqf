@@ -341,13 +341,14 @@ export class ChoiceOverlay implements Overlay {
       if (detail(desc, flavor) > room) { desc = 'small'; flavor = !tight; }
       if (detail(desc, flavor) > room) flavor = false;
       const dh = detail(desc, flavor);
-      // panels side by side share a height: the detail box holds at least three lines (+ flavour),
-      // a quarter panel fills its quarter. Text is never cut (at extreme text sizes a quarter panel
-      // may still grow past its quarter).
+      // panels side by side share a height: the detail box holds at least three lines (+ flavour).
+      // A quarter panel is only as tall as its text (at least two lines), hugging its corner, so
+      // with four hands choosing the middle of the screen stays visible. Text is never cut (at
+      // extreme text sizes a quarter panel may still grow past its quarter).
       const anyFlavor = flavor && this.choices.some((c) => !!c.flavor);
       let dhMin = Math.ceil(3 * Text.lineH(desc) + (anyFlavor ? 3 + Text.lineH('small') : 0));
-      if (quarter) dhMin = Math.min(dhMin, R.h - (hh + rows + 8 + fh));
-      const h = Math.max(hh + rows + 8 + Math.max(dh, dhMin) + fh, quarter ? R.h : 0);
+      if (quarter) dhMin = Math.min(Math.ceil(2 * Text.lineH(desc)), R.h - (hh + rows + 8 + fh));
+      const h = hh + rows + 8 + Math.max(dh, dhMin) + fh;
       return { h, hh, rh, desc, flavor, dh, fh, tight };
     };
     let L0 = build(false);

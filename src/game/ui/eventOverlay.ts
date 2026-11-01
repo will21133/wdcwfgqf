@@ -12,6 +12,7 @@ import { clamp, ease } from '../../engine/math';
 import type { EventDef, EventCtx } from '../progression/events';
 import type { Run } from '../run';
 import type { InputLike } from './overlay';
+import { drawSlotTag, ROMAN } from '../players';
 
 export class EventOverlay implements Overlay {
   blocks = true;
@@ -93,6 +94,12 @@ export class EventOverlay implements Overlay {
     // title & text
     // title, rule, text, then options / result: each block starts below the measured one above it
     Text.draw(ctx, this.ev.title, x + 228, y + 16, { color: 'B5' });
+    // co-op: whose decision this is (the deciding hand's tag, right end of the title line)
+    const slot = (this.input as { slot?: number } | undefined)?.slot;
+    if (this.input && typeof slot === 'number') {
+      const tw = Math.ceil(Text.measure(ROMAN[slot % 4], 'body').w) + 23;
+      drawSlotTag(ctx, slot, x + 568 - tw, y + 16 + Text.lineH('body') / 2 - 1);
+    }
     const ruleY = Math.round(y + 16 + Text.lineH('body') + 3);
     rect(ctx, x + 228, ruleY, 340, 1, 'B1');
     const text = tr(this.ev.text);

@@ -36,9 +36,9 @@ import { ICONS, patronSigil } from '../../art/sprites/icons';
 import { rumbleAll } from '../../engine/rumble';
 import { ensurePlayers, slotColor } from '../players';
 import { devices } from '../../engine/devices';
-import { joinSeat, leaveSeat, slotText, DisconnectOverlay } from '../ui/joinPanel';
+import { joinSeat, leaveSeat, slotText, DisconnectOverlay, renderJoinHold, SlotBanners, flushJoinEvents } from '../ui/joinPanel';
 import { markSeen } from '../save';
-import { WEAPON_INFO } from '../ui/metaPanels';
+import { WEAPON_INFO, SeatWeapons } from '../ui/metaPanels';
 import type { Boss } from '../entities/boss';
 import { settings } from '../settings';
 import { Hints, hintsHooks } from '../ui/hints';
@@ -59,6 +59,8 @@ hintsHooks.busy = () => {
   return s instanceof GameScene && !!s.boss && !s.boss.dead && !s.cleared;
 };
 const ALL_PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
+/** a co-op hand choosing a reward stands anchored: teammates bump off it instead of pushing it */
+const CHOOSER_MASS = 1000;
 
 export class GameScene implements Scene, RoomHost {
   world!: World;
@@ -77,7 +79,7 @@ export class GameScene implements Scene, RoomHost {
   boss: Boss | null = null;
   private bossPhase = 0;
   /** co-op camera state (tether glow, catch-up timers) */
-  private coop: CoopCam = { glow: [], away: [] };
+  private coop: CoopCam = { glow: [], away: [], stuck: [] };
   /** set by the flow controller (hub/title) */
   onDeath?: (run: Run) => void;
   onVictory?: (run: Run) => void;
@@ -164,6 +166,7 @@ export class GameScene implements Scene, RoomHost {
     }
     if (run.roomIndex === 0 && !this.boss) this.titleCard = { title: tr(th.name), sub: tr(L(`第 ${run.floor + 1} 层`, `FLOOR ${run.floor + 1}`)), t: 0 };
     w.bus.emit('roomStart', { kind });
+    flushJoinEvents(w);
     // global hooks (PLAN2 §1.5): the run's first room, then every room (bus fresh, hand hooks registered)
     if (!run.started) { run.started = true; GameHooks.fire.runStart(run); }
     GameHooks.fire.roomStart({ w, run, scene: this, kind });
@@ -192,7 +195,8 @@ export class GameScene implements Scene, RoomHost {
     }, regen ? () => { if (lo.rerolls <= 0) return null; lo.rerolls--; return regen(); } : undefined, place);
     ov.rerollsLeft = () => lo.rerolls;
     // the choosing hand stands still while the others keep walking (GDD2 §5.8)
-    if (coop) { pl.locked = true; this.choosing.add(pl); }
+    // (and teammates walking into it do not shove it around: it is anchored while it chooses)
+    if (coop) { pl.locked = true; pl.mass = CHOOSER_MASS; this.choosing.add(pl); }
     this.openOverlay(ov);
   }
 
@@ -218,7 +222,9 @@ export class GameScene implements Scene, RoomHost {
     const quarters = slots.some((a) => slots.some((b) => a !== b && a % 2 === b % 2));
     const x = left ? 8 : 324, w = 308;
     if (!quarters) return { x, y: 44, w, h: 360 - 44 - 8 };
-    return { x, y: slot < 2 ? 4 : 184, w, h: 172 };  // bottom quarters hug the bottom edge
+    // quarters hug their corners (sized to their text) and leave a gap down the middle, where the
+    // shared camera keeps the hands
+    return { x: left ? 8 : 336, y: slot < 2 ? 4 : 184, w: 296, h: 172 };
   }
 
   /** after the overlays tick: free hands whose panel closed, open the next queued offer */
@@ -226,7 +232,9 @@ export class GameScene implements Scene, RoomHost {
     for (const p of [...this.choosing]) {
       if (this.panelOf(p.slot)) continue;
       this.choosing.delete(p);
-      if (!this.leaving) p.locked = false;
+      p.mass = 1;
+      // (during a boss intro everyone stays put until the intro ends)
+      if (!this.leaving && !this.boss?.inIntro) p.locked = false;
     }
     for (const [slot, q] of this.choiceQueue) if (q.length && !this.panelOf(slot)) q.shift()!();
   }
@@ -472,6 +480,9 @@ export class GameScene implements Scene, RoomHost {
     if (this.titleCard) { this.titleCard.t += dt; if (this.titleCard.t > 3.2) this.titleCard = null; }
     // a free device can join at any moment (it walks in at the next room); its press is consumed
     this.midRunJoin();
+    this.banners.update(dt);
+    // a seated pad that went away while no scene could pause for it (summary, cutscene, credits)
+    if (!this.leaving) for (const slot of devices.lostSlots()) this.onDeviceLost(slot);
     // overlays: the topmost full-screen blocking overlay owns input; toasts tick underneath.
     // Co-op choice panels each read their own hand's device, so they all tick together (unless a
     // full-screen menu such as pause sits on top of them).
@@ -500,14 +511,15 @@ export class GameScene implements Scene, RoomHost {
       // the pocket-watch button: your own build (co-op: whoever pressed it, unless they are
       // holding it to read a choice card)
       const by = w.players.find((q) => q.input.pressed('info')) ?? p;
-      if (!this.panelOf(by.slot)) { this.overlays.push(new RunInfoPanel(this.run, by.slot)); return; }
+      if (!this.panelOf(by.slot)) { this.overlays.push(new RunInfoPanel(this.run, by.slot, w.playerCount > 1 && by.input.kind !== 'bot' ? by.input : undefined)); return; }
     }
     w.update(dt);
     if (!w.frozen && !this.cleared) w.bus.emit('tick', { dt });
     if (this.boss) {
       // intro: camera on the boss, player waits
       if (this.boss.inIntro) { w.cam.follow(this.boss.x, this.boss.y - 30, dt, 4); this.hud.update(dt, w); this.postFx(dt, p); return; }
-      if (!this.cleared) for (const pl of w.players) if (pl.locked) pl.locked = false;
+      // after the intro everyone walks again — except a hand still choosing (a catch-up pick)
+      if (!this.cleared) for (const pl of w.players) if (pl.locked && !this.choosing.has(pl)) pl.locked = false;
       if (this.boss.phase !== this.bossPhase) { this.bossPhase = this.boss.phase; Hints.hold(4); }
       if (!this.cleared && this.boss.dead) { this.cleared = true; this.onClear(); }
       G.music.layer('boss', this.boss.phase > 0 && !this.boss.dead ? 1 : 0, this.boss.dead ? 4 : 2);
@@ -550,21 +562,32 @@ export class GameScene implements Scene, RoomHost {
   buildSlot = 0;
   leaveItem?: { label: L10n; act: () => void };
 
+  /** "Hand II joins at the next room" / "has left" plates (UI layer, top-centre) */
+  private banners = new SlotBanners();
+
   /**
-   * A free pad (A / Start) or keyboard (Enter) joins mid-run: the seat is taken now (the press does
-   * nothing else), the hand walks in at the next room with a fresh loadout and catches up with one
-   * memory pick per floor already climbed. Its pod waits in its corner until then.
+   * A free pad (A / Start) or keyboard (Enter) joins mid-run (next to a solo player: held for
+   * devices.JOIN_HOLD, so a solo player picking up another device just keeps playing): the seat is
+   * taken now (the press does nothing else), the hand walks in at the next room with a fresh
+   * loadout and catches up with one memory pick per floor already climbed. Its pod waits in its
+   * corner until then.
    */
   private midRunJoin() {
     if (this.deathT > 0 || this.leaving) return;
+    // a lost pad's "continue without them" (Start) is not a join
+    if (this.overlays.some((o) => o instanceof DisconnectOverlay)) return;
     const id = devices.joinPressed({ split: false });
     if (!id) return;
     const slot = devices.freeSlot();
     if (slot < 0) return;
     if (!joinSeat(id, slot)) return;
+    // the newcomer brings the weapon its seat took from the workshop rack
+    const cfg = this.run.config.players;
+    if (!cfg.some((pc) => pc.slot === slot) && !this.run.loadouts[slot]) cfg.push({ slot, device: id, hand: 'tick', weapon: SeatWeapons.get(slot) });
+    this.run.away.delete(slot);
+    this.run.recompute();
     this.hud.pending.push(slot);
-    const c = this.world.cam.centre();
-    this.world.fx.banner(c.x, c.y - 70, tr(slotText('joinsNext', slot)), slotColor(slot), 2.6);
+    this.banners.show(slot, slotText('joinsNext', slot), 3.2);
     sfx('cogWind');
   }
 
@@ -576,10 +599,15 @@ export class GameScene implements Scene, RoomHost {
       p.syncRun();
       for (const e of p.echoes) e.kill();
       w.fx.ring(p.x, p.y - 8, 3, 24, 0.4, p.color, 2);
-      w.fx.banner(p.x, p.y - 34, tr(slotText('left', slot)), 'K8', 1.6);
       p.kill();
       this.choosing.delete(p);
+      w.players = w.players.filter((q) => q !== p);
+      // the one hand left behind is solo now: stopped → its Last Second, a ghost → wound up
+      if (w.players.length === 1) Down.nowSolo(w.players[0]);
     }
+    this.run.away.add(slot);
+    this.run.recompute();
+    this.banners.show(slot, slotText('left', slot), 2.2, true);
     for (let i = this.overlays.length - 1; i >= 0; i--) { const o = this.overlays[i]; if (o instanceof ChoiceOverlay && o.place?.slot === slot) this.overlays.splice(i, 1); }
     this.choiceQueue.delete(slot);
     this.hud.pending = this.hud.pending.filter((s) => s !== slot);
@@ -648,7 +676,7 @@ export class GameScene implements Scene, RoomHost {
     this.hud.boss = this.boss && !this.boss.inIntro && !this.boss.dead ? this.boss : null;
     const ctx = r.ui2;
     // co-op: tether glow on the screen edges and arrows to anyone off screen (under the HUD)
-    if (this.world.playerCount > 1) renderCoopEdges(ctx, this.world, this.coop);
+    if (this.world.playerCount > 1) renderCoopEdges(ctx, this.world, this.coop, { boss: !!this.hud.boss });
     this.hud.render(r, this.world);
     // the floor / boss title card yields to menus and reward screens (it would sit half under them)
     if (this.titleCard && !blocking) this.renderTitleCard(ctx);
@@ -665,7 +693,10 @@ export class GameScene implements Scene, RoomHost {
       if (this.deathT > 2.4) G.font.draw(ctx, tr(UI.retry), 320, 196, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K8' });
       ctx.globalAlpha = 1;
     }
+    if (!blocking) this.banners.render(ctx, this.world.playerCount > 1 || this.hud.pending.length ? 40 : 30);
     for (const o of this.overlays) o.render(r);
+    // a free device holding its join button next to a solo player
+    renderJoinHold(ctx, { cy: 62 });
   }
 
   private renderTitleCard(ctx: CanvasRenderingContext2D) {

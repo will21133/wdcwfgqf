@@ -5,7 +5,7 @@ import { devices, MAX_SLOTS } from '../engine/devices';
 import type { DeviceId, PlayerInput } from '../engine/input';
 import { rumbleAll } from '../engine/rumble';
 import { rect } from './ui/draw';
-import type { ColorKey } from './ui/text';
+import { Text, type ColorKey } from './ui/text';
 import { SLOT_COLOR } from './ui/widgets';
 import { hintsHooks } from './ui/hints';
 import { noticesHooks } from './ui/notices';
@@ -19,21 +19,22 @@ export const ROMAN = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ'];
 
 /**
  * Tick's body-sprite scarf letters (S highlight, s base, z shade, Z deep shade) per slot.
- * Slot I keeps 1.0's rust red. Brass and night blue get a lighter top and a deeper bottom so the
- * scarf reads against the brass crown and the navy coat.
+ * Slot I keeps 1.0's rust red. Brass and night blue stay in their LIGHT shades only: the watch
+ * case's dark rim is B3 / B2 and the coat is U3 / U2 / U1, so a scarf shaded with those melts into
+ * the case (II) or reads as a collar on the coat (IV); a bright band under the dark rim does not.
  */
 export const SLOT_SCARF: Partial<Record<string, ColorKey>>[] = [
   {},
-  { S: 'B6', s: 'B5', z: 'B3', Z: 'B2' },
+  { S: 'B6', s: 'B5', z: 'B5', Z: 'B4' },
   { S: 'G4', s: 'G3', z: 'G2', Z: 'G1' },
-  { S: 'K10', s: 'U4', z: 'U3', Z: 'U1' },
+  { S: 'K10', s: 'U4', z: 'U4', Z: 'U4' },
 ];
 /** the flowing scarf tail: [near the neck, middle, tip] */
 export const SLOT_RAMP: [ColorKey, ColorKey, ColorKey][] = [
   ['R4', 'R3', 'R2'],
-  ['B6', 'B5', 'B3'],
+  ['B6', 'B5', 'B4'],
   ['G4', 'G3', 'G2'],
-  ['K9', 'U4', 'U3'],
+  ['K10', 'U4', 'U4'],
 ];
 
 export const slotColor = (slot: number): ColorKey => SLOT_COLOR[((slot % 4) + 4) % 4];
@@ -146,6 +147,22 @@ export function drawSlotPlate(ctx: CanvasRenderingContext2D, slot: number, x: nu
     rect(ctx, x + 2, y + 2, o.column, h - 4, tint);
     rect(ctx, x + 2 + o.column, y + 2, 1, h - 4, rim);
   }
+}
+
+/**
+ * "whose is this" tag for shared-looking panels in co-op (build panel, weapon rack, event window):
+ * a small slot plate with the hand's badge and numeral. (x, cy) = left edge, vertical centre;
+ * returns the width.
+ */
+export function drawSlotTag(ctx: CanvasRenderingContext2D, slot: number, x: number, cy: number): number {
+  const s = ((slot % 4) + 4) % 4;
+  const tw = Math.ceil(Text.measure(ROMAN[s], 'body').w);
+  const w = 6 + 7 + 4 + tw + 6, h = Math.max(15, Math.ceil(Text.lineH('body')) + 3);
+  const y = Math.round(cy - h / 2);
+  drawSlotPlate(ctx, s, x, y, w, h);
+  drawSlotBadge(ctx, s, x + 9, y + h / 2);
+  Text.draw(ctx, ROMAN[s], x + 16, y + h / 2, { color: slotColor(s), valign: 'middle' });
+  return w;
 }
 
 /** latin numerals for the tiny font (the CJK fonts carry Ⅰ–Ⅳ; tiny is latin only) */

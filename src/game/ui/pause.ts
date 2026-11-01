@@ -1,4 +1,6 @@
 // Pause menu, settings panel, and run-info (build) panel.
+import { drawSlotTag } from '../players';
+import type { PlayerInput } from '../../engine/input';
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Overlay } from './overlay';
 import { drawScaled, RARITY_TEXT } from './overlay';
@@ -123,8 +125,8 @@ export class RunInfoPanel implements Overlay {
   blocks = true;
   hidesNotes = true;
   sel = 0;
-  /** slot: whose build to show (F2c opens one per hand) */
-  constructor(private run: Run, private slot = 0) {}
+  /** slot: whose build to show; input: co-op, that hand's own device drives the panel */
+  constructor(private run: Run, private slot = 0, private input?: PlayerInput) {}
   private entries(): { icon: Sprite; name: string; desc: string; color: string; tag: string }[] {
     const run = this.run;
     const out: { icon: Sprite; name: string; desc: string; color: string; tag: string }[] = [];
@@ -140,8 +142,8 @@ export class RunInfoPanel implements Overlay {
     return out;
   }
   update(dt: number) {
-    const inp = G.input;
-    if (inp.pressed('cancel') || inp.pressed('info') || inp.pressed('pause')) { G.input.consume('pause'); sfx('uiBack'); return false; }
+    const inp = this.input ?? G.input;
+    if (inp.pressed('cancel') || inp.pressed('info') || inp.pressed('pause')) { inp.consume('pause'); sfx('uiBack'); return false; }
     const n = this.entries().length;
     const nav = inp.nav(dt);
     if (n) {
@@ -156,6 +158,8 @@ export class RunInfoPanel implements Overlay {
     panel(ctx, 40, 24, 560, 312);
     const run = this.run;
     G.font.draw(ctx, tr(L('本局构筑', 'Your Build')), 320, 34, { align: 'center', color: 'B5' });
+    // co-op: whose build
+    if (this.input || G.players.length > 1) drawSlotTag(ctx, this.slot, 52, 34 + Text.lineH('body') / 2);
     const lo = run.lo(this.slot);
     const m = lo.mods;
     const stats = [

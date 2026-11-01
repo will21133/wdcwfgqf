@@ -18,6 +18,7 @@
 // tempo 60 (P1) · keystone 70 (P4) · objective (top, P2) · chain (top, F3) · brass (corner) ·
 // slots (bottom, P4) · metaKey (pod, P6). F2 registers hp / sand as wrappers of 1.0's bar and
 // hourglasses until F3 replaces them, plus dash, special, brass, slots and the boss bar.
+import { devices } from '../../engine/devices';
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { World } from '../world/world';
 import type { Player } from '../entities/player';
@@ -52,7 +53,13 @@ export interface HudWidget {
 }
 
 const WIDGETS: HudWidget[] = [];
-const sorted = (a: HudArea) => WIDGETS.filter((w) => w.area === a).sort((x, y) => x.order - y.order);
+/** per-area widget lists in draw order, rebuilt only when a widget is (un)registered */
+const SORTED = new Map<HudArea, HudWidget[]>();
+const sorted = (a: HudArea): HudWidget[] => {
+  let l = SORTED.get(a);
+  if (!l) SORTED.set(a, (l = WIDGETS.filter((w) => w.area === a).sort((x, y) => x.order - y.order)));
+  return l;
+};
 
 /** pod geometry */
 const SOLO = { x: 8, y: 6, w: 176, h: 44 };
@@ -71,8 +78,9 @@ export const Hud = {
   register(w: HudWidget): void {
     const i = WIDGETS.findIndex((x) => x.id === w.id);
     if (i >= 0) WIDGETS[i] = w; else WIDGETS.push(w);
+    SORTED.clear();
   },
-  unregister(id: string): void { const i = WIDGETS.findIndex((x) => x.id === id); if (i >= 0) WIDGETS.splice(i, 1); },
+  unregister(id: string): void { const i = WIDGETS.findIndex((x) => x.id === id); if (i >= 0) WIDGETS.splice(i, 1); SORTED.clear(); },
   get(id: string): HudWidget | undefined { return WIDGETS.find((x) => x.id === id); },
   ids(): string[] { return WIDGETS.map((w) => w.id); },
   /** co-op layout this frame (more than one hand on screen) */
@@ -368,11 +376,18 @@ export class HUD {
       // a hand that joins while the scene runs: its pod drops into its corner (the hands that were
       // there when the scene began just sit in place)
       const slotsNow = [...w.players.map((p) => p.slot), ...this.pending];
+      const lost = devices.lostSlots();
       for (const s of slotsNow) if (!this.seen.has(s)) this.seen.set(s, this.primed ? G.time : -99);
       this.primed = true;
       for (const p of w.players) {
         const pod = this.slide(Hud.podRect(p.slot), p.slot);
         if (pod.compact) {
+          // a hand whose pad went away: the pod greys out and says so until it is back
+          if (lost.includes(p.slot)) {
+            drawPodFrame(ctx, p.slot, pod, p, true);
+            podStatus(ctx, pod, S('f2', 'podLost'), Math.floor(G.time * 2) % 2 ? 'K10' : 'K8');
+            continue;
+          }
           drawPodFrame(ctx, p.slot, pod, p, p.state === 'ghost');
           if (p.state === 'ghost') { podStatus(ctx, pod, S('f2', 'ghost'), 'K8'); continue; }
           if (p.state === 'stopped') {

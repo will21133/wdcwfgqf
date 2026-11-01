@@ -6,6 +6,7 @@ registerStrings('f2', {
   // solo Last Second (GDD2 §3.10)
   lastSecond: L('回溯！', 'REWIND!'),
   noSand: L('时砂不足', 'No sand left'),
+  lastSecondHint: L('回到刚才', 'Go back in time'),
   // stopped & revive (GDD2 §5.5); {n} = the stopped hand's numeral
   stopped: L('停摆', 'Stopped'),
   windUp: L('按住：上弦 {n}', 'Hold: wind up {n}'),
@@ -41,10 +42,13 @@ registerStrings('f2', {
   lostTitle: L('手柄 {n} 断开了', 'Controller {n} disconnected'),
   lostBody: L('重新连接手柄就能继续。', 'Reconnect it to carry on.'),
   lostDrop: L('不带他继续', 'Continue without them'),
+  podLost: L('手柄断开', 'Pad lost'),
   joined: L('第{n}根指针醒了', 'Hand {n} wakes'),
   joinsNext: L('第{n}根指针将在下个房间加入', 'Hand {n} joins at the next room'),
   left: L('第{n}根指针离开了', 'Hand {n} has left'),
   leaving: L('离开…', 'Leaving…'),
   holdLeave: L('按住：离开', 'Hold: leave'),
   leaveHand: L('离开（{n}）', 'Leave ({n})'),
+  // next to a solo player a free device joins by holding its join button (devices.JOIN_HOLD)
+  holdJoin: L('按住：第{n}根指针加入', 'Hold: Hand {n} joins'),
 });

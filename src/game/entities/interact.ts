@@ -24,10 +24,12 @@ export abstract class Interactable extends Entity {
   abstract interact(): void;
   /** can this hand use it (a rest bench each hand uses once, …) */
   accepts(_p: Player): boolean { return true; }
+  /** ghost hands may use it too (their own part chest: GDD2 §5.8, it is theirs either way) */
+  ghostOk = false;
   update(_dt: number) {
     let best: Player | null = null, bd = this.range;
     if (this.enabled) for (const p of this.world.players) {
-      if (p.hp <= 0 || p.locked || !this.accepts(p)) continue;
+      if ((p.hp <= 0 && !(this.ghostOk && p.state === 'ghost')) || p.locked || !this.accepts(p)) continue;
       const d = Math.hypot(p.x - this.x, p.y - this.y);
       if (d < bd) { bd = d; best = p; }
     }
@@ -120,6 +122,7 @@ export class Chest extends Interactable {
     super();
     this.x = x; this.y = y;
     this.range = 22;
+    this.ghostOk = true;
   }
   accepts(p: Player) { return this.owner === null || p.slot === this.owner || !this.world.players.some((q) => q.slot === this.owner); }
   prompt() { return this.label(); }

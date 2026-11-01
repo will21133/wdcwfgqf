@@ -88,6 +88,13 @@ export class FX {
   }
 
   banner(x: number, y: number, text: string, color = 'K10', dur = 1.1) {
+    // a banner landing on one that is still up (two hands' picks, a pick and "cleared") stacks
+    // above it instead of printing over it
+    for (let k = 0; k < 4; k++) {
+      const hit = this.banners.find((b) => b.t < b.dur * 0.8 && Math.abs(b.x - x) < 70 && Math.abs(b.y - b.t / b.dur * 8 - y) < 13);
+      if (!hit) break;
+      y = hit.y - (hit.t / hit.dur) * 8 - 14;
+    }
     this.banners.push({ text, x, y, t: 0, dur, color });
   }
 

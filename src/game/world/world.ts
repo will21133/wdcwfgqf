@@ -44,7 +44,22 @@ export class World {
   }
   get playerCount(): number { return this.players.length; }
   /** players still standing (not stopped, not a ghost) */
-  alive(): Player[] { return this.players.filter((p) => p.state === 'alive'); }
+  alive(): Player[] {
+    // doors, the camera and the room loop ask several times a tick: one array per tick
+    if (this.aliveAt === this.tickNo) {
+      let n = 0, ok = true;
+      for (const p of this.players) if (p.state === 'alive') n++;
+      for (const p of this.aliveList) if (p.state !== 'alive' || p.dead) ok = false;
+      if (ok && n === this.aliveList.length) return this.aliveList;
+    }
+    this.aliveAt = this.tickNo;
+    this.aliveList = this.players.filter((p) => p.state === 'alive');
+    return this.aliveList;
+  }
+  private aliveAt = -1;
+  private aliveList: Player[] = [];
+  /** fixed ticks this world has run */
+  tickNo = 0;
   /** this room's seeded stream (derived from run.rng); use it for gameplay choices, never Math.random */
   rng: RNG;
   particles = new Particles();
@@ -157,7 +172,8 @@ export class World {
    * held for at least 1.5 s unless the target falls. Solo: the player (1.0).
    */
   targetFor(e: Actor): Actor | null {
-    if (this.players.length <= 1) {
+    // solo: the player (1.0), unless one of their echoes is taunting (P5 Mina) — then score it too
+    if (this.players.length <= 1 && !this.anyTaunt()) {
       const p = this.players[0];
       return p && p.state === 'alive' ? p : null;
     }
@@ -181,6 +197,10 @@ export class World {
     }
     this.aggro.set(e.id, { target: best, slot, until: this.time + AGGRO_LOCK });
     return best;
+  }
+  private anyTaunt(): boolean {
+    for (const p of this.players) for (const ec of p.echoes) if (!ec.dead && ((ec as unknown as { taunt?: number }).taunt ?? 0) > 0) return true;
+    return false;
   }
   /** slot of the hand an enemy is after (telegraph tip dots); -1 when none */
   targetSlotFor(e: Actor): number {
@@ -323,6 +343,7 @@ export class World {
   pan(x: number) { return Math.max(-0.8, Math.min(0.8, (x - this.cam.x) / (VIEW_W * 0.6))); }
 
   update(dt: number) {
+    this.tickNo++;
     this.flushAdds();
     this.cam.update(dt);
     if (this.stop > 0) {

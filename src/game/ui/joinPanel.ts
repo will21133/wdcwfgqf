@@ -5,12 +5,15 @@
 //   DisconnectOverlay   a joined pad went away: the game pauses until it comes back, or the
 //                       others press Start / Esc to carry on without that hand.
 //   joinSeat / leaveSeat  claim / release a slot and tell the current room's bus (playerJoin /
-//                       playerLeave), so notes and eggs can react.
+//                       playerLeave), so notes and eggs can react. Seats taken on the title (no
+//                       world yet) announce themselves on the next world (flushJoinEvents).
+//   renderJoinHold      next to a solo player a free device joins by HOLDING its join button
+//                       (devices.JOIN_HOLD): the prompt that fills while it is held.
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Overlay } from './overlay';
 import type { World } from '../world/world';
 import { G, sfx } from '../G';
-import { devices, MAX_SLOTS } from '../../engine/devices';
+import { devices, MAX_SLOTS, JOIN_HOLD } from '../../engine/devices';
 import { raw, padIndex, type DeviceId, type PlayerInput } from '../../engine/input';
 import { tr, type L10n } from '../i18n';
 import { S } from '../strings';
@@ -47,13 +50,20 @@ function currentWorld(): World | null {
   return s?.world ?? null;
 }
 
+/** seats taken while no world was on screen (the title): announced on the next world's bus */
+const pendingJoins: number[] = [];
+
 /** seat a device in a free slot (or `slot`); emits playerJoin on the current room's bus */
 export function joinSeat(id: DeviceId, slot = devices.freeSlot()): PlayerInput | null {
   if (slot < 0 || slot >= MAX_SLOTS) return null;
   const inp = devices.claim(id, slot);
+  // refused: that device is the one the solo hand is using
+  if (inp.slot !== slot) return null;
   // the press that joined must not also act (dash / confirm / pause) on the same tick
   for (const a of ['confirm', 'dash', 'pause', 'attack', 'interact', 'cancel', 'special'] as const) inp.consume(a);
-  currentWorld()?.bus.emit('playerJoin', { slot });
+  const w = currentWorld();
+  if (w) w.bus.emit('playerJoin', { slot });
+  else if (!pendingJoins.includes(slot)) pendingJoins.push(slot);
   return inp;
 }
 
@@ -61,10 +71,98 @@ export function joinSeat(id: DeviceId, slot = devices.freeSlot()): PlayerInput |
 export function leaveSeat(slot: number) {
   if (!devices.input(slot)) return;
   devices.release(slot);
+  const i = pendingJoins.indexOf(slot);
+  if (i >= 0) { pendingJoins.splice(i, 1); return; }   // joined and left on the title: nothing to tell
   currentWorld()?.bus.emit('playerLeave', { slot });
 }
 
+/** the first world after the title: tell its bus about the hands that sat down there */
+export function flushJoinEvents(w: World) {
+  for (const slot of pendingJoins.splice(0)) if (devices.input(slot)) w.bus.emit('playerJoin', { slot });
+}
+
+/** the glyph a device joins with (pads A, keyboard Enter, halves F / K) */
+function drawJoinKey(ctx: CanvasRenderingContext2D, id: DeviceId, x: number, y: number): number {
+  if (id.startsWith('pad')) return drawPadGlyph(ctx, 'A', x, y);
+  return drawKeycap(ctx, id === 'kbL' ? 'F' : id === 'kbR' ? 'K' : 'ENTER', x, y);
+}
+function joinKeyW(id: DeviceId): number { return id.startsWith('pad') ? padGlyphW('A') : keycapW(id === 'kbL' ? 'F' : id === 'kbR' ? 'K' : 'ENTER'); }
+
+/**
+ * Next to a solo player, a free device joins by holding its join button (GDD2 §5.1 hot join;
+ * a tap would also be the solo player's dash / confirm, so it must be deliberate). While it is
+ * held a plate fills in the new hand's colour; after a tap, the hub shows the hint briefly.
+ * UI layer, 640×360 logical; `cy` is the plate's vertical centre.
+ */
+export function renderJoinHold(ctx: CanvasRenderingContext2D, o: { cy?: number; hint?: boolean } = {}) {
+  const h = devices.joinHold;
+  const hint = !h && o.hint ? devices.joinHint : null;
+  if (!h && !hint) return;
+  const id = (h ?? hint)!.id, slot = (h ?? hint)!.slot;
+  if (slot < 0) return;
+  const label = slotText('holdJoin', slot);
+  const ls = Text.lineH('body'), ph = promptH();
+  const kw = joinKeyW(id), tw = Math.ceil(Text.measure(label, 'body').w);
+  const w = 22 + kw + 6 + tw + 12, hh = Math.max(ph, Math.ceil(ls)) + 12;
+  const x = Math.round(320 - w / 2), y = Math.round((o.cy ?? 62) - hh / 2);
+  const a = h ? 1 : clamp(hint!.k * 3, 0, 1);
+  ctx.globalAlpha = a;
+  drawSlotPlate(ctx, slot, x, y, w, hh, { column: 14 });
+  drawSlotBadge(ctx, slot, x + 9, y + hh / 2 - 1);
+  const ky = Math.round(y + (hh - 4 - ph) / 2);
+  drawJoinKey(ctx, id, x + 22, ky);
+  Text.draw(ctx, label, x + 22 + kw + 6, ky + ph / 2, { color: 'K10', valign: 'middle' });
+  // the fill: a bar along the bottom edge in the new hand's colour
+  const bw = w - 20, k = h ? h.k : 0;
+  rect(ctx, x + 18, y + hh - 5, bw, 2, 'K0');
+  if (k > 0) rect(ctx, x + 18, y + hh - 5, Math.max(1, Math.round(bw * k)), 2, slotColor(slot));
+  ctx.globalAlpha = 1;
+}
+export { JOIN_HOLD };
+
+/**
+ * UI-layer banners that name a hand (hot join "Hand II wakes", "joins at the next room", "has
+ * left"): a slot plate with the hand's badge and a 12px line, top-centre under the purse; it drops
+ * in, holds, then fades. Several stack downwards.
+ */
+export class SlotBanners {
+  private list: { slot: number; text: L10n; t: number; dur: number; dim: boolean }[] = [];
+  show(slot: number, text: L10n, dur = 2.8, dim = false) {
+    this.list = this.list.filter((b) => b.slot !== slot);
+    this.list.push({ slot, text, t: 0, dur, dim });
+  }
+  update(dt: number) {
+    for (const b of this.list) b.t += dt;
+    this.list = this.list.filter((b) => b.t < b.dur);
+  }
+  render(ctx: CanvasRenderingContext2D, top = 46) {
+    const lb = Text.lineH('body');
+    const hh = Math.ceil(lb) + 10;
+    let y = top;
+    for (const b of this.list) {
+      const kIn = ease.outCubic(clamp(b.t / 0.22, 0, 1)), kOut = clamp((b.dur - b.t) / 0.45, 0, 1);
+      const a = Math.min(kIn, kOut);
+      if (a <= 0) continue;
+      const tw = Math.ceil(Text.measure(b.text, 'body').w);
+      const w = tw + 46;
+      const x = Math.round(320 - w / 2), yy = Math.round(y - (1 - kIn) * 8);
+      ctx.globalAlpha = a;
+      drawSlotPlate(ctx, b.slot, x, yy, w, hh, { column: 16, dim: b.dim });
+      drawSlotBadge(ctx, b.slot, x + 10, yy + hh / 2, b.dim ? 'K7' : undefined);
+      Text.draw(ctx, b.text, x + 26 + tw / 2, yy + hh / 2, { align: 'center', color: b.dim ? 'K8' : 'K10', valign: 'middle' });
+      // a short glint runs along the lit top edge as it lands
+      if (!b.dim && b.t < 0.6) { const gx = x + 4 + Math.round((w - 12) * ease.outCubic(b.t / 0.6)); rect(ctx, gx, yy + 1, 4, 1, 'W'); }
+      ctx.globalAlpha = 1;
+      y += hh + 4;
+    }
+  }
+}
+
 // ───────────────────────── title: the join panel ─────────────────────────
+/** everyone ready → this long, then the workshop */
+const GO_AFTER = 1.2;
+/** …and nobody has left for this long (a hand that sat down is not ready yet, which gates it anyway) */
+const REJOIN_GRACE = 3;
 interface SeatUi { ready: boolean; t: number; readyT: number; justJoined: boolean }
 
 export class JoinPanel implements Overlay {
@@ -74,16 +172,21 @@ export class JoinPanel implements Overlay {
   private seats: (SeatUi | null)[] = [null, null, null, null];
   private goT = -1;
   private closing = -1;
+  /** seconds since a hand left (nobody launches while it may be sitting back down) */
+  private sinceChange = 9;
 
   constructor(private onGo: () => void) {
     sfx('uiOpen');
+    // the lobby: every seat reads only its own device; a free device's tap joins
+    devices.setLobby(true);
     // hands already seated (back from the workshop) keep their seats, not ready yet
     for (const p of devices.players) if (p.kind !== 'bot') this.seats[p.slot] = { ready: false, t: 1, readyT: -1, justJoined: false };
   }
 
   update(dt: number): boolean {
     this.t += dt;
-    if (this.closing >= 0) { this.closing += dt; return this.closing < 0.25; }
+    this.sinceChange += dt;
+    if (this.closing >= 0) { this.closing += dt; devices.setLobby(false); return this.closing < 0.25; }
     if (this.t < 0.2) return true;
     // a free device presses its join button → the next free slot
     const id = devices.joinPressed();
@@ -99,7 +202,7 @@ export class JoinPanel implements Overlay {
     // each seated hand: confirm = ready, cancel = not ready / leave
     for (let s = 0; s < MAX_SLOTS; s++) {
       const ui = this.seats[s], inp = devices.input(s);
-      if (ui && !inp) { this.seats[s] = null; continue; }
+      if (ui && !inp) { this.seats[s] = null; this.sinceChange = 0; continue; }
       if (!inp || inp.kind === 'bot') continue;
       if (!ui) { this.seats[s] = { ready: false, t: 1, readyT: -1, justJoined: false }; continue; }
       ui.t += dt;
@@ -110,7 +213,7 @@ export class JoinPanel implements Overlay {
       if (cancel) {
         inp.consume('cancel');
         if (ui.ready) { ui.ready = false; ui.readyT = -1; sfx('uiBack'); }
-        else { leaveSeat(s); this.seats[s] = null; sfx('uiBack'); }
+        else { leaveSeat(s); this.seats[s] = null; this.sinceChange = 0; sfx('uiBack'); }
         this.goT = -1;
         continue;
       }
@@ -124,11 +227,12 @@ export class JoinPanel implements Overlay {
     const seated = this.seats.filter(Boolean) as SeatUi[];
     // nobody seated: back closes the panel
     if (!seated.length && G.input.pressed('cancel')) { G.input.consume('cancel'); sfx('uiBack'); this.closing = 0; return true; }
-    // everyone seated is ready → a beat, then off to the workshop
+    // everyone seated is ready → a beat, then off to the workshop (a hand that just left gets a
+    // moment to sit back down before the others go)
     if (seated.length && seated.every((u) => u.ready)) {
       if (this.goT < 0) { this.goT = 0; sfx('chimeRing', { vol: 0.5 }); }
       this.goT += dt;
-      if (this.goT > 0.9) { this.closing = 0; this.onGo(); }
+      if (this.goT > GO_AFTER && this.sinceChange > REJOIN_GRACE) { this.closing = 0; devices.setLobby(false); this.onGo(); }
     } else this.goT = -1;
     return true;
   }
@@ -160,6 +264,11 @@ export class JoinPanel implements Overlay {
     const seated = this.seats.filter(Boolean) as SeatUi[];
     if (seated.length && seated.every((u) => u.ready)) {
       Text.draw(ctx, S('f2', 'allReady'), 320, fy + promptH() / 2, { align: 'center', color: Math.floor(this.t * 6) % 2 ? 'B6' : 'B5', valign: 'middle' });
+      // how long until we go: a thin brass bar under the line
+      const left = Math.max(GO_AFTER - Math.max(0, this.goT), REJOIN_GRACE - this.sinceChange), tot = Math.max(GO_AFTER, REJOIN_GRACE);
+      const bw = 120, by = Math.round(fy + promptH() + 3);
+      rect(ctx, 320 - bw / 2, by, bw, 2, 'K2');
+      rect(ctx, 320 - bw / 2, by, Math.round(bw * clamp(1 - left / tot, 0, 1)), 2, 'B5');
     } else if (seated.length) {
       Text.draw(ctx, S('f2', 'waitReady'), 320, fy + promptH() / 2, { align: 'center', color: 'K8', valign: 'middle' });
     } else {
@@ -229,24 +338,28 @@ export class JoinPanel implements Overlay {
         by += ph + 4;
       }
     } else {
-      // how to join: every kind of device's join button, centred in the space under the plinth
+      // how to join: only the join buttons that can seat someone right now (a keyboard that is
+      // already taken does not advertise Enter / F / K), centred in the space under the plinth
       const ph = promptH();
-      const gh = lb + 4 + ph + 6 + ph;
+      const kbm = devices.isFree('kbm'), kbl = devices.isFree('kbL'), kbr = devices.isFree('kbR');
+      const split = kbl || kbr;
+      const gh = lb + 4 + ph + (split ? 6 + ph : 0);
       ty = Math.round(ty + Math.max(0, (y + h - 10 - ty - gh) * 0.4));
       Text.draw(ctx, S('f2', 'pressJoin'), px, ty, { align: 'center', color: Math.floor(this.t * 2 + s) % 2 ? 'K10' : 'K8' });
       ty += lb + 4;
       const gA = padGlyphW('A'), kE = keycapW('ENTER');
-      let bx = Math.round(px - (gA + 6 + kE) / 2);
+      let bx = Math.round(px - (gA + (kbm ? 6 + kE : 0)) / 2);
       drawPadGlyph(ctx, 'A', bx, ty);
-      drawKeycap(ctx, 'ENTER', bx + gA + 6, ty);
+      if (kbm) drawKeycap(ctx, 'ENTER', bx + gA + 6, ty);
+      if (!split) return;
       ty += ph + 6;
-      const kF = keycapW('F'), kK = keycapW('K');
-      const label = S('f2', 'splitKb');
+      const kF = kbl ? keycapW('F') : 0, kK = kbr ? keycapW('K') : 0, gap = kbl && kbr ? 3 : 0;
+      const label = S('f2', kbl && kbr ? 'splitKb' : kbl ? 'devKbL' : 'devKbR');
       const lw = Math.ceil(Text.measure(label, 'small').w);
-      bx = Math.round(px - (kF + 3 + kK + 5 + lw) / 2);
-      drawKeycap(ctx, 'F', bx, ty);
-      drawKeycap(ctx, 'K', bx + kF + 3, ty);
-      Text.draw(ctx, label, bx + kF + 3 + kK + 5, ty + ph / 2, { size: 'small', color: 'K7', valign: 'middle' });
+      bx = Math.round(px - (kF + gap + kK + 5 + lw) / 2);
+      if (kbl) drawKeycap(ctx, 'F', bx, ty);
+      if (kbr) drawKeycap(ctx, 'K', bx + kF + gap, ty);
+      Text.draw(ctx, label, bx + kF + gap + kK + 5, ty + ph / 2, { size: 'small', color: 'K7', valign: 'middle' });
     }
   }
 }
@@ -284,14 +397,31 @@ export class DisconnectOverlay implements Overlay {
     const dev = this.device;
     // the seat is gone, or the pad is back: carry on
     if (!dev || !dev.startsWith('pad') || raw.pads[padIndex(dev)]?.connected) { G.audio.muffle(false); sfx('uiSelect'); return false; }
-    if (this.t > 0.3 && G.input.pressed('pause')) {
-      G.input.consume('pause');
+    // GDD2 §5.1: anyone still here presses Start (keyboards: their pause key) to go on without them
+    const others = this.others();
+    // (nobody else seated but bots: any keyboard Esc or any pad's Start)
+    const go = others.length ? others.find((p) => p.pressed('pause')) : raw.pressed.has('Escape') || raw.pads.some((p) => p?.connected && p.pressed.has(9)) ? G.input : null;
+    if (this.t > 0.3 && go) {
+      go.consume('pause');
       this.drop(this.slot);
       G.audio.muffle(false);
       sfx('uiBack');
       return false;
     }
     return true;
+  }
+  /** the hands still at the controls */
+  private others(): PlayerInput[] { return devices.humans.filter((p) => p.slot !== this.slot); }
+  /** one pause prompt per kind of device still seated (a pad's Start, a keyboard's Esc / Backspace) */
+  private prompts(): PlayerInput[] {
+    const out: PlayerInput[] = [], seen = new Set<string>();
+    for (const p of this.others()) {
+      const key = p.kind === 'pad' ? 'pad' : p.device;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
   }
   render(r: Renderer) {
     const ctx = r.ui2;
@@ -302,7 +432,10 @@ export class DisconnectOverlay implements Overlay {
     const s = this.slot;
     const lb = Text.lineH('body');
     const title = slotText('lostTitle', s, true), body = S('f2', 'lostBody'), drop = S('f2', 'lostDrop');
-    const w = Math.max(260, Math.ceil(Math.max(Text.measure(title, 'body').w, Text.measure(body, 'body').w, promptW('pause') + 4 + Text.measure(drop, 'body').w)) + 60);
+    const who: (PlayerInput | null)[] = this.prompts();
+    if (!who.length) who.push(null);
+    const keysW = who.reduce((a, p, i) => a + promptW('pause', p) + (i ? 9 : 0), 0);
+    const w = Math.max(260, Math.ceil(Math.max(Text.measure(title, 'body').w, Text.measure(body, 'body').w, keysW + 4 + Text.measure(drop, 'body').w)) + 60);
     const h = Math.ceil(16 + lb + 8 + lb + 14 + promptH() + 14);
     const x = Math.round(320 - w / 2), y = Math.round(160 - h / 2);
     drawSlotPlate(ctx, s, x, y, w, h, { column: 22 });
@@ -315,8 +448,12 @@ export class DisconnectOverlay implements Overlay {
     ty += lb + 6;
     Text.draw(ctx, body, x + 34, ty, { color: 'K9' });
     ty += lb + 12;
-    drawPrompt(ctx, 'pause', x + 34, ty);
-    Text.draw(ctx, drop, x + 34 + promptW('pause') + 4, ty + promptH() / 2, { color: 'K8', valign: 'middle' });
+    let kx = x + 34;
+    who.forEach((p, i) => {
+      if (i) { Text.draw(ctx, '/', kx + 2, ty + promptH() / 2, { color: 'K6', valign: 'middle' }); kx += 9; }
+      kx += drawPrompt(ctx, 'pause', kx, ty, p);
+    });
+    Text.draw(ctx, drop, kx + 4, ty + promptH() / 2, { color: 'K8', valign: 'middle' });
     ctx.globalAlpha = 1;
   }
 }
