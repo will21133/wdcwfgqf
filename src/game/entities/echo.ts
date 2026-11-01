@@ -492,8 +492,7 @@ export class Echo extends Entity implements Wielder {
     // rim: dashed until armed, then solid and pulsing (GDD2 §3.5); a Perfect Rewind's echo has a
     // brass rim on the unlit layer, bright enough to read in any light (D12)
     const pulse = this.armed ? 0.7 + 0.3 * Math.sin(this.armedT * (8 + standK * 24)) : 0.55;
-    const rimC = this.gilded ? 'B5' : this.armed ? 'C4' : 'C2';
-    drawSprite(r.u, outlineOf(spr, rimC, this.armed || this.gilded ? 'solid' : 'dash'), this.x, this.y, { flip: this.flip, alpha: (this.gilded ? Math.max(0.85, pulse) : pulse) * fade });
+    drawSprite(r.u, echoRim(spr, this.armed, this.gilded), this.x, this.y, { flip: this.flip, alpha: (this.gilded ? Math.max(0.85, pulse) : pulse) * fade });
     if (this.gilded && Math.floor(this.age * 6) % 3 === 0) { r.u.fillStyle = col('B6'); r.u.fillRect(Math.round(this.x) + (Math.floor(this.age * 6) % 2 ? 3 : -4), Math.round(this.y) - 18, 1, 1); }
     // additive ghost glow
     r.g.globalCompositeOperation = 'lighter';
@@ -593,6 +592,35 @@ export class Echo extends Entity implements Wielder {
     }
     u.globalAlpha = 1;
   }
+}
+
+/** an echo's rim: dashed C2 until armed, then solid C4; a gilded (Perfect Rewind) echo's is brass */
+function echoRim(spr: Sprite, armed: boolean, gilded: boolean): Sprite {
+  return outlineOf(spr, gilded ? 'B5' : armed ? 'C4' : 'C2', armed || gilded ? 'solid' : 'dash');
+}
+
+/**
+ * One frame of a hand drawn as its echo on a single canvas (ONBOARD2 §7.3): the cyan body
+ * (the same ECHO_RAMP recolour Echo.render uses), the rim (dashed until armed), and the owner's
+ * scarf colour as a two-pixel tail at the neck. The rewind guide's loops, the Hall's curtain and
+ * the death replay draw echoes with it, so they look exactly like the game's.
+ */
+export function drawEchoFrame(ctx: CanvasRenderingContext2D, spr: Sprite, x: number, y: number, alpha: number, slotColor?: string | null,
+  o: { flip?: boolean; armed?: boolean; gilded?: boolean; /** armed seconds: the spinning ◆ over its head */ diamondT?: number } = {}): void {
+  if (alpha <= 0) return;
+  const flip = !!o.flip;
+  if (slotColor) {
+    // the scarf's tail streams behind the neck (Scarf draws the real one; 2 px is enough at 1×)
+    const nx = Math.round(x) + (flip ? 3 : -4), ny = Math.round(y) - 15;
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.fillStyle = col(slotColor);
+    ctx.fillRect(nx, ny, 2, 1);
+    ctx.fillRect(nx + (flip ? 1 : -1), ny + 1, 2, 1);
+    ctx.globalAlpha = 1;
+  }
+  drawSprite(ctx, spr.recolor(ECHO_RAMP), x, y, { flip, alpha });
+  drawSprite(ctx, echoRim(spr, !!o.armed, !!o.gilded), x, y, { flip, alpha: Math.min(1, alpha * (o.armed ? 1.25 : 0.8)) });
+  if (o.diamondT !== undefined) { ctx.globalAlpha = alpha; diamond(ctx, Math.round(x), Math.round(y) - 27, o.diamondT, false); ctx.globalAlpha = 1; }
 }
 
 /** ◆ spinning: 7 px tall, its width runs 7 → 5 → 3 → 1 → 3 → 5 (a coin turning); hollow while a

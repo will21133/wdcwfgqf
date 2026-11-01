@@ -1,0 +1,30 @@
+[
+ {
+  "eval": "1"
+ },
+ {
+  "waitFor": "window.__tut && __tut.where==='title'",
+  "ms": 60000
+ },
+ {
+  "shot": "title"
+ },
+ {
+  "eval": "__tut.freeze(); 1"
+ },
+ {
+  "shot": "example_frozen"
+ },
+ {
+  "eval": "__tut.thaw(); 1"
+ },
+ {
+  "eval": "(async()=>{ /* your keys here, e.g. */ await __tut.tap('Enter'); return __tut.where })()"
+ },
+ {
+  "eval": "(async()=>{ return await __tut.wait('caption', 30) })()"
+ },
+ {
+  "shot": "after_first_caption"
+ }
+]

@@ -10,6 +10,23 @@ import type { Echo } from '../entities/echo';
 
 export type { BotInput };
 
+/**
+ * What a brain leaves to someone else (ONBOARD2 §3.9): the onboarding autopilot hands the fight to
+ * the bot but presses Rewind / Fork itself when the coach says so. Per slot; defaults = the bot does it all.
+ */
+export interface BotOpts {
+  /** never rewind (tap, scrub, Last Second, pull back) */
+  noRewind?: boolean;
+  /** never Fork (nor walk back into its fork echo) */
+  noFork?: boolean;
+}
+const slotOpts: BotOpts[] = [];
+/** set (or clear with null) what slot's brain must not do; botStep's own `o` argument wins */
+export function setBotOpts(slot: number, o: BotOpts | null): void { slotOpts[slot] = o ?? {}; }
+export function botOptsOf(slot: number): BotOpts { return slotOpts[slot] ?? {}; }
+// test scripts (tools/scripts/onboard) hold a co-op bot's rewind back so the coach can be seen
+(window as unknown as { __botOpts?: typeof setBotOpts }).__botOpts = setBotOpts;
+
 export const botLog: string[] = [];
 (window as any).__botLog = botLog;
 
@@ -78,8 +95,11 @@ function pathStep(s: GameScene, px: number, py: number, gx: number, gy: number):
   return { x: (next % W) * 16 + 8, y: ((next / W) | 0) * 16 + 8 };
 }
 
-/** one tick of thinking for the bot that drives player `p` */
-export function botStep(s: GameScene, p: Player, dt: number) {
+/**
+ * one tick of thinking for the bot that drives player `p` (o: what it must leave alone; default
+ * setBotOpts for its slot)
+ */
+export function botStep(s: GameScene, p: Player, dt: number, o: BotOpts = botOptsOf(p.slot)) {
   const b: BotInput = { move: { x: 0, y: 0 }, aimX: 0, aimY: 0, held: new Set(), pressed: new Set() };
   p.input.bot = b;
   const w = s.world;
@@ -95,7 +115,7 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   br.rwCd -= dt;
   br.forkCd -= dt;
   // a rewind being held keeps being held until its planned release (a tap is one tick)
-  if (br.rwHold > 0) {
+  if (br.rwHold > 0 && !o.noRewind) {
     b.held.add('rewind');
     br.rwHold -= dt;
     return;
@@ -103,9 +123,9 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   const roomT = br.roomT;
   const tap = (a: Action) => { if (br.tapT <= 0) { b.pressed.add(a); br.tapT = 0.35; } };
   // stopped: try to rewind out (Last Second / self-rescue), otherwise wait for a teammate
-  if (p.state === 'stopped' && !s.overlays.some((o) => o.blocks)) { if (Math.random() < 0.04) b.pressed.add('rewind'); if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
+  if (p.state === 'stopped' && !s.overlays.some((ov) => ov.blocks)) { if (!o.noRewind && Math.random() < 0.04) b.pressed.add('rewind'); if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
   // overlays / death / this hand's own co-op choice panel: confirm
-  if (s.overlays.some((o) => o.blocks) || (p.hp <= 0 && p.state !== 'ghost') || s.panelOf(p.slot)) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
+  if (s.overlays.some((ov) => ov.blocks) || (p.hp <= 0 && p.state !== 'ghost') || s.panelOf(p.slot)) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
   const go = (x: number, y: number) => {
     const step = pathStep(s, p.x, p.y, x, y);
     const tx = step ? step.x : x, ty = step ? step.y : y;
@@ -118,7 +138,7 @@ export function botStep(s: GameScene, p: Player, dt: number) {
     let down: Player | null = null, dd = 320;
     for (const q of w.players) if (q !== p && q.state === 'stopped') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; down = q; } }
     if (down) {
-      const pull = p.slot % 2 === 0 && down.down.t < 2.4 && s.run.lo(p.slot).sand >= 100;
+      const pull = !o.noRewind && p.slot % 2 === 0 && down.down.t < 2.4 && s.run.lo(p.slot).sand >= 100;
       if (pull) {
         if (dd > 30) go(down.x, down.y);
         else { b.held.add('rewind'); if (!p.pull) b.pressed.add('rewind'); }
@@ -145,17 +165,17 @@ export function botStep(s: GameScene, p: Player, dt: number) {
     if (Math.random() < 0.01) b.pressed.add('special');
     const danger = enemies.some((e) => (e as any).attacking && Math.hypot(e.x - p.x, e.y - p.y) < 50);
     if (danger && Math.random() < 0.3) { b.pressed.add('dash'); b.move = { x: -Math.sin(a) * side, y: Math.cos(a) * side }; }
-    const hold = planRewind(p, br);
+    const hold = o.noRewind ? 0 : planRewind(p, br);
     if (hold > 0) { b.pressed.add('rewind'); b.held.add('rewind'); br.rwHold = hold - dt; return; }
     // Fork, then go back into the armed echo when it stands at its end (a Paradox)
-    if (planFork(p, br, bd)) {
+    if (!o.noFork && planFork(p, br, bd)) {
       b.pressed.add('fork');
       br.forkEcho = null;
       const before = p.echoes.length;
       w.after(0, () => { if (p.echoes.length > before || p.lastEcho?.kind === 'fork') br.forkEcho = p.echoes.filter((e) => e.kind === 'fork').pop() ?? null; });
       return;
     }
-    const fe = br.forkEcho;
+    const fe = o.noFork ? null : br.forkEcho;
     if (fe && (fe.dead || fe.phase === 'recall')) br.forkEcho = null;
     else if (fe && fe.armed && fe.phase === 'stand') { go(fe.x, fe.y); return; }
     return;

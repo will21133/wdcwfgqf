@@ -21,6 +21,17 @@ import type { Sprite } from '../../engine/gfx/sprite';
 import { rumbleAll } from '../../engine/rumble';
 import { ControlsPanel } from './controls';
 import { GameHooks } from '../hooks';
+// the F4b package (coach, death card, rewind guide, Rehearsal Hall, late ladder): pause.ts is F4b's
+// only file every scene loads, so its entry hangs here (the lead may move it into onboard/index.ts)
+import '../onboard/f4b';
+import { S } from '../strings';
+import { Onboard } from '../onboard/core';
+import { Lessons } from '../onboard/lesson';
+import { Panels } from './panels';
+import { profile, saveProfile } from '../save';
+import { Flags } from '../meta/registry';
+import '../strings/coach';
+import '../strings/onboard';
 
 interface PauseHost {
   run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void; inHub?: boolean;
@@ -28,6 +39,23 @@ interface PauseHost {
   leaveItem?: { label: import('../i18n').L10n; act: () => void };
   /** whose build "Your Build" shows (co-op: whoever opened the menu) */
   buildSlot?: number;
+}
+
+/** settings → "reset tutorial progress" (ONBOARD2 §5.10): asks once more, then Onboard.reset() */
+function resetRow(): MenuItem {
+  let armed = false, done = false;
+  return {
+    label: () => tr(done ? S('coach', 'setResetDone') : armed ? S('coach', 'setResetConfirm') : S('coach', 'setReset')),
+    act: () => { if (done) return; if (!armed) { armed = true; return; } Onboard.reset(); done = true; sfx('uiSelect'); },
+  };
+}
+
+/** "I know how to play" from the pause menu: skipAll(), but the prologue's own flag stays as it was */
+function skipTeaching() {
+  const pd = profile.prologueDone;
+  Onboard.skipAll();
+  profile.prologueDone = pd;
+  saveProfile();
 }
 
 export function settingsItems(onBack: () => void, openControls?: () => void): MenuItem[] {
@@ -74,6 +102,22 @@ export function settingsItems(onBack: () => void, openControls?: () => void): Me
       hint: () => tr(L('在血条、磁带、时砂旁标出名字。自动：前 3 局显示。', 'Names next to your health bar, tape and sand. Auto: your first 3 runs.')),
     }]),
     { label: () => tr(L('伤害数字', 'Damage numbers')), kind: 'toggle', get: () => settings.showDamage, set: set('showDamage'), hint: () => tr(L('在敌人头上显示造成的伤害。', 'Show the damage you deal above enemies.')) },
+    // ── F4b (ONBOARD2 §6.12, §5.10): guidance, the coach, its slow motion, the death replay, reset ──
+    header('教学', 'Tutorial'),
+    {
+      label: () => tr(S('onboard', 'setGuidance')), kind: 'choice',
+      get options() { return [{ label: tr(S('onboard', 'setGuidanceFull')), value: 'full' }, { label: tr(S('onboard', 'setGuidanceLite')), value: 'lite' }, { label: tr(S('onboard', 'setGuidanceOff')), value: 'off' }]; },
+      get: () => settings.onboarding, set: (v: string) => { settings.onboarding = v === 'lite' ? 'lite' : v === 'off' ? 'off' : 'full'; saveSettings(); },
+      hint: () => tr(S('onboard', 'setGuidanceHint')),
+    },
+    {
+      label: () => tr(S('coach', 'setCoach')), kind: 'choice', get options() { return tripleOpts(); },
+      get: () => settings.coach, set: (v: string) => { settings.coach = v as typeof settings.coach; saveSettings(); },
+      hint: () => tr(S('coach', 'setCoachHint')),
+    },
+    { label: () => tr(S('coach', 'setCoachSlow')), kind: 'toggle', get: () => settings.coachSlowmo, set: set('coachSlowmo'), hint: () => tr(S('coach', 'setCoachSlowHint')), disabled: () => settings.coach === 'off' },
+    { label: () => tr(S('coach', 'setDeathReplay')), kind: 'toggle', get: () => settings.deathReplay, set: set('deathReplay'), hint: () => tr(S('coach', 'setDeathReplayHint')) },
+    resetRow(),
     header('操作', 'Controls'),
     ...(!settingsLive.rewindMode ? [] : [{
       label: () => tr(L('回溯方式', 'Rewind input')), kind: 'choice' as const,
@@ -215,8 +259,36 @@ export class PauseMenu implements Overlay {
   constructor(private host: PauseHost) {
     G.audio.muffle(true, 700);
     sfx('uiOpen');
+    // whose menu this is (co-op: whoever opened it): their buttons in the guide, their lesson
+    const hand = (G.scenes.current as { world?: { players: import('../entities/player').Player[] } } | null)?.world?.players.find((q) => q.slot === (host.buildSlot ?? 0)) ?? null;
+    const who = hand?.input;
+    const lesson = hand ? Lessons.active(hand) : null;
+    const kind = (G.scenes.current as { opt?: { kind?: string } } | null)?.opt?.kind;
+    const inPrologue = kind === 'prologue';
+    const confirm = (key: string): MenuItem => {
+      let armed = false;
+      return { label: () => tr(S('coach', armed ? key + 'Confirm' : key)), act: () => {
+        if (!armed) { armed = true; return; }
+        this.closing = true; G.audio.muffle(false);
+        if (key === 'pauseSkipLesson') lesson?.skip();
+        else if (key === 'pauseSkipPrologue') { Onboard.skipAll(); Flags.set('onboard.skipped', 1); void import('../flow').then((m) => m.Flow.hub('start')); }
+      } };
+    };
+    let skipArmed = false;
+    const teach: MenuItem[] = [
+      // ONBOARD2 §7.1: the second row everywhere (in the prologue, from its third lesson on)
+      ...(!inPrologue || (lesson && ['undo', 'echo', 'paradox', 'final'].includes(String(lesson.id))) ? [{ label: () => tr(S('coach', 'pauseGuide')), act: () => { const g = Panels.open('rewindGuide', { who }); if (g) host.overlays.push(g); } }] : []),
+      // the prologue: watch the demo again · skip this lesson · skip the prologue (each asks twice)
+      ...(inPrologue && lesson ? [{ label: () => tr(S('coach', 'pauseWatchDemo')), act: () => { this.closing = true; G.audio.muffle(false); lesson.replay(); } }, confirm('pauseSkipLesson')] : []),
+      ...(inPrologue ? [confirm('pauseSkipPrologue')] : []),
+      // an after-fight lesson in progress: "later" (a postponement, the door was always open)
+      ...(!inPrologue && lesson ? [{ label: () => tr(S('coach', 'pauseLater')), act: () => { this.closing = true; G.audio.muffle(false); lesson.postpone(); } }] : []),
+      // "I know how to play": the coach and the lessons go away (asks once more)
+      ...(!inPrologue && Onboard.mode() === 'full' ? [{ label: () => tr(S('coach', skipArmed ? 'pauseSkipYes' : 'pauseSkip')), act: () => { if (!skipArmed) { skipArmed = true; return; } skipTeaching(); this.closing = true; G.audio.muffle(false); } }] : []),
+    ];
     this.list = new MenuList([
       { label: () => tr(UI.resume), act: () => (this.closing = true) },
+      ...teach,
       { label: () => tr(L('本局构筑', 'Your Build')), act: () => host.overlays.push(new RunInfoPanel(host.run, host.buildSlot ?? 0)) },
       { label: () => tr(UI.settings), act: () => host.overlays.push(new SettingsPanel()) },
       ...(host.leaveItem ? [{ label: () => tr(host.leaveItem!.label), act: () => { this.closing = true; G.audio.muffle(false); host.leaveItem!.act(); } }] : []),
@@ -243,14 +315,19 @@ export class PauseMenu implements Overlay {
   render(r: Renderer) {
     const ctx = r.ui2;
     ctx.globalAlpha = 0.55; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
-    // 136 px holds four rows; a fifth (co-op "Leave") adds one more row
+    // 136 px holds four rows; each row past four (co-op "Leave", the teaching rows) adds one more
     const extra = this.list.items.length * (this.list.rh - this.list.rowH) + Math.round(Math.max(0, Text.lineH('body') - 15)) + Math.max(0, this.list.items.length - 4) * this.list.rowH;
-    panel(ctx, 220, 110 - Math.round(extra / 2), 200, 136 + extra);
+    // as wide as the longest row needs (the teaching rows are longer than 1.0's), centred
+    let lw = 160;
+    for (const it of this.list.items) lw = Math.max(lw, Math.ceil(Text.measure(it.label(), 'body').w) + 16);
+    lw = Math.min(lw, 340);
+    const pw = lw + 40, px = Math.round(320 - pw / 2);
+    panel(ctx, px, 110 - Math.round(extra / 2), pw, 136 + extra);
     const top = 110 - Math.round(extra / 2);
     G.font.draw(ctx, tr(UI.paused), 320, top + 10, { align: 'center', color: 'B5' });
     const ruleY = Math.round(top + 10 + Math.max(18, Text.lineH('body') + 3));
-    rect(ctx, 236, ruleY, 168, 1, 'B1');
-    this.list.render(ctx, 240, ruleY + 10, 160);
+    rect(ctx, px + 16, ruleY, pw - 32, 1, 'B1');
+    this.list.render(ctx, px + 20, ruleY + 10, lw);
     void i18n;
   }
 }
