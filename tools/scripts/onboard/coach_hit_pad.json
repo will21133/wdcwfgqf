@@ -1,0 +1,144 @@
+[
+ {
+  "eval": "// Shared helpers for the F4b onboarding scripts (tools/scripts/onboard/*.json). build.cjs inlines\n// this file as each script's first eval, so every script stays a plain tools/shot.cjs JSON.\n// Everything waits on simulated time (G.time / world.time), never the wall clock: headless Chrome\n// runs at ~4 fps and the game's fixed step keeps the simulation exact.\n(() => {\n  const G = window.__G;\n  const raf = () => new Promise((r) => requestAnimationFrame(() => r()));\n  const T = {\n    s: () => G.scenes.current,\n    w: () => G.scenes.current && G.scenes.current.world,\n    p: (i = 0) => G.scenes.current.world.players[i],\n    key: (code, down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code })),\n    async until(cond, ms = 30000) { const t0 = performance.now(); while (!cond()) { if (performance.now() - t0 > ms) return false; await raf(); } return true; },\n    /** wait `sec` of game time (G.time: the fixed-step clock) */\n    async sim(sec) { const t0 = G.time; return T.until(() => G.time - t0 >= sec, 120000); },\n    async hold(code, sec) { T.key(code, true); await T.sim(sec); T.key(code, false); await raf(); },\n    async tap(code) { T.key(code, true); await T.sim(0.06); T.key(code, false); await T.sim(0.03); },\n    near(p) { let b = null, bd = 1e9; for (const e of T.w().enemies) { if (e.dead) continue; const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < bd) { bd = d; b = e; } } return b; },\n    /** an undoable blow from the nearest enemy (or none), straight through the real Player.hurt */\n    hit(p, amount, o = {}) { const e = T.near(p); p.invuln = 0; p.dashT = 0; return p.hurt({ amount, kind: 'melee', owner: e, x: e ? e.x : p.x + 10, y: e ? e.y : p.y, knock: 0, fixed: !!o.fixed }); },\n    /** the room settled: hands walked in, floor card gone (enemies pinned as soon as they exist) */\n    async ready(t = 3.6, pin = true) {\n      await T.until(() => T.w() && T.p(), 60000);\n      if (pin) { await T.until(() => T.w().enemies.length > 0 || T.w().time > 2.5, 60000); T.pin(); }\n      await T.until(() => T.p().autoWalk <= 0 && T.w().time > t, 60000);\n      if (pin) T.pin();\n      for (const p of T.w().players) { p.hp = p.maxHp; p.lo.sand = p.lo.sandMax; }\n    },\n    /** freeze every enemy where it stands (its update does nothing) */\n    pin() { for (const e of T.w().enemies) { e.update = () => {}; e.spawnT = 0; } },\n    freeze() { T.w().stop = 1e9; },\n    thaw() { T.w().stop = 0; },\n    vis(slot) { return window.__tut.coach.visible(slot); },\n    rect(c) { return c ? c.rect : null; },\n    overlap(a, b) { return !!a && !!b && a[0] < b[0] + b[2] && a[0] + a[2] > b[0] && a[1] < b[1] + b[3] && a[1] + a[3] > b[1]; },\n  };\n  window.__T = T;\n  return 'lib ready';\n})()\n"
+ },
+ {
+  "waitFor": "window.__T && __T.w() && __T.p()",
+  "ms": 60000
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.ready(); const p=T.p(), e=T.near(p), m=T.w().map; const cx=m.pw/2, cy=m.ph/2+20;\n     if(e){e.x=cx+18; e.y=cy; e.hp=e.maxHp=999;} p.x=cx-6; p.y=cy; p.rec.clear(); p.rec.prefill(p.x,p.y,p.rec.capacity,{hp:p.hp}); await T.sim(0.5); return {p:[p.x,p.y]}})()"
+ },
+ {
+  "axes": [
+   0,
+   [
+    0.9,
+    0,
+    0,
+    0
+   ]
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "axes": [
+   0,
+   [
+    0,
+    0,
+    0,
+    0
+   ]
+  ]
+ },
+ {
+  "pad": [
+   0,
+   2,
+   true
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   2,
+   false
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   2,
+   true
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   2,
+   false
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   2,
+   true
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   2,
+   false
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.1); return 1})()"
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.5); const p=T.p(); T.hit(p, 14); const ok = await T.until(()=>T.vis()!==null && T.vis().form==='card', 30000);\n     T.freeze(); return {ok, vis: T.vis(), level: __tut.coach.level(), state: __tut.coach.state()};})()"
+ },
+ {
+  "shot": "card"
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;return {card: T.vis() && T.vis().form, dock: T.vis() && T.vis().dock, text: T.vis() && T.vis().text}})()"
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;T.thaw(); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   4,
+   true
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;await T.sim(0.12); return 1})()"
+ },
+ {
+  "pad": [
+   0,
+   4,
+   false
+  ]
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;const ok = await T.until(()=>__tut.coach.log.some(l=>l.ev==='success'), 30000); T.freeze(); return {ok, last: __tut.coach.log.slice(-3)}})()"
+ },
+ {
+  "shot": "success"
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;T.thaw(); const d3 = await T.until(()=>__tut.coach.log.some(l=>l.det==='D3'), 20000); if (d3) { await T.until(()=>T.vis() && T.vis().key==='coach.d3', 8000); T.freeze(); } return {d3, vis: T.vis()}})()"
+ },
+ {
+  "shot": "d3"
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;T.thaw(); const s=__tut.coach.state(); return {pass: true, slowMinInv: s.slowMinInv, coached: s.coached, log: __tut.coach.log.map(l=>l.ev+':'+(l.det||'')).join(',')}})()"
+ },
+ {
+  "eval": "(async()=>{const T=window.__T;return {audit: __tut.audit(), desync: __tut.log.filter(e=>e.ev==='demo-desync').length}})()"
+ }
+]
