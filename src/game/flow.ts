@@ -11,6 +11,7 @@ import { profile, saveProfile, metaBonus, nodeLevel, markSeen } from './save';
 import type { Patron } from './progression/memories';
 import { LedgerOverlay, SeatWeapons } from './ui/metaPanels';
 import { GameHooks, Cutscenes } from './hooks';
+import type { RoomKind } from './rooms/registry';
 
 // the 1.0 story scenes are the default cutscenes (P7 re-registers these ids with the 2.0 versions)
 Cutscenes.register('intro', (then) => new CutsceneScene('intro', then), { fade: 0.8 });
@@ -19,10 +20,28 @@ Cutscenes.register('credits', (then) => new CreditsScene(then), { fade: 0.8 });
 
 const PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
 
+/** where the workshop is entered from (Flow.hub); 'rehearsal' = back out of the Rehearsal Hall's arch */
+export type HubContext = 'start' | 'death' | 'victory' | 'quit' | 'rehearsal';
+
+/**
+ * Onboarding hooks (ONBOARD2 §2.1, §11.2; F4a). The defaults are the v2-F3 flow; the onboarding
+ * replaces them when the first-launch card and the prologue land.
+ */
+export const FlowHooks = {
+  /** title "Start": `next` is the old path (the intro the first time, then the workshop) */
+  titleStart: (next: () => void): void => next(),
+  /** the kind of a new run's first room */
+  firstRoom: (_run: Run): RoomKind => (profile.tutorialDone ? 'combat' : 'tutorial'),
+  /** a new run's first scene was built (the onboarding may lengthen its first wave delay) */
+  runScene: (_s: GameScene, _run: Run): void => {},
+  /** the workshop context of the last Flow.hub (the Hall's arch puts the hand back in front of it) */
+  lastHub: 'start' as HubContext,
+};
+
 export const Flow = {
   title() {
     G.scenes.go(() => new TitleScene({
-      start: () => (profile.introSeen ? Flow.hub('start') : Flow.intro()),
+      start: () => FlowHooks.titleStart(() => (profile.introSeen ? Flow.hub('start') : Flow.intro())),
       credits: () => Cutscenes.play('credits', () => Flow.title()),
       ledger: () => { const t = G.scenes.current as TitleScene; t.overlays.push(new LedgerOverlay()); },
     }), 'fade', 0.6);
@@ -32,8 +51,11 @@ export const Flow = {
     Cutscenes.play('intro', () => { profile.introSeen = true; saveProfile(); Flow.hub('start'); });
   },
 
-  hub(context: 'start' | 'death' | 'victory' | 'quit') {
-    G.scenes.go(() => new HubScene({ startRun: (config?: RunConfig) => Flow.startRun(config), title: () => Flow.title() }, context), 'clock', 0.6);
+  hub(context: HubContext) {
+    FlowHooks.lastHub = context;
+    // back from the Hall: no greeting, no death lines (the workshop treats it like a quiet return)
+    const hubCtx = context === 'rehearsal' ? 'quit' : context;
+    G.scenes.go(() => new HubScene({ startRun: (config?: RunConfig) => Flow.startRun(config), title: () => Flow.title() }, hubCtx), 'clock', 0.6);
   },
 
   /** the seated hands as a run config (each with the weapon it took from the rack; solo: yours) */
@@ -65,8 +87,9 @@ export const Flow = {
     const run = Flow.newRun(config);
     profile.runs++;
     saveProfile();
-    const first = new GameScene(run, { kind: profile.tutorialDone ? 'combat' : 'tutorial', reward: 'memory', patron: run.rng.pick(PATRONS) });
+    const first = new GameScene(run, { kind: FlowHooks.firstRoom(run), reward: 'memory', patron: run.rng.pick(PATRONS) });
     Flow.wire(first);
+    FlowHooks.runScene(first, run);
     G.scenes.go(() => first, 'clock', 0.8);
   },
 

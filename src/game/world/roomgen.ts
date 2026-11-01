@@ -36,6 +36,9 @@ function tryGenerate(o: GenOpts, attempt: number): RoomMap | null {
   else if (kind === 'vault') { iw = 22; ih = 13; }
   else if (kind === 'hub') { iw = 30; ih = 16; }
   else if (kind === 'tutorial') { iw = 26; ih = 14; }
+  // onboarding stages (ONBOARD2 §2.0, §8.1): the prologue's 22×11 and the Rehearsal Hall's 36×17, flat and clear
+  else if (kind === 'prologue') { iw = 22; ih = 11; }
+  else if (kind === 'rehearsal') { iw = 36; ih = 17; }
   else { iw = rng.int(18, 22); ih = rng.int(10, 12); }
   if (iw % 2) iw++; // even widths keep doors centred
   const w = iw + SIDE * 2, h = ih + TOP + BOTTOM;
@@ -46,7 +49,7 @@ function tryGenerate(o: GenOpts, attempt: number): RoomMap | null {
   // shape
   const shapes: [string, number][] = kind === 'combat' || kind === 'elite'
     ? [['plain', 1], ['chamfer', 3], ['cross', 2], ['alcove', 2], ['notch', 2], ['hall', 1.2]]
-    : kind === 'boss' ? [['chamfer', 1]] : kind === 'vault' ? [['plain', 1]] : [['chamfer', 2], ['plain', 1]];
+    : kind === 'boss' ? [['chamfer', 1]] : kind === 'vault' || kind === 'prologue' || kind === 'rehearsal' ? [['plain', 1]] : [['chamfer', 2], ['plain', 1]];
   const shape = rng.weighted(shapes, (s) => s[1])![0];
   m.shape = shape;
   applyShape(m, rng, shape, x0, y0, x1, y1);

@@ -25,7 +25,7 @@
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Player, RewindRefusal } from '../entities/player';
 import type { Frame } from '../systems/rewind';
-import { drawSprite } from '../../engine/gfx/sprite';
+import { drawSprite, type Sprite } from '../../engine/gfx/sprite';
 import { outlineOf } from '../../engine/gfx/outline';
 import { col } from '../../art/palette';
 import { G } from '../G';
@@ -39,12 +39,58 @@ import { tr, type L10n } from '../i18n';
 import { S, term } from '../strings';
 import { ROMAN, SLOT_COLOR } from '../players';
 import { termCallout, Callouts, Caption } from './callouts';
+import { Gates } from '../onboard/gates';
 /** Sand per hourglass icon (run.ts SAND_PER_GLASS; not imported to keep this module off run.ts's import graph) */
 const SAND_PER_GLASS = 100;
 import '../strings/f3';
 
 // world term callouts live in ui/callouts.ts (one at a time, never over the action); re-exported for callers
 export { termCallout };
+
+// ───────────────────────── hooks for the onboarding (ONBOARD2 §4.7, §11.2) ─────────────────────────
+/** a HUD part the Stage can spotlight: the bar, its cyan stripes, the tape, its newest red notch, the Sand number */
+export type HudPart = 'hp' | 'hpStripe' | 'tape' | 'notch' | 'sand';
+/** where each seat's HUD parts were drawn (UI px), and on which frame */
+const partRects = new Map<string, { r: [number, number, number, number]; frame: number }>();
+function notePart(id: HudPart, slot: number, x: number, y: number, w: number, h: number) {
+  const k = id + ':' + slot;
+  const e = partRects.get(k);
+  if (e) { e.r[0] = x; e.r[1] = y; e.r[2] = w; e.r[3] = h; e.frame = G.frame; } else partRects.set(k, { r: [x, y, w, h], frame: G.frame });
+}
+let platesHiddenTo = -1;
+export const RewindHudHooks = {
+  /** the Shadow's +N and the bar's cyan stripes flash together (lessons, the coach: "this is what comes back") */
+  pulse(p: Player, dur = 0.6): void { H(p).promiseT = dur; },
+  /** where a seat's HUD part was drawn this frame or the last (UI px [x, y, w, h]); null = not on screen */
+  rect(id: HudPart, slot: number): [number, number, number, number] | null {
+    const e = partRects.get(id + ':' + slot);
+    return e && G.frame - e.frame <= 1 ? e.r : null;
+  },
+  /**
+   * the prologue and every lesson teach through the caption rail: while this says so the term
+   * plates under the pod, co-op's plain captions and the Shadow / Culprit callouts stay quiet
+   * (onboard/index.ts assigns it; default: never)
+   */
+  muted: (): boolean => false,
+  /** the caption needs the plates' room: hide the solo term plates on the next frame */
+  hidePlates(): void { platesHiddenTo = G.frame + 1; },
+};
+const platesHidden = () => G.frame <= platesHiddenTo;
+
+/**
+ * The Shadow as the game draws it (F4b's LoopPlayer and death replay reuse it so the pages look like
+ * the game): a soft landing ring, the faint body and the dashed rim in `color` (C3; co-op: the slot colour).
+ */
+export function drawShadowOutline(ctx: CanvasRenderingContext2D, spr: Sprite, x: number, y: number, color = 'C3', o: { flip?: boolean; alpha?: number; rim?: number } = {}): void {
+  const alpha = o.alpha ?? 1;
+  ctx.globalAlpha = 0.5 * alpha;
+  ctx.strokeStyle = col(color);
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.ellipse(Math.round(x) + 0.5, Math.round(y) + 0.5, 6, 2.5, 0, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 1;
+  drawSprite(ctx, spr, x, y, { flip: o.flip, tint: 'C1', alpha: 0.22 * alpha });
+  drawSprite(ctx, outlineOf(spr, color, 'dash'), x, y, { flip: o.flip, alpha: (o.rim ?? 0.85) * alpha });
+}
 
 // ───────────────────────── small pixel icons ─────────────────────────
 /** 5×6 padlock (violet = locked HP) */
@@ -181,14 +227,8 @@ export function renderShadow(r: Renderer, p: Player) {
     // a soft landing mark on the floor under it, then the hollow, dashed outline (cyan; co-op: the
     // hand's own colour so four Shadows stay apart)
     const c = solo ? 'C3' : SLOT_COLOR[p.slot % 4];
-    u.globalAlpha = 0.5 * alpha;
-    u.strokeStyle = col(c);
-    u.lineWidth = 1;
-    u.beginPath(); u.ellipse(Math.round(f.x) + 0.5, Math.round(f.y) + 0.5, 6, 2.5, 0, 0, TAU); u.stroke();
-    u.globalAlpha = 1;
     r.glowAt(f.x, f.y - 8, 14, 'C2', 0.18 * alpha);
-    drawSprite(u, spr, f.x, f.y, { flip: f.flip, tint: 'C1', alpha: 0.22 * alpha });
-    drawSprite(u, outlineOf(spr, c, 'dash'), f.x, f.y, { flip: f.flip, alpha: (p.state === 'stopped' ? 1 : 0.85) * alpha });
+    drawShadowOutline(u, spr, f.x, f.y, c, { flip: f.flip, alpha, rim: p.state === 'stopped' ? 1 : 0.85 });
   }
   // a grey Shadow says why (the reason the press would give)
   if (!pv.ok && !near && p.state === 'alive') {
@@ -295,7 +335,7 @@ function scrubHelp(r: Renderer, p: Player, f: Frame, gain: number) {
  * of the first rooms, and when it starts to promise something (+N after a hit).
  */
 function shadowTerm(r: Renderer, p: Player, f: Frame, ok: boolean, gain: number, seconds: number, scrub: boolean) {
-  if (scrub || !ok || p.state !== 'alive' || !Terms.showPlain('shadow')) return;
+  if (scrub || !ok || p.state !== 'alive' || !Terms.showPlain('shadow') || RewindHudHooks.muted()) return;
   if (Math.hypot(f.x - p.x, f.y - p.y) < 20) return;
   if (!(p.world.time < TERM_SECONDS || gain > 0)) return;
   termCallout(r, p.world, 'shadow', f.x, f.y - 11, { prio: 1, hw: 7, hh: 13, plain: fill(S('f3', 'shadowLive'), '{s}', secs(seconds)) });
@@ -322,8 +362,10 @@ function bead(u: CanvasRenderingContext2D, x: number, y: number, type: string) {
 export function renderRewindMarks(r: Renderer, p: Player) {
   const w = p.world;
   const u = r.u;
-  // Culprit: a red clock hand over every enemy this hand marked (GDD2 §3.8)
-  for (const e of w.enemies) {
+  // Culprit: a red clock hand over every enemy this hand marked (GDD2 §3.8) — once the Culprit
+  // lesson has taught what it means (ONBOARD2 §5.3; the +50% applies all along)
+  const culprits = Gates.shows(p, 'culprit');
+  for (const e of culprits ? w.enemies : []) {
     const t = e.culpritOf.get(p.slot);
     if (!t || e.dead) continue;
     const blink = t < 1 && Math.floor(w.time * 8) % 2 === 0;
@@ -333,7 +375,8 @@ export function renderRewindMarks(r: Renderer, p: Player) {
     // the word follows the mark once the landing's '+N' has faded (they would sit on each other)
     const age = p.mods.culpritT - t;
     if (age > 0.6 && (termOn(p, 'culprit') || age < 3)) {
-      if (Terms.showPlain('culprit')) termCallout(r, w, 'culprit', e.x, (e.y - e.height - 12 + e.y) / 2, { prio: 3, color: 'R4', hw: e.r + 4, hh: (e.height + 16) / 2 });
+      if (RewindHudHooks.muted()) { /* a lesson is talking */ }
+      else if (Terms.showPlain('culprit')) termCallout(r, w, 'culprit', e.x, (e.y - e.height - 12 + e.y) / 2, { prio: 3, color: 'R4', hw: e.r + 4, hh: (e.height + 16) / 2 });
       else {
         seenThisRoom(w, 'culprit');
         const lx = x, ly = y - 14;
@@ -447,6 +490,7 @@ Hud.register({
       gearIcon(ctx, r.x - 12, r.y - 1, 'B4', 'B2', lowHp(p) ? 'R4' : 'R3');
       const bw = Math.min(150, Math.round(70 + m.maxHp * 0.3));
       bar3(ctx, r.x, r.y, bw, 7, p, a);
+      notePart('hp', p.slot, r.x, r.y, bw, 7);
       const dx = r.x + bw + 5;
       const dw = G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, dx, r.y + 3.5 - 4.5 * Text.k, { fill: 'K10' });
       // first runs: name the violet part (GDD2 §3.1)
@@ -457,6 +501,7 @@ Hud.register({
     const dw = Math.ceil(G.digits.measure(`${p.maxHp}/${p.maxHp}`));
     const bw = Math.max(24, r.w - dw - 6);
     bar3(ctx, r.x, r.y, bw, r.h, p, a);
+    notePart('hp', p.slot, r.x, r.y, bw, r.h);
     G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, r.x + r.w, r.y + r.h / 2 - 4.5 * Text.k, { fill: lowHp(p) ? 'R4' : 'K10', align: 'right' });
     coopCaptions(p, a);
   },
@@ -471,6 +516,7 @@ function bar3(ctx: CanvasRenderingContext2D, bx: number, by: number, bw: number,
   const gw = Math.max(0, Math.min(bw - fw, Math.round((bw * (a.hpShown + a.gainShown)) / max) - fw));
   const pw = Math.max(0, Math.min(bw - fw - gw, Math.round((bw * (a.hpShown + a.gainShown + a.potShown)) / max) - fw - gw));
   const lw = Math.max(0, Math.min(bw - fw - gw - pw, Math.round((bw * (a.hpShown + a.gainShown + a.potShown + a.lockShown)) / max) - fw - gw - pw));
+  if (gw > 0) notePart('hpStripe', p.slot, bx + fw, by, gw, bh);
   if (gw > 0 && a.ok) {
     // recoverable: cyan diagonal stripes drifting backwards (time running back); brighter while
     // they pulse with the Shadow's +N the first times they appear
@@ -551,6 +597,7 @@ function drawTape(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number
   const anchored = p.anchorT > 0, burnt = rec.burnT > 0;
   rect(ctx, x - 1, y - 1, w + 2, h + 2, 'K0');
   rect(ctx, x, y, w, h, 'K1');
+  notePart('tape', p.slot, x, y, w, h);
   const right = x + w;
   const xAt = (i: number) => right - Math.min(w, ((n - i) / 60 / L) * w);
   // recorded length
@@ -577,7 +624,9 @@ function drawTape(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number
   }
   // notches: red = a hit a rewind would undo, violet = fixed damage; white diamond = Culprit
   const culpritIds = new Set<number>();
-  if (!compact) for (const e of p.world.enemies) if (e.culpritOf.has(p.slot)) culpritIds.add(e.id);
+  const showCulprit = Gates.shows(p, 'culprit');
+  if (!compact && showCulprit) for (const e of p.world.enemies) if (e.culpritOf.has(p.slot)) culpritIds.add(e.id);
+  let newest = -1;
   // a hit the scrub cursor has not reached blinks: that is the damage a longer scrub would undo
   const blinkOn = Math.floor(G.time * 6) % 2 === 0;
   for (let i = 0; i < n; i++) {
@@ -591,15 +640,17 @@ function drawTape(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number
       rect(ctx, nx, y + h - hh, 1, hh, 'V4');
     }
     if (f.hit) {
+      newest = nx;
       const hh = compact ? h : h + Math.min(3, 1 + Math.floor(f.hit / 6));
       rect(ctx, nx - 1, y + h - hh - 1, 3, hh + 1, 'K0');
       rect(ctx, nx, y + h - hh, 1, hh, scrub && i < cut && blinkOn ? 'K10' : 'R4');
       // a hit whose dealer is marked, or will be marked by the scrub in progress
       const willMark = scrub && i >= cut && !!f.culprits;
       const marked = !!f.culprits && f.culprits.some((id) => culpritIds.has(id));
-      if (!compact && (willMark || marked)) diamond(ctx, nx, y - 6);
+      if (!compact && showCulprit && (willMark || marked)) diamond(ctx, nx, y - 6);
     }
   }
+  if (newest >= 0) notePart('notch', p.slot, newest - 2, y - 4, 5, h + 5);
   if (scrub) {
     const cx = Math.round(xAt(cut));
     rect(ctx, cx - 1, y - (compact ? 2 : 4), 3, h + (compact ? 4 : 7), 'K0');
@@ -689,6 +740,7 @@ Hud.register({
     }
     const fullFlash = a.fullT > 0 && Math.floor(a.fullT * 10) % 2 === 0;
     const cw = G.digits.draw(ctx, t.cur, x + 2, cy - 4.5 * Text.k, { fill: fullFlash ? 'K10' : can ? 'C3' : 'K7' });
+    notePart('sand', p.slot, r.x - 1, cy - 5, x + 2 + cw + Math.ceil(G.digits.measure(t.rest)) - r.x + 2, 10);
     if (t.rest) G.digits.draw(ctx, t.rest, x + 2 + cw, cy - 4.5 * Text.k, { fill: t.kind === 'scrub' ? (Math.floor(G.time * 8) % 2 ? 'C4' : 'K10') : t.kind === 'tap' ? 'C2' : 'K7' });
     if (a.fullT > 0 && !r.compact) Text.draw(ctx, S('f3', 'full'), x + 4 + cw + Math.ceil(G.digits.measure(t.rest)), cy, { size: 'small', color: 'C4', valign: 'middle' });
     if (a.flyT > 0 && a.flyT < 0.7) {
@@ -709,6 +761,7 @@ Hud.register({
  */
 const TERM_X = 22, TERM_Y = 52;
 function termPlates(ctx: CanvasRenderingContext2D, p: Player, a: HandHud) {
+  if (RewindHudHooks.muted() || platesHidden()) return;
   const w = p.world;
   const rows: { id: string; icon: (x: number, y: number) => void; ih: number }[] = [];
   if (a.gainShown >= 0.5 && a.ok && Terms.showPlain('hpPromise')) rows.push({ id: 'hpPromise', icon: (x, y) => stripeIcon(ctx, x, y), ih: 5 });
@@ -745,6 +798,7 @@ function termPlate(ctx: CanvasRenderingContext2D, id: string, x: number, y: numb
  * rail at the top centre, once a room each (clarity S2.9).
  */
 function coopCaptions(p: Player, a: HandHud) {
+  if (RewindHudHooks.muted()) return;
   const w = p.world;
   const say = (id: string) => { if (onceThisRoom(w, 'cap:' + id)) { Terms.seen(id); Caption.say(null, { term: id, key: 'term:' + id, dur: 3.2 }); } };
   if (termOn(p, 'tape')) say('tape');

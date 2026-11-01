@@ -35,6 +35,7 @@ import { patronSigil, partIcon, SLOT_GLYPH } from '../../art/sprites/icons';
 import { drawSlotBadge, drawSlotPlate, ROMAN_LATIN } from '../players';
 import { S } from '../strings';
 import '../strings/f2';
+import { Gates } from '../onboard/gates';
 
 export interface HudRect { x: number; y: number; w: number; h: number; compact: boolean }
 export type HudArea = 'pod' | 'top' | 'bottom' | 'corner';
@@ -114,6 +115,8 @@ function podLayout(p: Player | null, pod: HudRect): { w: HudWidget; r: HudRect }
   const out: { w: HudWidget; r: HudRect }[] = [];
   for (const w of sorted('pod')) {
     if (w.visible && !w.visible(p, pod.compact)) continue;
+    // progressive HUD (ONBOARD2 §5.4): the prologue / a novice's first run hide what is not taught yet
+    if (!Gates.hud(w.id, p)) continue;
     let row: number;
     if (typeof w.row === 'function') row = Math.max(0, Math.min(w.row(pod.compact), rows.length - 1));
     else row = Math.min(w.row ?? (w.order < 20 ? 0 : w.order < 40 ? 1 : 2), pod.compact ? 1 : rows.length - 1);
@@ -210,6 +213,8 @@ Hud.register({
     slots.forEach((sl, i) => {
       const x = r.x + 10 + i * 22;
       const om = lo.memories.find((m) => MEMORIES[m.id]?.slot === sl);
+      // a novice's first run draws only the filled slots (empty ones read as locked; ONBOARD2 §5.4)
+      if (!om && !Gates.hud('slots:empty', p)) return;
       rect(ctx, x - 1, y0 - 1, 20, 20, 'K0');
       rect(ctx, x, y0, 18, 18, om ? 'K2' : 'K1');
       if (om) {
@@ -325,7 +330,7 @@ export class HUD {
     for (const a of ['corner', 'top', 'bottom'] as const) {
       if (!want(a)) continue;
       const ar = Hud.areaRect(a);
-      for (const wd of sorted(a)) if (!wd.visible || wd.visible(lead, ar.compact)) wd.draw(ctx, lead, ar);
+      for (const wd of sorted(a)) if ((!wd.visible || wd.visible(lead, ar.compact)) && Gates.hud(wd.id, lead)) wd.draw(ctx, lead, ar);
     }
     ctx.globalAlpha = 1;
 

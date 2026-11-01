@@ -89,6 +89,25 @@ export const padIndex = (id: DeviceId): number => (id.startsWith('pad') ? Number
 
 const KEYBOARD_AIM_KEYS = new Set(['KeyJ', 'KeyK', 'KeyL']);
 
+/**
+ * Forced prompt glyphs (ONBOARD2 §1.7, tests: ?glyph=kbm|kb|pad): every player's prompts use this
+ * family, and 'kb' shows the keyboard-only column (J / K / L / I …). null = follow the devices.
+ */
+export const glyphs = { force: null as null | 'kbm' | 'kb' | 'pad' };
+/**
+ * Actions whose prompt follows the key the player actually pressed for them (lastCodeFor). Menu
+ * actions (confirm, cancel, pause, tabs) share keys with gameplay actions (Space dashes and
+ * confirms), so their prompts keep the table's first key.
+ */
+const TRACKED: ReadonlySet<Action> = new Set<Action>(['up', 'down', 'left', 'right', 'attack', 'special', 'dash', 'rewind', 'fork', 'interact', 'info']);
+/**
+ * The keyboard-only column (GDD2 §2.1) differs from keyboard + mouse only here: J attack, K special,
+ * L rewind, I fork. Movement (WASD), dash (Space) and interact (E) are the same in both.
+ */
+const COLUMN_ACTIONS: ReadonlySet<Action> = new Set<Action>(['attack', 'special', 'rewind', 'fork']);
+/** ticks without a real mouse move after which a J-attacking player counts as keyboard-only (20 s) */
+const KB_ONLY_TICKS = 20 * 60;
+
 // ───────────────────────── raw devices ─────────────────────────
 export class PadState {
   connected = false;
@@ -151,6 +170,25 @@ export class RawInput {
   anyPressed = false;
   /** last key / button code pressed (rebinding UI); pad buttons read 'PadA', 'PadB' … */
   lastPressedCode: string | null = null;
+  /**
+   * when each keyboard / mouse code was last pressed (a running counter): the prompt for an action
+   * shows the key that last triggered it, so a keyboard-only player sees L / I / J (ONBOARD2 §1.7)
+   */
+  readonly codeSeq = new Map<string, number>();
+  private seq = 0;
+  /** fixed ticks so far, and the tick of the last real mouse move / click */
+  private ticks = 0;
+  private mouseTick = -1e9;
+  /** which column of the kbm attack binding last attacked (0 = mouse, 1 = J) */
+  private attackCol = 0;
+  /**
+   * the keyboard column this player plays with: 1 (keyboard only: J / K / L / I) after attacking
+   * with J and no mouse movement for 20 s; else 0. Prompts for actions never pressed use it.
+   */
+  get kbColumn(): 0 | 1 {
+    if (glyphs.force) return glyphs.force === 'kb' ? 1 : 0;
+    return this.attackCol === 1 && this.ticks - this.mouseTick > KB_ONLY_TICKS ? 1 : 0;
+  }
   /** every gamepad seen, by gp.index */
   pads: PadState[] = [];
   /** last physical device that pressed something or pushed a stick (mouse motion does not count) */
@@ -183,6 +221,7 @@ export class RawInput {
         this.mouseAim = true;
         this.kbMouseAim = true;
         this.family = 'kbm';
+        this.mouseTick = this.ticks;
       }
       this.mx = x; this.my = y;
       this.mouseInside = true;
@@ -190,6 +229,7 @@ export class RawInput {
     el.addEventListener('mouseleave', () => (this.mouseInside = false));
     el.addEventListener('mousedown', (e) => {
       el.focus();
+      this.mouseTick = this.ticks;
       this.press('Mouse' + e.button);
       this.mouseAim = true;
       this.kbMouseAim = true;
@@ -204,6 +244,9 @@ export class RawInput {
     if (!this.held.has(code)) this.pressed.add(code);
     this.held.add(code);
     this.lastPressedCode = code;
+    this.codeSeq.set(code, ++this.seq);
+    const ai = KB.kbm.attack.indexOf(code);
+    if (ai >= 0) this.attackCol = ai === 0 ? 0 : 1;
     this.anyPressed = true;
     this.lastPhys = 'kbm';
     this.onCode?.(code, 'kbm');
@@ -240,6 +283,7 @@ export class RawInput {
   }
 
   endTick() {
+    this.ticks++;
     this.pressed.clear();
     this.released.clear();
     for (const p of this.pads) p?.clearEdges();
@@ -461,8 +505,38 @@ export class PlayerInput extends InputView {
 
   /** keyboard table used for this player's key prompts */
   get bindings(): Bindings { return this.kind === 'kb' ? KB[this.device as KbProfile] : KB.kbm; }
-  /** glyph family for prompts (widgets.drawPrompt(..., who)) */
-  get lastDevice(): 'kbm' | 'pad' { return this.merged ? raw.family : this.kind === 'pad' ? 'pad' : 'kbm'; }
+  /** glyph family for prompts (widgets.drawPrompt(..., who)); ?glyph= forces one */
+  get lastDevice(): 'kbm' | 'pad' {
+    if (glyphs.force) return glyphs.force === 'pad' ? 'pad' : 'kbm';
+    return this.merged ? raw.family : this.kind === 'pad' ? 'pad' : 'kbm';
+  }
+  /**
+   * the keyboard / mouse code that last triggered `a` for this player (ONBOARD2 §1.7): a player who
+   * rewinds with L sees [L], not [Q]. An action never pressed follows the column the player plays
+   * with (raw.kbColumn). null = no keyboard here, a menu action, or nothing to go on (prompts then
+   * show the table's first key).
+   */
+  lastCodeFor(a: Action): string | null {
+    if (!TRACKED.has(a)) return null;
+    const kb = glyphs.force ? this.bindings : this.src.kb;
+    if (!kb) return null;
+    const mouse = glyphs.force ? glyphs.force === 'kbm' : this.src.mouse;
+    const list = kb[a].filter((b) => mouse || !b.startsWith('Mouse'));
+    if (!list.length) return null;
+    if (glyphs.force) return glyphs.force === 'kb' && COLUMN_ACTIONS.has(a) ? (list[1] ?? list[0]) : list[0];
+    let best: string | null = null, bs = 0;
+    for (const b of list) { const n = raw.codeSeq.get(b) ?? 0; if (n > bs) { bs = n; best = b; } }
+    if (best) return best;
+    return raw.kbColumn === 1 && COLUMN_ACTIONS.has(a) && list[1] ? list[1] : null;
+  }
+  /** movement keys this player uses: 1 = the arrow keys (the last movement key pressed was one), 0 = WASD */
+  moveColumn(): 0 | 1 {
+    const kb = glyphs.force ? this.bindings : this.src.kb;
+    if (!kb || glyphs.force) return 0;
+    let col: 0 | 1 = 0, bs = 0;
+    for (const a of ['up', 'down', 'left', 'right'] as const) kb[a].forEach((b, i) => { const n = raw.codeSeq.get(b) ?? 0; if (n > bs) { bs = n; col = i === 0 ? 0 : 1; } });
+    return col;
+  }
   /** does the mouse aim for this player right now? */
   get mouseAim(): boolean { return this.merged ? raw.mouseAim : this.kind === 'kbm' ? raw.kbMouseAim : false; }
   get usesMouse(): boolean { return this.merged || this.kind === 'kbm'; }
@@ -548,7 +622,7 @@ export class Input extends InputView {
   get mouseInside() { return raw.mouseInside; }
   /** true when the mouse is aiming / pointing (and a joined player owns it) */
   get mouseAim() { return raw.mouseAim && this.hasMouse(); }
-  get lastDevice(): 'kbm' | 'pad' { return raw.family; }
+  get lastDevice(): 'kbm' | 'pad' { return glyphs.force ? (glyphs.force === 'pad' ? 'pad' : 'kbm') : raw.family; }
   set lastDevice(v: 'kbm' | 'pad') { raw.family = v; }
   get padMoveX() { return this.leftStick().x; }
   get padMoveY() { return this.leftStick().y; }

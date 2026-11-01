@@ -34,8 +34,11 @@ import { tr } from '../i18n';
 import { S } from '../strings';
 import '../strings/f2';
 import '../strings/f3';
+import { Gates } from '../onboard/gates';
 
 export type PlayerState = 'alive' | 'stopped' | 'ghost';
+/** Player.renderTint: the demo puppet's chalk look (ONBOARD2 §3.3–3.4) */
+export interface PlayerTint { alpha: number; desat: number; outline: ColorKey; dashed: boolean }
 
 let FRAMES: TickFrames | null = null;
 let KEYS: Sprite[] = [];
@@ -261,6 +264,12 @@ export class Player extends Actor implements Wielder {
   tickRingT = 0;
   /** > 0: the next hit of this hand is a Counter (crit ×2; combat.ts) */
   counterT = 0;
+  /**
+   * The demo puppet's chalk look (ONBOARD2 §3.4): while a lesson drives this hand it is drawn at
+   * `alpha`, washed grey by `desat` (0..1), with a 1 px `outline` rim (dashed: the chalk line).
+   * null = normal (everything outside a demo).
+   */
+  renderTint: PlayerTint | null = null;
   private refuseT = 0;
   /** rewindPreview() cache: the tick and every input it depends on (no per-frame key string) */
   private previewCache: { tick: number; recTick: number; len: number; cursor: number; sand: number; hp: number; fixed: number; hold: boolean; v: RewindPreview } | null = null;
@@ -783,6 +792,8 @@ export class Player extends Actor implements Wielder {
     if (reason === 'state' && (this.hp <= 0 || this.state !== 'alive')) return;
     sfx('denied', { vol: 0.6 });
     this.world.fx.banner(this.x, this.y - 32, text, reason === 'anchor' ? 'K9' : reason === 'burnt' ? 'O3' : 'C4', 1.1);
+    // the coach's "what to do about it" line (ONBOARD2 §6.5 D7) listens for this
+    this.world.bus.emit('custom', { id: 'rewindRefused', player: this, data: { reason, need: need ?? null } });
   }
 
   /** start holding Rewind: the hand turns intangible at once, time around it crawls */
@@ -805,7 +816,8 @@ export class Player extends Actor implements Wielder {
     sfx('rewindHold', { vol: 0.8 });
     this.input.rumble(0.05, 0.3, 90);
     muffle(this);
-    if (o.auto || settings.rewindMode === 'tap') this.confirmRewind();
+    // tap-only: the setting, or scrub not taught yet (ONBOARD2 §5.3: holding = a tap until then)
+    if (o.auto || settings.rewindMode === 'tap' || Gates.tapOnly(this)) this.confirmRewind();
   }
 
   /** dash while holding: a free cancel (GDD2 §3.2) */
@@ -835,7 +847,7 @@ export class Player extends Actor implements Wielder {
       const thr = m.rewindTapThreshold;
       // the cursor runs from the tap threshold, but a release before it passes TAP_GRACE_BACK is still a tap
       const scrubAt = thr + Math.max(0, TAP_GRACE_BACK - MIN_BACK / 60) / SCRUB_RATE;
-      if (!R.scrub && held && R.t >= scrubAt && settings.rewindMode !== 'tap') {
+      if (!R.scrub && held && R.t >= scrubAt && settings.rewindMode !== 'tap' && !Gates.tapOnly(this)) {
         R.scrub = true;
         R.clickT = 0.5;
         this.scrubsSeen++;
@@ -1041,6 +1053,8 @@ export class Player extends Actor implements Wielder {
    */
   fork(): boolean {
     const c = this.canFork();
+    // not taught yet: the first press is explained instead (no Sand, no echo; ONBOARD2 §5.3)
+    if (c.reason !== 'state' && !Gates.forkAllow(this)) return false;
     if (!c.ok) { this.refuseFork(c.reason!); return false; }
     const m = this.mods, w = this.world;
     if (!this.lo.spendSand(m.forkCost)) { this.refuseFork('sand'); return false; }
@@ -1070,6 +1084,7 @@ export class Player extends Actor implements Wielder {
       : tr(S('f3', 'tapeShort')).replace('{s}', this.rec.seconds.toFixed(1));
     sfx('denied', { vol: 0.6 });
     this.world.fx.banner(this.x, this.y - 32, text, reason === 'anchor' ? 'K9' : 'C4', 1.1);
+    this.world.bus.emit('custom', { id: 'forkRefused', player: this, data: { reason, need: reason === 'sand' ? this.mods.forkCost : null } });
   }
 
   /** Recall (mods.recall): every armed echo of this hand flies home; true if any did */
@@ -1513,7 +1528,14 @@ export class Player extends Actor implements Wielder {
     }
     if (weaponBehind) this.weapon.drawHeld(r, hx, hy, pose);
     const tint = this.flash > 0 ? '#ffffff' : this.rewinding ? 'C3' : undefined;
-    drawSprite(ctx, spr, this.x, this.y, { flip: this.flip, tint, alpha: blink ? 0.4 : 1 });
+    const pt = this.renderTint;
+    if (pt) {
+      // the demo puppet: the hand's own colours, see-through and greyed, with a white chalk rim
+      const a = (blink ? 0.4 : 1) * pt.alpha;
+      drawSprite(ctx, spr, this.x, this.y, { flip: this.flip, tint, alpha: a });
+      if (pt.desat > 0) drawSprite(ctx, spr, this.x, this.y, { flip: this.flip, tint: 'K6', alpha: a * pt.desat * 0.6 });
+      drawSprite(ctx, outlineOf(spr, pt.outline, pt.dashed ? 'dash' : 'solid'), this.x, this.y, { flip: this.flip });
+    } else drawSprite(ctx, spr, this.x, this.y, { flip: this.flip, tint, alpha: blink ? 0.4 : 1 });
     if (!weaponBehind) this.weapon.drawHeld(r, hx, hy, pose);
     if (scarfFront) {
       drawSprite(ctx, key, this.x, this.y - 11, { flip: this.flip });

@@ -50,6 +50,7 @@ import * as Down from '../systems/downed';
 import { coopCamera, renderCoopEdges, type CoopCam } from '../world/coopCamera';
 import { S } from '../strings';
 import '../strings/f2';
+import { Onboard } from '../onboard/core';
 
 setPartLookup((id) => PARTS_BY_ID[id] ?? null);
 
@@ -688,9 +689,12 @@ export class GameScene implements Scene, RoomHost {
       ctx.fillStyle = '#0b0a14';
       ctx.fillRect(0, 0, 640, 360);
       ctx.globalAlpha = a;
-      G.font.draw(ctx, tr(UI.stopped), 320, 150, { align: 'center', color: 'R3', outline: 'K0' });
-      if (this.world.playerCount > 1) Text.draw(ctx, S('f2', 'allStopped'), 320, 178, { align: 'center', color: 'K9', outline: 'K0' });
-      if (this.deathT > 2.4) G.font.draw(ctx, tr(UI.retry), 320, 196, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K8' });
+      // the onboarding's death card (F4b) says it all in its own layout: the dim stays, these words step aside
+      if (!Onboard.deathCard.active()) {
+        G.font.draw(ctx, tr(UI.stopped), 320, 150, { align: 'center', color: 'R3', outline: 'K0' });
+        if (this.world.playerCount > 1) Text.draw(ctx, S('f2', 'allStopped'), 320, 178, { align: 'center', color: 'K9', outline: 'K0' });
+        if (this.deathT > 2.4) G.font.draw(ctx, tr(UI.retry), 320, 196, { align: 'center', color: Math.floor(this.t * 2) % 2 ? 'K10' : 'K8' });
+      }
       ctx.globalAlpha = 1;
     }
     if (!blocking) this.banners.render(ctx, this.world.playerCount > 1 || this.hud.pending.length ? 40 : 30);

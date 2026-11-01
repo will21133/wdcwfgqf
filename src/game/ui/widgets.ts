@@ -207,7 +207,12 @@ function drawMouse(ctx: CanvasRenderingContext2D, label: string, x: number, y: n
  * anything that knows which device a player last used and, for keyboards, which key table they
  * play with (F2's PlayerInput satisfies this; split-keyboard players get their own keys)
  */
-export interface PromptDevice { lastDevice?: string; bindings?: Partial<Record<Action, readonly string[]>> }
+export interface PromptDevice {
+  lastDevice?: string;
+  bindings?: Partial<Record<Action, readonly string[]>>;
+  /** the key that last triggered the action (PlayerInput: keyboard-only players see L / I / J; ONBOARD2 §1.7) */
+  lastCodeFor?(a: Action): string | null;
+}
 
 const PAD_FOR: Partial<Record<Action | 'nav', PadGlyph>> = {
   confirm: 'A', dash: 'A', cancel: 'B', interact: 'B', attack: 'X', special: 'Y', rewind: 'LB', fork: 'RB',
@@ -225,7 +230,7 @@ const usesPad = (who?: PromptDevice | null) => (who?.lastDevice ?? G.input.lastD
 function keyFor(a: Action | 'nav', who?: PromptDevice | null): string {
   if (a === 'nav') return '↕↔';
   const table = who?.bindings ?? G.input.bindings;
-  return keyLabel(table[a]?.[0] ?? '');
+  return keyLabel(who?.lastCodeFor?.(a) ?? table[a]?.[0] ?? '');
 }
 
 /** width a prompt icon will take */

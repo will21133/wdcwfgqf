@@ -13,6 +13,7 @@ import { registerBuildsSfx } from '../audio/sfx_builds';
 import { registerHandsSfx } from '../audio/sfx_hands';
 import { registerMetaSfx } from '../audio/sfx_meta';
 import { registerStorySfx } from '../audio/sfx_story';
+import { registerOnboardSfx } from '../audio/sfx_onboard';
 import { Music } from '../engine/audio/music';
 import { INSTRUMENTS } from '../audio/instruments';
 import { SONGS } from '../audio/songs';
@@ -23,6 +24,8 @@ import { loadProfile } from './save';
 import { Flow } from './flow';
 import { registerDebugRoute, runDebugRoutes } from './debugRoutes';
 import { initPlayersFromUrl, ensurePlayers } from './players';
+// F4 onboarding: gates, Stage, lessons, debug routes (?onboard= ?glyph= …), window.__tut
+import './onboard';
 
 function setupAudio() {
   registerSfx(G.audio);
@@ -37,6 +40,8 @@ function setupAudio() {
   registerHandsSfx(G.audio);
   registerMetaSfx(G.audio);
   registerStorySfx(G.audio);
+  // F4 · rewind teaching and onboarding (shared by F4a / F4b)
+  registerOnboardSfx(G.audio);
   G.music = new Music(G.audio, INSTRUMENTS);
   for (const [k, s] of Object.entries(SONGS)) G.music.define(k, s);
   const unlock = () => {

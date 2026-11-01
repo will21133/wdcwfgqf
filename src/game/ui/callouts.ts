@@ -16,11 +16,16 @@
 // Caption — one line at a time on a fixed rail at the top centre, under the purse:
 //   Caption.say(text | term, { key, dur, prio, action, who }) / Caption.clear(key). The tutorial's
 //   coach and banners and co-op's plain lines (compact pods have no room for them) go here.
+//   F4: the onboarding Stage (onboard/stage.ts) owns the rail. It plugs itself in through
+//   CaptionHooks.forward, so Caption.say becomes Stage.say (prio ≥ 2 → tier A, 1 → B, 0 → C) and the
+//   line moves to the bottom when a hand walks under it; without the Stage the F3 rail below runs.
+//   Callouts.mute(reason, on) quiets the world term callouts (the prologue, lessons, a tier-S card);
+//   Callouts.obstacles(w) hands the Stage everything they keep clear of.
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { World } from '../world/world';
 import type { Action } from '../../engine/input';
 import type { PromptDevice } from './widgets';
-import { drawTermLabel, drawPromptLabel, promptH } from './widgets';
+import { drawTermLabel, drawPromptLabel, promptH, promptW } from './widgets';
 import { Text, type ColorKey } from './text';
 import { rect } from './draw';
 import { col } from '../../art/palette';
@@ -57,6 +62,7 @@ const GAP = 5, HAND_PAD = 8;
 const TOP = 48, BOTTOM = VIEW_H - 4;
 
 interface Req { id: string; x: number; y: number; hw: number; hh: number; prio: number; color: string; above: boolean; supersedes?: string[]; plain?: L10n | string }
+export interface CalloutBox { x0: number; y0: number; x1: number; y1: number }
 interface Active { id: string; since: number; prio: number; cand: number }
 interface Box { x0: number; y0: number; x1: number; y1: number }
 interface RoomState { active: Active[]; done: Set<string>; seen: Set<string> }
@@ -70,6 +76,14 @@ let obsFrame = -1;
 /** UI-px rects other HUD parts drew last frame (the solo term plates); kept off as well */
 const uiRects: Box[] = [];
 let uiFrame = -1;
+/** UI-px rects of the Stage's teaching text (last frame): callouts keep off them, the Stage never reads them back */
+const stageRects: Box[] = [];
+let stageFrame = -1;
+/** the callout plates placed this frame (UI px) — soft obstacles for the Stage */
+const placedUi: Box[] = [];
+let placedFrame = -1;
+/** reasons the world callouts are quiet (the prologue, a lesson, a tier-S card on screen) */
+const muteReasons = new Set<string>();
 const rooms = new WeakMap<object, RoomState>();
 function room(w: object): RoomState {
   let s = rooms.get(w);
@@ -81,7 +95,7 @@ function freshObs() { if (obsFrame !== G.frame) { obsFrame = G.frame; hard.lengt
 
 /** ask for a term's plain-language callout beside an object this frame (render code only) */
 export function termCallout(_r: Renderer, _w: object, id: string, x: number, y: number, o: CalloutOpts = {}): void {
-  if (!Terms.showPlain(id)) return;
+  if (!Terms.showPlain(id) || muteReasons.size) return;
   freshReqs();
   const prio = o.prio ?? 0;
   const i = reqs.findIndex((q) => q.id === id);
@@ -100,6 +114,33 @@ export const Callouts = {
   avoidUi(x: number, y: number, w: number, h: number): void {
     if (uiFrame !== G.frame) { uiFrame = G.frame; uiRects.length = 0; }
     uiRects.push({ x0: x, y0: y, x1: x + w, y1: y + h });
+  },
+  /** the Stage's teaching text this frame (UI px): callouts keep off it from the next frame on */
+  avoidStage(x: number, y: number, w: number, h: number): void {
+    if (stageFrame !== G.frame) { stageFrame = G.frame; stageRects.length = 0; }
+    stageRects.push({ x0: x, y0: y, x1: x + w, y1: y + h });
+  },
+  /** quiet the world callouts for a reason (prologue, lesson, a tier-S card); on = false lifts that reason */
+  mute(reason: string, on: boolean): void { if (on) muteReasons.add(reason); else muteReasons.delete(reason); },
+  /** are the world callouts quiet? */
+  muted(): boolean { return muteReasons.size > 0; },
+  /**
+   * What teaching text must not cover, this frame, in world px (hard: every hand with an 8 px
+   * clearance, echoes, everything registered with avoid(); soft: enemies, soft avoid() rects;
+   * players: the hands alone) and in UI px (ui: the solo HUD term plates; placed: callout plates
+   * drawn this frame). The Stage converts the world boxes and adds its own (onboard/stage.ts).
+   */
+  obstacles(w: World): { hard: CalloutBox[]; soft: CalloutBox[]; players: CalloutBox[]; ui: CalloutBox[]; placed: CalloutBox[] } {
+    const fresh = obsFrame >= G.frame - 1;
+    const H: Box[] = fresh ? hard.slice() : [], Sf: Box[] = fresh ? soft.slice() : [], P: Box[] = [];
+    for (const p of w.players) {
+      if (p.dead || p.state === 'ghost') continue;
+      const b = { x0: p.x - 8 - HAND_PAD, y0: p.y - 26 - HAND_PAD, x1: p.x + 8 + HAND_PAD, y1: p.y + 4 + HAND_PAD };
+      H.push(b); P.push(b);
+      for (const e of p.echoes) if (!e.dead) H.push({ x0: e.x - 9, y0: e.y - 30, x1: e.x + 9, y1: e.y + 4 });
+    }
+    for (const e of w.enemies) if (!e.dead) Sf.push({ x0: e.x - e.r - 3, y0: e.y - e.height - 6, x1: e.x + e.r + 3, y1: e.y + 3 });
+    return { hard: H, soft: Sf, players: P, ui: uiFrame >= G.frame - 1 ? uiRects.slice() : [], placed: placedFrame >= G.frame - 1 ? placedUi.slice() : [] };
   },
   /** the ids showing now in this world (tests, tutorial) */
   showing(w: object): string[] { return room(w).active.map((a) => a.id); },
@@ -144,7 +185,7 @@ export const Callouts = {
     }
     for (const e of w.enemies) if (!e.dead) Sf.push({ x0: e.x - e.r - 3, y0: e.y - e.height - 6, x1: e.x + e.r + 3, y1: e.y + 3 });
     const shows = S.active.map((a) => ({ a, q: byId.get(a.id)! })).filter((s) => !!s.q);
-    const ui = uiRects.slice();
+    const ui = uiRects.concat(stageFrame >= G.frame - 1 ? stageRects : []);
     r.worldUi((ctx, toUi) => drawCallouts(ctx, toUi, w, shows, H, Sf, ui));
   },
 };
@@ -193,6 +234,7 @@ function drawCallouts(ctx: CanvasRenderingContext2D, toUi: ToUi, w: World, shows
       return { x0, y0, x1: x0 + bw, y1: y0 + bh };
     };
     const free = (b: Box, withSoft: boolean) => !overlaps(b, ob) && !hardUi.some((o) => overlaps(b, o)) && !placedNow.some((o) => overlaps(b, o)) && (!withSoft || !softUi.some((o) => overlaps(b, o)));
+    if (placedFrame !== G.frame) { placedFrame = G.frame; placedUi.length = 0; }
     let pick = -1;
     // stay put while the spot is still clear (no plate hopping about)
     if (a.cand >= 0 && free(boxAt(a.cand), false)) pick = a.cand;
@@ -202,6 +244,7 @@ function drawCallouts(ctx: CanvasRenderingContext2D, toUi: ToUi, w: World, shows
     a.cand = pick;
     const b = boxAt(pick);
     placedNow.push(b);
+    placedUi.push(b);
     const a0 = ctx.globalAlpha;
     // the leader: a dotted line from the plate's nearest edge to the object's
     leader(ctx, b, ob, q.color);
@@ -246,21 +289,37 @@ export interface CaptionOpts {
 interface Cap { text: L10n | string | null; key: string | null; t: number; dur: number; prio: number; term?: string; action?: Action; who?: PromptDevice | null; color: ColorKey; seq: number }
 const caps: Cap[] = [];
 let capSeq = 0;
+/** the Stage (onboard/stage.ts) takes the rail over by setting these; null = the F3 rail below */
+export const CaptionHooks = {
+  forward: null as null | {
+    say(text: L10n | string | null, o: CaptionOpts): void;
+    clear(key: string): void;
+    has(key: string): boolean;
+    current(): { key: string | null; text: string } | null;
+    reset(): void;
+  },
+};
 /** the solo term plates' right edge this frame (the caption steps right of them) */
 let platesRight = 0, platesFrame = -1;
 
 export const Caption = {
   say(text: L10n | string | null, o: CaptionOpts = {}): void {
+    if (CaptionHooks.forward) { CaptionHooks.forward.say(text, o); return; }
     if (o.key) { const old = caps.find((c) => c.key === o.key); if (old) { old.text = text; old.dur = o.dur ?? old.dur; old.term = o.term; old.action = o.action; old.who = o.who; old.color = o.color ?? old.color; return; } }
     caps.push({ text, key: o.key ?? null, t: 0, dur: o.dur ?? 2.6, prio: o.prio ?? 0, term: o.term, action: o.action, who: o.who, color: o.color ?? 'C3', seq: capSeq++ });
   },
-  clear(key: string): void { for (let i = caps.length - 1; i >= 0; i--) if (caps[i].key === key) caps.splice(i, 1); },
-  has(key: string): boolean { return caps.some((c) => c.key === key); },
+  clear(key: string): void { if (CaptionHooks.forward) { CaptionHooks.forward.clear(key); return; } for (let i = caps.length - 1; i >= 0; i--) if (caps[i].key === key) caps.splice(i, 1); },
+  has(key: string): boolean { return CaptionHooks.forward ? CaptionHooks.forward.has(key) : caps.some((c) => c.key === key); },
   /** the caption showing now (tests) */
-  current(): { key: string | null; text: string } | null { const c = top(); return c ? { key: c.key, text: c.term ? tr(term(c.term)?.name) : tr(c.text ?? '') } : null; },
+  current(): { key: string | null; text: string } | null {
+    if (CaptionHooks.forward) return CaptionHooks.forward.current();
+    const c = top(); return c ? { key: c.key, text: c.term ? tr(term(c.term)?.name) : tr(c.text ?? '') } : null;
+  },
+  /** where the rail line goes this frame: right of the solo HUD term plates (they end at this x; 0 = none) */
+  platesRight(): number { return platesFrame === G.frame - 1 || platesFrame === G.frame ? platesRight : 0; },
   /** the HUD's term plates end at this x this frame (so the rail never runs under them) */
   notePlates(right: number): void { if (platesFrame !== G.frame) { platesFrame = G.frame; platesRight = 0; } platesRight = Math.max(platesRight, right); },
-  reset(): void { caps.length = 0; },
+  reset(): void { caps.length = 0; CaptionHooks.forward?.reset(); },
 };
 // a new room starts with an empty rail (a caption never outlives the room that said it)
 GameHooks.onRoomStart(() => Caption.reset());
@@ -284,28 +343,46 @@ Hud.register({
     if (!c) return;
     const a = Math.min(1, c.t / 0.15, c.dur === Infinity ? 1 : (c.dur - c.t) / 0.3);
     if (a <= 0) return;
-    const y = r.y + r.h + 4;
     const a0 = ctx.globalAlpha;
     ctx.globalAlpha = a0 * Math.max(0, a);
-    const right = platesFrame === G.frame - 1 || platesFrame === G.frame ? platesRight : 0;
-    if (c.term) {
-      const t = term(c.term);
-      if (t) {
-        const lh = Math.ceil(Text.lineH('small'));
-        const w = Math.ceil(Text.measure(t.name, 'small').w + 14 + Text.measure(t.plain, 'small').w) + 10;
-        const cx = Math.max(320, right + 8 + w / 2);
-        ctx.globalAlpha = a0 * a * 0.88;
-        rect(ctx, Math.round(cx - w / 2), y, w, lh + 3, 'K0');
-        ctx.globalAlpha = a0 * a;
-        rect(ctx, Math.round(cx - w / 2), y, w, 1, c.color);
-        drawTermLabel(ctx, c.term, Math.round(cx), y + 2, { size: 'small', color: c.color, align: 'center', layout: 'inline', forcePlain: true });
-      }
-    } else {
-      const text = tr(c.text ?? '');
-      const w = Math.ceil(Text.measure(text, 'body').w) + (c.action ? 30 : 0);
-      const cx = Math.max(320, right + 12 + w / 2);
-      drawPromptLabel(ctx, c.action ?? null, text, cx, y + 2 + Math.round((promptH() - 13) / 2), { color: c.color, who: c.who });
-    }
+    const L = captionLayout(c, Caption.platesRight());
+    drawCaptionLine(ctx, c, L.cx, r.y + r.h + 4);
     ctx.globalAlpha = a0;
   },
 });
+
+/** an F3 rail line: a term's name + plain line, or [button] text (also drawn by the Stage for Caption.say lines) */
+export interface CaptionLine { text: L10n | string | null; term?: string; action?: Action; who?: PromptDevice | null; color: ColorKey }
+/** the F3 rail's geometry for a line: its centre x (right of the plates), size, and the box top below the rail's y */
+export function captionLayout(c: CaptionLine, platesRightX: number): { cx: number; w: number; h: number; dy: number } {
+  if (c.term) {
+    const t = term(c.term);
+    const lh = Math.ceil(Text.lineH('small'));
+    const w = t ? Math.ceil(Text.measure(t.name, 'small').w + 14 + Text.measure(t.plain, 'small').w) + 10 : 0;
+    return { cx: Math.max(320, platesRightX + 8 + w / 2), w, h: lh + 3, dy: 0 };
+  }
+  const text = tr(c.text ?? '');
+  const w0 = Math.ceil(Text.measure(text, 'body').w) + (c.action ? 30 : 0);
+  // drawPromptLabel's plate: icon + 4 + text, 4 px either side; as tall as the icon or the letters + 2
+  const iw = c.action ? promptW(c.action, c.who) : 0, tw = Math.ceil(Text.measure(text, 'body').w);
+  const total = iw + (iw && tw ? 4 : 0) + tw;
+  const ph = Math.max(promptH(), Math.ceil(Text.inkH('body')) + 2);
+  return { cx: Math.max(320, platesRightX + 12 + w0 / 2), w: total + 8, h: ph + 4, dy: Math.round((promptH() - 13) / 2) };
+}
+/** draw an F3 rail line centred on cx with the rail at y (the box starts at y + captionLayout().dy) */
+export function drawCaptionLine(ctx: CanvasRenderingContext2D, c: CaptionLine, cx: number, y: number): void {
+  const a0 = ctx.globalAlpha;
+  if (c.term) {
+    const t = term(c.term);
+    if (!t) return;
+    const lh = Math.ceil(Text.lineH('small'));
+    const w = Math.ceil(Text.measure(t.name, 'small').w + 14 + Text.measure(t.plain, 'small').w) + 10;
+    ctx.globalAlpha = a0 * 0.88;
+    rect(ctx, Math.round(cx - w / 2), y, w, lh + 3, 'K0');
+    ctx.globalAlpha = a0;
+    rect(ctx, Math.round(cx - w / 2), y, w, 1, c.color);
+    drawTermLabel(ctx, c.term, Math.round(cx), y + 2, { size: 'small', color: c.color, align: 'center', layout: 'inline', forcePlain: true });
+    return;
+  }
+  drawPromptLabel(ctx, c.action ?? null, tr(c.text ?? ''), cx, y + 2 + Math.round((promptH() - 13) / 2), { color: c.color, who: c.who });
+}

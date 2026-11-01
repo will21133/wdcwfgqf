@@ -32,6 +32,17 @@ export interface Settings {
   flashLimit: boolean;
   /** plain-language lines under stylised terms (GDD2 §9.8): auto = until seen 3 times */
   termHints: 'auto' | 'always' | 'off';
+  /**
+   * guidance (ONBOARD2 §5.10 / §6.12): full = lessons after fights, the adaptive coach, gates on
+   * untaught verbs; lite = notes and the Rehearsal Hall only; off = safety notes only
+   */
+  onboarding: 'full' | 'lite' | 'off';
+  /** coach prompts when hit (ONBOARD2 §6.3): auto = fades once learned, comes back if forgotten */
+  coach: 'auto' | 'always' | 'off';
+  /** the coach slows time briefly the first few times its card shows (ONBOARD2 §6.7) */
+  coachSlowmo: boolean;
+  /** the death card replays the last 3 seconds (ONBOARD2 §9) */
+  deathReplay: boolean;
 }
 
 const KEY = 'secondhand.settings.v1';
@@ -40,14 +51,16 @@ export const settings: Settings = {
   master: 0.8, music: 0.7, sfx: 0.85, shake: 1, lang: 'zh', rumble: true, rumbleStrength: 1,
   pixelPerfect: false, flashes: true, bindings: {}, bindingsKb: {}, padSwap: false, aimAssist: true, showDamage: true,
   textSize: 100, hudLabels: 'auto', rewindMode: 'both', flashLimit: false, termHints: 'auto',
+  onboarding: 'full', coach: 'auto', coachSlowmo: true, deathReplay: true,
 };
 
 /**
  * Settings whose consumers are not built yet stay out of the menu until the owning package wires
  * them up and flips the flag (an option that does nothing would only confuse players):
- * rewindMode → F3 (tap-only rewind; live), hudLabels → P1 (HUD 2.0 labels).
+ * rewindMode → F3 (tap-only rewind; live), hudLabels → P1 (HUD 2.0 labels), onboarding / coach /
+ * coachSlowmo / deathReplay → F4 (the pause menu's settings rows, F4b, once the coach and death card exist).
  */
-export const settingsLive = { rewindMode: true, hudLabels: false };
+export const settingsLive = { rewindMode: true, hudLabels: false, onboarding: false, coach: false, coachSlowmo: false, deathReplay: false };
 
 /** the ?lang= debug override applies until the player picks a language in the menu */
 let urlLang = true;
@@ -82,6 +95,10 @@ function sanitize() {
   if (!settings.bindingsKb || typeof settings.bindingsKb !== 'object') settings.bindingsKb = {};
   if (!settings.bindings || typeof settings.bindings !== 'object') settings.bindings = {};
   settings.padSwap = !!settings.padSwap;
+  if (!['full', 'lite', 'off'].includes(settings.onboarding)) settings.onboarding = 'full';
+  if (!['auto', 'always', 'off'].includes(settings.coach)) settings.coach = 'auto';
+  settings.coachSlowmo = settings.coachSlowmo !== false;
+  settings.deathReplay = settings.deathReplay !== false;
 }
 
 /** the saved rebinds of one keyboard layout (writable: the controls panel edits it) */
