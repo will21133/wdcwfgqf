@@ -36,10 +36,12 @@ export interface HintDef {
 export const hintsHooks = {
   players: (): number => 1,
   busy: (): boolean => false,
+  /** bottom edge of the card (co-op: above the bottom-left HUD pod) */
+  bottom: (): number => 326,
 };
 
 const THROTTLE = 20, SHOW = 6, QUEUE_MAX_AGE = 30, MIN_READ = 0.6;
-const W = 232, X = 8, BOTTOM = 326;
+const W = 232, X = 8;
 
 const DEFS: Record<string, HintDef> = {};
 const listeners: ((id: string) => void)[] = [];
@@ -235,7 +237,7 @@ export const Hints = {
     const h = cardHeight(active);
     const kIn = ease.outCubic(clamp(active.t / 0.25, 0, 1));
     const kOut = active.out > 0 ? clamp(active.out / 0.3, 0, 1) : 0;
-    const x = X, y = Math.round(BOTTOM - h + (1 - kIn) * 14 + kOut * 10);
+    const x = X, y = Math.round(hintsHooks.bottom() - h + (1 - kIn) * 14 + kOut * 10);
     const a = ctx.globalAlpha;
     ctx.globalAlpha = a * kIn * (1 - kOut);
     drawPanel(ctx, x, y, W, h, 'dark');

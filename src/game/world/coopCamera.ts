@@ -119,8 +119,8 @@ function drawArrow(ctx: CanvasRenderingContext2D, cx: number, cy: number, ang: n
   for (const [x, y] of px) rect(ctx, x0 + x, y0 + y, 1, 1, c);
 }
 
-/** arrows keep clear of the HUD: the HP plate top-left, the build slots and boss bar at the bottom */
-const INSET = { l: 16, r: 16, t: 34, b: 40 };
+/** arrows keep clear of the HUD: the corner pods (132×32), the purse and the boss bar */
+const INSET = { l: 16, r: 16, t: 46, b: 46 };
 
 /** tether glow on the screen edges + arrows to hands off screen (UI layer, 640×360 logical) */
 export function renderCoopEdges(ctx: CanvasRenderingContext2D, w: World, st: CoopCam) {

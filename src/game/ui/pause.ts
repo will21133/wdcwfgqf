@@ -18,8 +18,15 @@ import type { Run } from '../run';
 import type { Sprite } from '../../engine/gfx/sprite';
 import { rumbleAll } from '../../engine/rumble';
 import { ControlsPanel } from './controls';
+import { GameHooks } from '../hooks';
 
-interface PauseHost { run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void; inHub?: boolean }
+interface PauseHost {
+  run: Run; overlays: Overlay[]; onQuit?: (run: Run) => void; bankStats(): void; inHub?: boolean;
+  /** co-op: "Leave (II)" for the hand that opened the menu (GDD2 §5.1) */
+  leaveItem?: { label: import('../i18n').L10n; act: () => void };
+  /** whose build "Your Build" shows (co-op: whoever opened the menu) */
+  buildSlot?: number;
+}
 
 export function settingsItems(onBack: () => void, openControls?: () => void): MenuItem[] {
   const set = <K extends keyof typeof settings>(k: K) => (v: (typeof settings)[K]) => { settings[k] = v; saveSettings(); };
@@ -206,8 +213,9 @@ export class PauseMenu implements Overlay {
     sfx('uiOpen');
     this.list = new MenuList([
       { label: () => tr(UI.resume), act: () => (this.closing = true) },
-      { label: () => tr(L('本局构筑', 'Your Build')), act: () => host.overlays.push(new RunInfoPanel(host.run)) },
+      { label: () => tr(L('本局构筑', 'Your Build')), act: () => host.overlays.push(new RunInfoPanel(host.run, host.buildSlot ?? 0)) },
       { label: () => tr(UI.settings), act: () => host.overlays.push(new SettingsPanel()) },
+      ...(host.leaveItem ? [{ label: () => tr(host.leaveItem!.label), act: () => { this.closing = true; G.audio.muffle(false); host.leaveItem!.act(); } }] : []),
       { label: () => (this.confirmQuit ? tr(L('确定？（再按一次）', 'Are you sure? (press again)')) : tr(host.inHub ? UI.quit : UI.abandon)), act: () => {
         if (!this.confirmQuit) { this.confirmQuit = true; return; }
         this.closing = true;
@@ -219,9 +227,10 @@ export class PauseMenu implements Overlay {
   }
   update(dt: number) {
     this.t += dt;
+    GameHooks.fire.pauseTick(this.t);
     if (this.closing) { G.audio.muffle(false); return false; }
     if (this.t > 0.1 && (G.input.pressed('pause') || G.input.pressed('cancel'))) { G.input.consume('pause'); sfx('uiBack'); G.audio.muffle(false); return false; }
-    if (G.input.pressed('info')) { this.host.overlays.push(new RunInfoPanel(this.host.run)); return true; }
+    if (G.input.pressed('info')) { this.host.overlays.push(new RunInfoPanel(this.host.run, this.host.buildSlot ?? 0)); return true; }
     const prev = this.list.sel;
     this.list.update(dt);
     if (this.list.sel !== prev) this.confirmQuit = false;
@@ -230,7 +239,8 @@ export class PauseMenu implements Overlay {
   render(r: Renderer) {
     const ctx = r.ui2;
     ctx.globalAlpha = 0.55; ctx.fillStyle = '#0b0a14'; ctx.fillRect(0, 0, 640, 360); ctx.globalAlpha = 1;
-    const extra = this.list.items.length * (this.list.rh - this.list.rowH) + Math.round(Math.max(0, Text.lineH('body') - 15));
+    // 136 px holds four rows; a fifth (co-op "Leave") adds one more row
+    const extra = this.list.items.length * (this.list.rh - this.list.rowH) + Math.round(Math.max(0, Text.lineH('body') - 15)) + Math.max(0, this.list.items.length - 4) * this.list.rowH;
     panel(ctx, 220, 110 - Math.round(extra / 2), 200, 136 + extra);
     const top = 110 - Math.round(extra / 2);
     G.font.draw(ctx, tr(UI.paused), 320, top + 10, { align: 'center', color: 'B5' });

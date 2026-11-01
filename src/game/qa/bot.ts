@@ -62,8 +62,8 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   const tap = (a: Action) => { if (br.tapT <= 0) { b.pressed.add(a); br.tapT = 0.35; } };
   // stopped: try to rewind out (Last Second / self-rescue), otherwise wait for a teammate
   if (p.state === 'stopped' && !s.overlays.some((o) => o.blocks)) { if (Math.random() < 0.04) b.pressed.add('rewind'); if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
-  // overlays / death: confirm
-  if (s.overlays.some((o) => o.blocks) || (p.hp <= 0 && p.state !== 'ghost')) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
+  // overlays / death / this hand's own co-op choice panel: confirm
+  if (s.overlays.some((o) => o.blocks) || (p.hp <= 0 && p.state !== 'ghost') || s.panelOf(p.slot)) { if (Math.random() < 0.05) b.pressed.add('confirm'); return; }
   const go = (x: number, y: number) => {
     const step = pathStep(s, p.x, p.y, x, y);
     const tx = step ? step.x : x, ty = step ? step.y : y;
@@ -102,12 +102,12 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   // rewards first (give up after a while; skip vault chests — the cage needs the echo puzzle)
   if (roomT < 12) for (const e of w.entities) {
     if (s.opt.kind === 'vault') break;
-    if (e instanceof RewardOrb && !e.dead) { go(e.x, e.y); return; }
-    if (e instanceof Chest && !(e as any).opened) { go(e.x, e.y + 6); if (Math.hypot(e.x - p.x, e.y - p.y) < 20) tap('interact'); return; }
+    if (e instanceof RewardOrb && !e.dead && e.takes(p)) { go(e.x, e.y); return; }
+    if (e instanceof Chest && !(e as any).opened && e.accepts(p)) { go(e.x, e.y + 6); if (Math.hypot(e.x - p.x, e.y - p.y) < 20) tap('interact'); return; }
   }
   // events / workbench: interact once
   if (roomT < 16) for (const e of w.entities) {
-    if (e instanceof Interactable && e.enabled && !(e as any).sold && (e.constructor.name === 'EventStatue' || e.constructor.name === 'Workbench')) {
+    if (e instanceof Interactable && e.enabled && e.accepts(p) && !(e as any).sold && (e.constructor.name === 'EventStatue' || e.constructor.name === 'Workbench')) {
       go(e.x, e.y + 14);
       if ((e as Interactable).near) tap('interact');
       return;

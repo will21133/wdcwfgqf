@@ -191,3 +191,14 @@ export const EVENTS: EventDef[] = [
     ],
   },
 ];
+
+/**
+ * The frozen moment an event room shows (PLAN2 §1.5). Default = 1.0: uniformly among the events not
+ * seen this run that are allowed on this floor (every event once they are all seen). P7 replaces it
+ * with the weighted / conditional version. `rng` defaults to the run's; rooms pass their own.
+ */
+export function pickEvent(run: Run, rng: RNG = run.rng): EventDef {
+  const seen = new Set(run.eventsSeen);
+  const pool = EVENTS.filter((e) => !seen.has(e.id) && (e.minFloor ?? 0) <= run.floor);
+  return pool.length ? rng.pick(pool) : rng.pick(EVENTS);
+}

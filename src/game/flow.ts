@@ -10,6 +10,12 @@ import { CutsceneScene, CreditsScene } from './scenes/cutscene';
 import { profile, saveProfile, metaBonus, nodeLevel, markSeen } from './save';
 import type { Patron } from './progression/memories';
 import { LedgerOverlay } from './ui/metaPanels';
+import { GameHooks, Cutscenes } from './hooks';
+
+// the 1.0 story scenes are the default cutscenes (P7 re-registers these ids with the 2.0 versions)
+Cutscenes.register('intro', (then) => new CutsceneScene('intro', then), { fade: 0.8 });
+Cutscenes.register('ending', (then) => new CutsceneScene('ending', then), { fade: 1 });
+Cutscenes.register('credits', (then) => new CreditsScene(then), { fade: 0.8 });
 
 const PATRONS: Patron[] = ['oren', 'pip', 'marta', 'fen', 'asu'];
 
@@ -17,13 +23,13 @@ export const Flow = {
   title() {
     G.scenes.go(() => new TitleScene({
       start: () => (profile.introSeen ? Flow.hub('start') : Flow.intro()),
-      credits: () => G.scenes.go(() => new CreditsScene(() => Flow.title()), 'fade', 0.6),
+      credits: () => Cutscenes.play('credits', () => Flow.title()),
       ledger: () => { const t = G.scenes.current as TitleScene; t.overlays.push(new LedgerOverlay()); },
     }), 'fade', 0.6);
   },
 
   intro() {
-    G.scenes.go(() => new CutsceneScene('intro', () => { profile.introSeen = true; saveProfile(); Flow.hub('start'); }), 'fade', 0.8);
+    Cutscenes.play('intro', () => { profile.introSeen = true; saveProfile(); Flow.hub('start'); });
   },
 
   hub(context: 'start' | 'death' | 'victory' | 'quit') {
@@ -83,8 +89,9 @@ export const Flow = {
     for (const id of run.lore) if (!profile.lore.includes(id)) profile.lore.push(id);
     for (const e of run.eventsSeen) markSeen('events', e);
     saveProfile();
+    GameHooks.fire.runEnd(run, kind);
     const after = () => (kind === 'victory'
-      ? G.scenes.go(() => new CutsceneScene('ending', () => G.scenes.go(() => new CreditsScene(() => Flow.hub('victory')), 'fade', 0.8)), 'fade', 1)
+      ? Cutscenes.play('ending', () => Cutscenes.play('credits', () => Flow.hub('victory')))
       : Flow.hub(kind));
     G.scenes.go(() => new SummaryScene(run, kind, banked, after), 'fade', kind === 'victory' ? 1.2 : 0.8);
   },

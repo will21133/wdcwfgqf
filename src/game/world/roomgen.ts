@@ -3,7 +3,9 @@
 import { RNG } from '../../engine/rng';
 import { RoomMap, T, PropSpec } from './room';
 
-export type RoomKind = 'combat' | 'elite' | 'boss' | 'shop' | 'event' | 'rest' | 'treasure' | 'vault' | 'start' | 'hub' | 'tutorial';
+// every room kind (rooms/registry.ts); unknown kinds get the plain safe-room shape
+import type { RoomKind } from '../rooms/registry';
+export type { RoomKind };
 
 export interface GenOpts {
   rng: RNG;

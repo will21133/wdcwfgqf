@@ -23,7 +23,9 @@ export interface NoticeSpec {
 
 interface Live extends NoticeSpec { t: number; slotY: number; sz?: { w: number; h: number }; szKey?: string }
 
-const DUR = 4.2, IN = 0.28, OUT = 0.3, MAX_LIVE = 3, TOP = 36;
+const DUR = 4.2, IN = 0.28, OUT = 0.3, MAX_LIVE = 3;
+/** where the stack starts (co-op: below the top-right HUD pod) */
+export const noticesHooks = { top: (): number => 36 };
 
 const COLOR: Record<NoticeKind, ColorKey> = { achievement: 'B5', secret: 'V4', chime: 'B6', unlock: 'G4' };
 const LABEL: Record<NoticeKind, L10n> = {
@@ -119,7 +121,7 @@ export const Notices = {
       G.audio.play(SOUND[n.kind]);
     }
     // stack top-down, sliding into freed slots
-    let y = TOP;
+    let y = noticesHooks.top();
     for (const n of live) {
       const h = size(n).h;
       n.slotY = n.slotY < 0 ? y : n.slotY + (y - n.slotY) * Math.min(1, dt * 10);

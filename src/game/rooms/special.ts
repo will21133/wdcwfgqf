@@ -14,7 +14,7 @@ import { buildManman, CITIZENS, EVENT_OBJECTS, WORKBENCH, PLATE, PEDESTAL } from
 import { ICONS, patronSigil } from '../../art/sprites/icons';
 import { rollPart, partLook, pickPatron } from '../progression/rewards';
 import { MEMORIES, PATRONS } from '../progression/memories';
-import { EVENTS, EventDef } from '../progression/events';
+import { pickEvent, EventDef } from '../progression/events';
 import { EventOverlay } from '../ui/eventOverlay';
 import { G, sfx } from '../G';
 import { tr, L, L10n, UI } from '../i18n';
@@ -22,7 +22,9 @@ import { TS, T } from '../world/room';
 import { col } from '../../art/palette';
 import { frand } from '../../engine/rng';
 import { Text } from '../ui/text';
-import { drawPanel } from '../ui/widgets';
+import { drawPanel, promptH } from '../ui/widgets';
+import { S } from '../strings';
+import '../strings/f2';
 import { rect } from '../ui/draw';
 import type { Player } from '../entities/player';
 import type { Loadout } from '../run';
@@ -38,7 +40,7 @@ export interface RoomHost {
   offerHourglass(who?: Player | null): void;
   offerCalibration(who?: Player | null): void;
   grantPart(p: PartDef, who?: Player | null): void;
-  toast(icon: Sprite | null, title: string, desc: string, color?: string): void;
+  toast(icon: Sprite | null, title: string, desc: string, color?: string, slot?: number | null): void;
   unlockDoors(): void;
   center(): { x: number; y: number };
 }
@@ -107,7 +109,29 @@ class ShopItem extends Interactable {
   /** what the nearest hand would pay */
   get price() { const p = this.nearBy ?? this.world.player; return this.priceFor(p ? this.host.run.lo(p.slot) : null); }
   prompt() { return this.sold ? tr(UI.soldOut) : `${tr(this.name)}  ${this.price}`; }
+  /** co-op: seconds the nearest hand has held Interact (the shared purse needs a deliberate hold) */
+  holdT = 0;
+  /** the hand whose hold is under way */
+  private holder: Player | null = null;
+  update(dt: number) {
+    this.t += dt;
+    if (this.world.playerCount <= 1) { super.update(dt); return; }
+    // co-op (GDD2 §2.3 / §5.8): hold Interact 0.6 s to buy, so nobody spends the shared purse by accident
+    super.update(dt);
+    const p = this.nearBy;
+    if (!p || this.sold || !p.input.down('interact')) { this.holdT = 0; this.holder = null; return; }
+    if (this.holder !== p) { this.holder = p; this.holdT = 0; }
+    // after a purchase attempt (bought or too poor) the button has to be let go first
+    if (this.holdT < 0) return;
+    this.holdT += dt;
+    if (this.holdT >= SHOP_HOLD) { this.holdT = -1; this.user = p; this.buy(); }
+  }
   interact() {
+    // co-op purchases go through the hold above; a tap only does something in solo (1.0)
+    if (this.world.playerCount > 1) return;
+    this.buy();
+  }
+  private buy() {
     if (this.sold) return;
     const run = this.host.run;
     const who = this.user;
@@ -125,7 +149,6 @@ class ShopItem extends Interactable {
     // what you buy is yours (GDD2 §5.8)
     this.onBuy(who);
   }
-  update(dt: number) { this.t += dt; super.update(dt); }
   render(r: Renderer) {
     drawSprite(r.w, PEDESTAL, this.x, this.y);
   }
@@ -151,9 +174,33 @@ class ShopItem extends Interactable {
       });
     }
     super.renderUnlit(r);
+    // co-op: "hold to buy" under the prompt, filling in the buyer's colour
+    if (this.near && !this.sold && this.world.playerCount > 1) {
+      const k = Math.max(0, this.holdT) / SHOP_HOLD, c = this.nearBy?.color ?? 'B5';
+      const px = this.x, py = this.y - this.promptY();
+      r.worldUi((ctx, toUi) => {
+        const q = toUi(px, py);
+        const ph = Math.max(promptH(), Math.ceil(Text.inkH('body')) + 2);
+        const ly = Math.round(q.y + ph + 4);
+        const label = tr(HOLD_BUY);
+        const w = Math.max(44, Math.ceil(Text.measure(label, 'small').w) + 10);
+        const x0 = Math.round(q.x - w / 2);
+        const a = ctx.globalAlpha;
+        ctx.globalAlpha = a * 0.85;
+        rect(ctx, x0, ly, w, Math.ceil(Text.lineH('small')) + 5, 'K0');
+        ctx.globalAlpha = a;
+        rect(ctx, x0 + 1, ly + Math.ceil(Text.lineH('small')) + 3, w - 2, 1, 'K3');
+        if (k > 0) rect(ctx, x0 + 1, ly + Math.ceil(Text.lineH('small')) + 2, Math.round((w - 2) * Math.min(1, k)), 2, c);
+        Text.draw(ctx, label, q.x, ly + 2 + Text.inkMid('small'), { size: 'small', color: k > 0 ? 'K10' : 'K8', align: 'center', valign: 'middle' });
+      });
+    }
   }
   promptY() { return 44; }
 }
+
+/** co-op: seconds Interact is held to buy (GDD2 §2.3) */
+const SHOP_HOLD = 0.6;
+const HOLD_BUY = S('f2', 'holdBuy');
 
 export function setupShop(h: RoomHost) {
   const w = h.world, run = h.run, rng = h.rng;
@@ -189,14 +236,18 @@ export function setupShop(h: RoomHost) {
 // ───────────────────────── Repair station ─────────────────────────
 class Workbench extends Interactable {
   used = false;
+  /** hands that already used it: each hand gets its own choice (GDD2 §5.8) */
+  usedBy = new Set<number>();
   constructor(x: number, y: number, private host: RoomHost) { super(); this.x = x; this.y = y; this.range = 26; }
   prompt() { return tr(L('使用修理台', 'Use the bench')); }
+  accepts(p: Player) { return !this.usedBy.has(p.slot); }
   interact() {
     if (this.used) return;
     const h = this.host;
     const run = h.run;
-    // the hand at the bench chooses for themselves (F2c: each hand picks in turn)
+    // the hand at the bench chooses for themselves; the bench stays open until every hand has
     const who = this.user ?? h.world.player!;
+    if (this.usedBy.has(who.slot)) return;
     const lo = run.lo(who.slot);
     const polishable = lo.memories.filter((m) => m.rarity < 3);
     const choices: Choice[] = [
@@ -227,8 +278,8 @@ class Workbench extends Interactable {
         }), { title: L('打磨', 'Polish'), color: 'B5', icon: ICONS.whetstone }, undefined, undefined, who), this);
       },
     });
-    this.used = true;
-    this.enabled = false;
+    this.usedBy.add(who.slot);
+    if (h.world.players.every((p) => this.usedBy.has(p.slot))) { this.used = true; this.enabled = false; }
     h.openChoice(choices, { title: UI.rest, sub: L('一次只能做一件事。', 'There is only time for one.'), icon: ICONS.rest, color: 'G3' }, undefined, undefined, who);
   }
   render(r: Renderer) {
@@ -278,10 +329,11 @@ class EventStatue extends Interactable {
       shards: (n: number) => { h.run.shards += n; sfx('shard'); },
       lore: (id: string) => { h.run.lore.push(id); },
     };
+    // co-op: the decider's own device drives the event (solo: every device, as in 1.0)
     h.openOverlay(new EventOverlay(this.ev, this.art, h.run, ctx, () => {
       for (const f of pending) f();
       h.unlockDoors();
-    }));
+    }, w.playerCount > 1 ? who.input : undefined));
   }
   update(dt: number) { this.t += dt; super.update(dt); }
   renderGround(r: Renderer) { r.w.fillStyle = 'rgba(11,10,20,0.45)'; r.w.beginPath(); r.w.ellipse(Math.round(this.x), Math.round(this.y), 9, 3, 0, 0, Math.PI * 2); r.w.fill(); }
@@ -302,9 +354,7 @@ let EVENT_PART_LOOKUP: (id: string) => PartDef | null = () => null;
 export function setPartLookup(f: (id: string) => PartDef | null) { EVENT_PART_LOOKUP = f; }
 
 export function setupEvent(h: RoomHost) {
-  const seen = new Set(h.run.eventsSeen);
-  const pool = EVENTS.filter((e) => !seen.has(e.id) && (e.minFloor ?? 0) <= h.run.floor);
-  const ev = pool.length ? h.rng.pick(pool) : h.rng.pick(EVENTS);
+  const ev = pickEvent(h.run, h.rng);
   h.run.eventsSeen.push(ev.id);
   const art = CITIZENS[ev.art] ?? EVENT_OBJECTS[ev.art] ?? null;
   const c = h.center();

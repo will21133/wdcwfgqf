@@ -130,6 +130,8 @@ export class Loadout {
   /** per-room: the wax seal is up */
   shieldReady = false;
   revivesUsed = 0;
+  /** joined mid-run: memory picks still owed (one per floor already climbed, GDD2 §5.1) */
+  catchup = 0;
   /** fired when a rewind charge fills */
   onCharge?: () => void;
   /** live hook context of the current room (set by registerHooks) */
@@ -223,6 +225,9 @@ export class Loadout {
   has(id: string) { return this.memories.some((m) => m.id === id) || this.parts.includes(id) || this.hourglass.includes(id) || this.calibrations.includes(id); }
 }
 
+/** per-floor state of the floor plan (kinds = rooms of each type entered this floor) */
+export interface FloorState { shop: boolean; elites: number; vault: boolean; kinds: Record<string, number> }
+
 // ───────────────────────── Run (shared) ─────────────────────────
 export class Run {
   config: RunConfig;
@@ -246,9 +251,11 @@ export class Run {
   lore: string[] = [];
   eventsSeen: string[] = [];
   /** per-floor flags for the floor plan */
-  floorState = { shop: false, elites: 0, vault: false };
+  floorState: FloorState = { shop: false, elites: 0, vault: false, kinds: {} };
   /** this run's scratch flags (eggs, multi-floor events) */
   flags: Record<string, number> = {};
+  /** GameHooks.onRunStart has fired for this run */
+  started = false;
   overwind = 0;
   /** meta rarity boost for memory rolls (copied into each new loadout) */
   luck = 0;
@@ -280,6 +287,8 @@ export class Run {
       l.rerolls = this.startRerolls;
       l.autoRewindLeft = l.mods.autoRewindPerFloor;
       if (this.startFullSand) l.charges = l.mods.rewindCharges;
+      // a hand joining a run already under way catches up with a memory pick per floor climbed
+      if (this.started) l.catchup = this.floor;
       // the echo cap depends on how many hands there are
       for (const o of this.all) o.recompute();
     }

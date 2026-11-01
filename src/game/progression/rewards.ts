@@ -1,6 +1,8 @@
 // Floor plan (door options) and reward generation / granting.
 import type { Run, OwnedMemory, Loadout } from '../run';
-import type { RoomKind } from '../world/roomgen';
+import type { RoomKind } from '../rooms/registry';
+import { RoomTypes } from '../rooms/registry';
+import { Routes } from '../routes';
 import type { Sprite } from '../../engine/gfx/sprite';
 import { MEMORIES, MEMORY_LIST, PATRONS, Patron, offerable, EXCLUSIVE_SLOTS, MemoryDef } from './memories';
 import { HOURGLASS, HOURGLASS_BY_ID } from './hourglass';
@@ -30,27 +32,46 @@ export function pickPatron(run: Run, rng: RNG): Patron {
   }) ?? 'oren';
 }
 
-export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; elites: number; vault: boolean }, cur?: string): RoomOption[] {
+/**
+ * Combat doors by reward, with their 1.0 weights (the whole table is scaled by the 'combat' room
+ * type's weight). `next` is the index of the room the door leads to.
+ */
+export const COMBAT_REWARDS: { reward: RewardKind; weight(run: Run, next: number): number; patron?: boolean }[] = [
+  { reward: 'memory', weight: () => 46, patron: true },
+  { reward: 'hourglass', weight: (_r, next) => (next > 1 ? 9 : 0) },
+  { reward: 'brass', weight: () => 9 },
+  { reward: 'heal', weight: (run) => (run.all.some((lo) => lo.hp < lo.mods.maxHp * 0.6) ? 12 : 5) },
+  { reward: 'calibration', weight: (_r, next) => (next > 1 ? 9 : 0) },
+  { reward: 'part', weight: () => 6 },
+];
+
+export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; elites: number; vault: boolean; kinds?: Record<string, number> }, cur?: string): RoomOption[] {
   const next = run.roomIndex + 1;
-  if (next >= ROOMS_PER_FLOOR) return [{ kind: 'boss', reward: null }];
-  if (next === ROOMS_PER_FLOOR - 1) {
+  const rooms = Routes.floor(run).rooms;
+  if (next >= rooms) return [{ kind: 'boss', reward: null }];
+  if (next === rooms - 1) {
     return floorState.shop ? [{ kind: 'rest', reward: null }, { kind: 'combat', reward: 'heal' }] : [{ kind: 'rest', reward: null }, { kind: 'shop', reward: null }];
   }
   const n = rng.chance(0.35) && next > 1 ? 3 : 2;
   const opts: RoomOption[] = [];
   const key = (o: RoomOption) => `${o.kind}|${o.reward}|${o.patron ?? ''}`;
-  const table: [() => RoomOption, number][] = [
-    [() => ({ kind: 'combat', reward: 'memory', patron: pickPatron(run, rng) }), 46],
-    [() => ({ kind: 'combat', reward: 'hourglass' }), next > 1 ? 9 : 0],
-    [() => ({ kind: 'combat', reward: 'brass' }), 9],
-    [() => ({ kind: 'combat', reward: 'heal' }), run.all.some((lo) => lo.hp < lo.mods.maxHp * 0.6) ? 12 : 5],
-    [() => ({ kind: 'combat', reward: 'calibration' }), next > 1 ? 9 : 0],
-    [() => ({ kind: 'combat', reward: 'part' }), 6],
-    [() => ({ kind: 'elite', reward: rng.chance(0.5) ? 'part' : 'memory', patron: pickPatron(run, rng) }), next >= 3 && floorState.elites < 2 ? 11 : 0],
-    [() => ({ kind: 'shop', reward: null }), !floorState.shop && next >= 3 ? 14 : 0],
-    [() => ({ kind: 'event', reward: null }), next >= 1 ? 11 : 0],
-    [() => ({ kind: 'vault', reward: 'part' }), !floorState.vault && next >= 2 ? 6 : 0],
-  ];
+  // the door table: combat doors by reward, then every other registered room kind by its weight
+  // (registry order = the 1.0 table's order, so a seed rolls the same doors as 1.0)
+  const table: [() => RoomOption, number][] = [];
+  for (const def of RoomTypes.all()) {
+    if (def.kind === 'combat') {
+      const k = def.weight(run, run.floor, next);
+      for (const cr of COMBAT_REWARDS) table.push([() => ({ kind: 'combat', reward: cr.reward, ...(cr.patron ? { patron: pickPatron(run, rng) } : {}) }), cr.weight(run, next) * k]);
+      continue;
+    }
+    let wgt = def.weight(run, run.floor, next);
+    if (def.oncePerFloor && (floorState.kinds?.[def.kind] ?? 0) > 0) wgt = 0;
+    const kind = def.kind;
+    table.push([() => {
+      if (kind === 'elite') return { kind, reward: rng.chance(0.5) ? 'part' : 'memory', patron: pickPatron(run, rng) };
+      return { kind, ...(def.door?.(run, rng) ?? { reward: null }) };
+    }, wgt]);
+  }
   // guarantee a shop opportunity mid-floor
   if (!floorState.shop && next >= 5) opts.push({ kind: 'shop', reward: null });
   let guard = 0;
@@ -68,13 +89,9 @@ export function nextOptions(run: Run, rng: RNG, floorState: { shop: boolean; eli
 export interface RewardLook { icon: Sprite; color: string; label: L10n }
 
 export function rewardLook(o: RoomOption): RewardLook {
-  switch (o.kind) {
-    case 'boss': return { icon: ICONS.boss, color: 'R3', label: UI.boss };
-    case 'shop': return { icon: ICONS.snail, color: 'B4', label: UI.shop };
-    case 'event': return { icon: ICONS.event, color: 'K9', label: UI.event };
-    case 'rest': return { icon: ICONS.rest, color: 'G3', label: UI.rest };
-    case 'vault': return { icon: ICONS.vault, color: 'B5', label: UI.vault };
-  }
+  // a room kind without a fight reward shows its registered medallion (boss, shop, event, rest, vault …)
+  const def = RoomTypes.get(o.kind);
+  if (def && o.kind !== 'combat' && o.kind !== 'elite' && (!def.combat || !o.reward)) return { icon: ICONS[def.icon] ?? ICONS.boss, color: def.color ?? 'K9', label: def.label };
   const base = rewardKindLook(o.reward, o.patron);
   if (o.kind === 'elite') return { ...base, label: L(`${UI.elite.zh} · ${base.label.zh}`, `${UI.elite.en} · ${base.label.en}`) };
   return base;

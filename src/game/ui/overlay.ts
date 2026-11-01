@@ -2,7 +2,7 @@
 import type { Renderer } from '../../engine/gfx/renderer';
 import { G, sfx } from '../G';
 import { tr, L, L10n, UI, i18n } from '../i18n';
-import { drawHint } from './prompts';
+import { drawHint, hintW } from './prompts';
 import { card, rect, panel } from './draw';
 import { drawSprite, Sprite } from '../../engine/gfx/sprite';
 import { ease, clamp } from '../../engine/math';
@@ -10,9 +10,12 @@ import type { Choice } from '../progression/rewards';
 import { SLOT_GLYPH } from '../../art/sprites/icons';
 import { col } from '../../art/palette';
 import { Text, TextSize } from './text';
-import { drawTermLabel } from './widgets';
+import { drawTermLabel, promptH, type PromptDevice } from './widgets';
+import type { Action } from '../../engine/input';
+import { drawSlotBadge, drawSlotPlate, ROMAN_LATIN, slotColor } from '../players';
 import { Terms } from '../meta/registry';
-import { term as termDef } from '../strings';
+import { term as termDef, S } from '../strings';
+import '../strings/f2';
 
 export interface Overlay {
   /** returns false when finished */
@@ -57,10 +60,44 @@ interface CardLayout {
   head: { term: number; sub: number; quote: number; bottom: number };
 }
 
+interface CompactLayout {
+  /** panel height, header strip, row height, detail text size / flavour shown / detail height, footer */
+  h: number; hh: number; rh: number; desc: TextSize; flavor: boolean; dh: number; fh: number;
+  hint: { items: [Action, string][]; size: TextSize };
+  /** header and names in 10px (a quarter panel at a large text size) */
+  tight: boolean;
+}
+
 export interface ChoiceHeader {
   title: L10n; sub?: L10n; quote?: L10n; icon?: Sprite; color: string;
   /** term id of what is being offered (memory / hourglass / calibration ...): its plain line shows under the title while the player is learning it */
   term?: string;
+}
+
+/** what drives a panel: the menu aggregate (solo) or one player's own device (co-op) */
+export interface InputLike extends PromptDevice {
+  pressed(a: Action): boolean;
+  down(a: Action): boolean;
+  consume(a: Action): boolean;
+  nav(dt: number): { x: number; y: number };
+  /** this device also drives the mouse (kbm / the solo player) */
+  usesMouse?: boolean;
+  mouseAim?: boolean;
+}
+
+/**
+ * Co-op (PLAN2 §2 F2 item 6, GDD2 §5.8): a choice belongs to one hand. Their device drives it and it
+ * sits in their half / quarter of the screen as a compact list (icon · name · tag per row, the
+ * selected choice's text below; hold the pocket-watch button for the full card). Other hands keep
+ * walking unless `blocks` (only while enemies are alive).
+ */
+export interface ChoicePlace {
+  input: InputLike;
+  rect: { x: number; y: number; w: number; h: number };
+  slot: number;
+  blocks?: boolean;
+  /** the panel hugs the rect's bottom edge (bottom quarters: it covers that hand's own pod) */
+  anchor?: 'top' | 'bottom';
 }
 
 export class ChoiceOverlay implements Overlay {
@@ -71,6 +108,11 @@ export class ChoiceOverlay implements Overlay {
   pickT = 0;
   done = false;
   private hover = -1;
+  /** co-op: this hand's compact panel */
+  readonly compact: boolean;
+  private inp: InputLike;
+  /** compact: the full card is shown while the pocket-watch button is held */
+  private expanded = false;
 
   constructor(
     public choices: Choice[],
@@ -78,9 +120,14 @@ export class ChoiceOverlay implements Overlay {
     private onDone?: (c: Choice) => void,
     /** returns fresh choices, or null if no rerolls remain */
     public reroll?: () => Choice[] | null,
+    /** co-op: whose panel this is and where it sits (solo: full screen, every device) */
+    public place?: ChoicePlace,
   ) {
+    this.compact = !!place;
+    this.inp = place?.input ?? G.input;
+    if (place) this.blocks = !!place.blocks;
     sfx('uiOpen');
-    G.audio.muffle(true, 2200);
+    if (!place) G.audio.muffle(true, 2200);
     // decide once per opening whether this offer explains its term, and count the sighting
     if (header.term) { this.termPlain = Terms.showPlain(header.term); Terms.seen(header.term); }
   }
@@ -157,6 +204,7 @@ export class ChoiceOverlay implements Overlay {
 
   update(dt: number): boolean {
     this.t += dt;
+    if (this.compact) return this.updateCompact(dt);
     const inp = G.input;
     if (this.picked >= 0) {
       this.pickT += dt;
@@ -200,6 +248,7 @@ export class ChoiceOverlay implements Overlay {
 
   render(r: Renderer) {
     const ctx = r.ui2;
+    if (this.compact) { this.renderCompact(ctx); return; }
     const fadeIn = clamp(this.t / 0.25, 0, 1);
     const fadeOut = this.picked >= 0 ? clamp(1 - (this.pickT - 0.25) / 0.3, 0, 1) : 1;
     const A = fadeIn * fadeOut;
@@ -252,6 +301,195 @@ export class ChoiceOverlay implements Overlay {
       if (this.reroll && this.rerollsLeft() > 0) items.push(['special', tr(L(`重抽 ×${this.rerollsLeft()}`, `Reroll ×${this.rerollsLeft()}`))]);
       drawHint(ctx, 320, 334, items);
     }
+  }
+
+  // ───────────────────────── co-op: one hand's compact panel ─────────────────────────
+  private cl: CompactLayout | null = null;
+  private clKey = '';
+  /** rows' screen position from the last frame (mouse hit-test) */
+  private rowHit = { x: 0, y: 0, w: 0, h: 0 };
+
+  /**
+   * Header strip, one row per choice, a detail box sized for the longest text (so the panel does not
+   * jump while browsing), and the device's own prompts. Everything is measured: the detail text drops
+   * to 10px when 12px does not fit, then the flavour line goes.
+   */
+  private compactLayout(): CompactLayout {
+    const R = this.place!.rect;
+    let key = `${Text.k}|${i18n.lang}|${R.w}|${R.h}|${this.rerollsLeft()}`;
+    for (const c of this.choices) key += `|${c.id}${c.rarity}${c.replaces ? 'r' : ''}`;
+    if (this.cl && this.clKey === key) return this.cl;
+    const quarter = R.h < 200;
+    const tw = R.w - 20;
+    const detail = (size: TextSize, flavor: boolean) => Math.max(...this.choices.map((c) => {
+      let h = Text.measureWrapped(c.desc, size, tw).h;
+      if (c.replaces) h += 3 + Text.measureWrapped(`${tr(UI.replaces)}：${tr(c.replaces)}`, size, tw).h;
+      if (flavor && c.flavor) h += 3 + Text.measureWrapped(c.flavor, 'small', tw).h;
+      return Math.ceil(h);
+    }));
+    // tight: a quarter panel whose 12px rows would not leave room for the text (large text sizes)
+    // sets the header and the names in 10px and drops the flavour line
+    const build = (tight: boolean) => {
+      const ln = Text.lineH(tight ? 'small' : 'body');
+      const hh = Math.max(20, Math.ceil(ln) + (tight ? 5 : 7));
+      const rh = Math.max(tight ? 18 : 22, Math.ceil(ln) + (tight ? 5 : 8));
+      const fh = promptH() + (tight ? 6 : 9);
+      const rows = 4 + this.choices.length * rh + 4;
+      const room = R.h - hh - rows - fh - 8;
+      let desc: TextSize = 'body', flavor = !tight;
+      if (detail(desc, flavor) > room) flavor = false;
+      if (detail(desc, flavor) > room) { desc = 'small'; flavor = !tight; }
+      if (detail(desc, flavor) > room) flavor = false;
+      const dh = detail(desc, flavor);
+      // panels side by side share a height: the detail box holds at least three lines (+ flavour),
+      // a quarter panel fills its quarter. Text is never cut (at extreme text sizes a quarter panel
+      // may still grow past its quarter).
+      const anyFlavor = flavor && this.choices.some((c) => !!c.flavor);
+      let dhMin = Math.ceil(3 * Text.lineH(desc) + (anyFlavor ? 3 + Text.lineH('small') : 0));
+      if (quarter) dhMin = Math.min(dhMin, R.h - (hh + rows + 8 + fh));
+      const h = Math.max(hh + rows + 8 + Math.max(dh, dhMin) + fh, quarter ? R.h : 0);
+      return { h, hh, rh, desc, flavor, dh, fh, tight };
+    };
+    let L0 = build(false);
+    if (quarter && L0.h > R.h) L0 = build(true);
+    const { h, hh, rh, desc, flavor, dh, fh, tight } = L0;
+    // prompts: [choose] [reroll ×n] [hold: card], shortened when they would not fit
+    const items: [Action, string][] = [['confirm', tr(UI.choose)]];
+    if (this.reroll && this.rerollsLeft() > 0) items.push(['special', tr(L(`重抽 ×${this.rerollsLeft()}`, `Reroll ×${this.rerollsLeft()}`))]);
+    items.push(['info', tr(S('f2', 'holdCard'))]);
+    let hint: { items: [Action, string][]; size: TextSize } = { items, size: tight ? 'small' : 'body' };
+    if (hintW(items, this.inp) > R.w - 12) hint = { items, size: 'small' };
+    if (hintW(items, this.inp, 'small') > R.w - 12) hint = { items: items.slice(0, -1), size: 'small' };
+    this.cl = { h, hh, rh, desc, flavor, dh, fh, hint, tight };
+    this.clKey = key;
+    return this.cl;
+  }
+
+  private updateCompact(dt: number): boolean {
+    const inp = this.inp;
+    if (this.picked >= 0) { this.pickT += dt; return this.pickT < 0.5; }
+    this.expanded = inp.down('info');
+    if (this.t < 0.3) return true;
+    const n = this.choices.length;
+    const nav = inp.nav(dt);
+    const d = nav.y || nav.x;
+    if (d) { this.sel = (this.sel + d + n) % n; sfx('uiMove', { vol: 0.6 }); }
+    // the keyboard + mouse hand can point at a row
+    const mouse = !!inp.usesMouse && G.input.mouseAim;
+    if (mouse) {
+      const H = this.rowHit, mx = G.input.mx, my = G.input.my;
+      const h = mx >= H.x && mx < H.x + H.w && my >= H.y && my < H.y + H.h * n ? Math.floor((my - H.y) / H.h) : -1;
+      if (h >= 0 && h !== this.hover) { this.sel = h; sfx('uiMove', { vol: 0.6 }); }
+      this.hover = h;
+    }
+    if (this.reroll && inp.pressed('special')) {
+      inp.consume('special');
+      const fresh = this.reroll();
+      if (fresh && fresh.length) { this.choices = fresh; this.t = 0.18; this.sel = 0; sfx('cogWind'); }
+      else sfx('denied');
+      return true;
+    }
+    const click = mouse && inp.pressed('attack') && this.hover >= 0;
+    if (inp.pressed('confirm') || inp.pressed('interact') || click) {
+      for (const a of ['confirm', 'interact', 'attack', 'dash'] as const) inp.consume(a);
+      this.picked = this.sel;
+      const c = this.choices[this.sel];
+      c.apply();
+      this.onDone?.(c);
+      sfx('uiSelect');
+      sfx('pickupBig', { vol: 0.5 });
+    }
+    return true;
+  }
+
+  private renderCompact(ctx: CanvasRenderingContext2D) {
+    const P = this.place!, R = P.rect, LY = this.compactLayout();
+    const kIn = ease.outCubic(clamp(this.t / 0.22, 0, 1));
+    const kOut = this.picked >= 0 ? ease.inCubic(clamp((this.pickT - 0.18) / 0.3, 0, 1)) : 0;
+    const dir = R.x + R.w / 2 < 320 ? -1 : 1;
+    const x = Math.round(R.x + dir * ((1 - kIn) * 16 + kOut * 16)), w = R.w;
+    const y = P.anchor === 'bottom' ? R.y + R.h - LY.h : R.y;
+    const A = kIn * (1 - kOut);
+    if (A <= 0) return;
+    const a0 = ctx.globalAlpha;
+    ctx.globalAlpha = a0 * A;
+    const s = P.slot, sc = slotColor(s);
+    drawSlotPlate(ctx, s, x, y, w, LY.h);
+    // header: slot-tinted strip with the hand's badge and numeral, what is on offer, its subtitle
+    const hh = LY.hh;
+    rect(ctx, x + 2, y + 2, w - 4, hh - 2, ['R0', 'B0', 'G0', 'U0'][s % 4]);
+    rect(ctx, x + 2, y + hh, w - 4, 1, sc);
+    drawSlotBadge(ctx, s, x + 10, y + 2 + (hh - 2) / 2);
+    const nx = x + 17;
+    Text.draw(ctx, ROMAN_LATIN[s % 4], nx, y + 2 + (hh - 2) / 2, { size: 'tiny', color: 'K10', valign: 'middle', shadow: false });
+    const ix = nx + Math.ceil(Text.measure(ROMAN_LATIN[s % 4], 'tiny').w) + 6;
+    const h = this.header;
+    if (h.icon) ctx.drawImage(h.icon.img, ix, Math.round(y + 2 + (hh - 2) / 2 - h.icon.h / 2));
+    const tx = ix + (h.icon ? h.icon.w + 4 : 0);
+    const hs: TextSize = LY.tight ? 'small' : 'body';
+    const tw = Math.ceil(Text.measure(h.title, hs).w);
+    Text.draw(ctx, h.title, tx, y + 2 + (hh - 2) / 2, { size: hs, color: h.color, valign: 'middle', outline: 'K0' });
+    if (h.sub) {
+      const sw = Math.ceil(Text.measure(h.sub, 'small').w);
+      if (tx + tw + 10 + sw <= x + w - 8) Text.draw(ctx, h.sub, x + w - 8, y + 2 + (hh - 2) / 2, { size: 'small', color: 'K8', align: 'right', valign: 'middle' });
+    }
+    // rows: icon · name (rarity colour) · tag; the selected one is lit with the hand's colour
+    const rh = LY.rh, ry0 = y + hh + 5;
+    this.rowHit = { x: x + 4, y: ry0, w: w - 8, h: rh };
+    this.choices.forEach((c, i) => {
+      const ry = ry0 + i * rh;
+      const sel = i === this.sel;
+      const picked = i === this.picked;
+      if (sel) {
+        rect(ctx, x + 4, ry, w - 8, rh - 2, picked && this.pickT < 0.15 ? 'K8' : 'K3');
+        rect(ctx, x + 4, ry, 2, rh - 2, sc);
+      }
+      const cy = ry + (rh - 2) / 2;
+      ctx.drawImage(c.icon.img, x + 10, Math.round(cy - c.icon.h / 2));
+      const nx2 = x + 10 + c.icon.w + 5;
+      const right = x + w - 9;
+      const name = tr(c.title);
+      const nSize: TextSize = !LY.tight && nx2 + Text.measure(name, 'body').w <= right ? 'body' : 'small';
+      const nw = Math.ceil(Text.measure(name, nSize).w);
+      Text.draw(ctx, name, nx2, cy, { size: nSize, color: RARITY_TEXT[c.rarity], valign: 'middle' });
+      // tag (and NEW) on the right when there is room
+      let rx = right;
+      const tag = tr(c.tag), tgw = Math.ceil(Text.measure(tag, 'small').w);
+      if (nx2 + nw + 10 + tgw <= rx) { Text.draw(ctx, tag, rx, cy, { size: 'small', color: 'K7', align: 'right', valign: 'middle' }); rx -= tgw + 6; }
+      if (c.isNew) { const nw2 = Math.ceil(Text.measure(UI.new, 'small').w); if (nx2 + nw + 6 + nw2 <= rx) Text.draw(ctx, UI.new, rx, cy, { size: 'small', color: 'B5', align: 'right', valign: 'middle' }); }
+      if (c.replaces) rect(ctx, x + w - 7, ry + 3, 2, rh - 8, 'R4');
+    });
+    // detail: the selected choice's text
+    const c = this.choices[this.sel];
+    let dy = ry0 + this.choices.length * rh + 3;
+    rect(ctx, x + 8, dy, w - 16, 1, 'K3');
+    dy += 5;
+    const tw2 = w - 20;
+    dy += Text.draw(ctx, c.desc, x + 10, dy, { size: LY.desc, color: 'K9', maxW: tw2 }).h;
+    if (c.replaces) dy += 3 + Text.draw(ctx, `${tr(UI.replaces)}：${tr(c.replaces)}`, x + 10, dy + 3, { size: LY.desc, color: 'R4', maxW: tw2 }).h;
+    if (LY.flavor && c.flavor) Text.draw(ctx, c.flavor, x + 10, dy + 3, { size: 'small', color: c.color, maxW: tw2 });
+    // this hand's own prompts
+    if (this.picked < 0) drawHint(ctx, x + w / 2, y + LY.h - LY.fh + 3, LY.hint.items, this.inp, LY.hint.size);
+    // hold the pocket-watch button: the full card over the panel
+    if (this.expanded && this.picked < 0) {
+      const cw = Math.min(200, w - 24);
+      const SL = this.singleLayout(c, cw);
+      const cx = Math.round(x + (w - cw) / 2), cy = Math.round(Math.min(y + hh + 4, 356 - SL.h));
+      this.drawCard(ctx, c, cx, cy, SL, true, -1);
+    }
+    ctx.globalAlpha = a0;
+  }
+
+  /** one card's layout at width w (the compact panel's held-open card) */
+  private singleLayout(c: Choice, w: number): CardLayout {
+    const tw = w - 62;
+    const tSize: TextSize = Text.measure(c.title, 'body').w <= tw ? 'body' : 'small';
+    const newLine = c.isNew && !newBesideTag(c, w) ? Text.lineH('small') : 0;
+    const band = Math.max(44, Math.ceil(6 + Math.max(Text.lineH('body'), Text.measureWrapped(c.title, tSize, tw).h + (tSize === 'small' ? 2 : 0)) + 3 + Text.measureWrapped(c.tag, 'small', tagW(c, w)).h + newLine + 4));
+    let h = band + 7 + Text.measureWrapped(c.desc, 'body', w - 18).h + 8;
+    if (c.flavor) h += Text.measureWrapped(c.flavor, 'small', w - 18).h;
+    if (c.replaces) h += Text.measureWrapped(`${tr(UI.replaces)}：${tr(c.replaces)}`, 'body', w - 18).h + 2;
+    return { w, h: Math.ceil(h + 4), gap: 0, x0: 0, y0: 0, band, desc: 'body', repl: 'body', head: { term: -1, sub: -1, quote: -1, bottom: 0 } };
   }
 
   private drawCard(ctx: CanvasRenderingContext2D, c: Choice, x: number, y: number, LY: CardLayout, sel: boolean, pickT: number) {
@@ -316,7 +554,10 @@ export class ChoiceOverlay implements Overlay {
 export class Toast implements Overlay {
   blocks = false;
   t = 0;
-  constructor(private icon: Sprite | null, private title: string, private desc: string, private color = 'B5', private dur = 3.2) {}
+  /** stacking lane when several toasts are up at once (co-op: two hands open chests together) */
+  lane = 0;
+  /** slot: co-op, whose it is (a strip in the hand's colour with its shape; the toast drops below the purse) */
+  constructor(private icon: Sprite | null, private title: string, private desc: string, private color = 'B5', private dur = 3.2, private slot: number | null = null) {}
   update(dt: number) { this.t += dt; return this.t < this.dur; }
   render(r: Renderer) {
     const ctx = r.ui2;
@@ -324,8 +565,13 @@ export class Toast implements Overlay {
     const w = 280;
     const dh = Text.measureWrapped(this.desc, 'small', w - 52).h;
     const h = Math.max(46, Math.ceil(8 + Text.lineH('body') + dh + 6));
-    const x = 320 - w / 2, y = Math.round(-h + (h + 44) * k);
+    const top = (this.slot !== null ? 24 : 0) + this.lane * (h + 4);
+    const x = 320 - w / 2, y = Math.round(-h + (h + 44 + top) * k);
     panel(ctx, x, y, w, h, { fill: 'K1' });
+    if (this.slot !== null) {
+      rect(ctx, x + 3, y + 3, 3, h - 6, slotColor(this.slot));
+      drawSlotBadge(ctx, this.slot, x + w - 12, y + 11);
+    }
     if (this.icon) drawScaled(ctx, this.icon, x + 22, y + 23, 2);
     Text.draw(ctx, this.title, x + 42, y + 5, { color: this.color });
     Text.draw(ctx, this.desc, x + 42, y + 6 + Text.lineH('body'), { size: 'small', color: 'K8', maxW: w - 52 });

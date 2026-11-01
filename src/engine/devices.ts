@@ -106,10 +106,15 @@ export class DeviceHub {
   release(slot: number) {
     const p = this.slots[slot];
     if (!p) return;
+    const dev = p.device;
     p.dispose();
     this.slots[slot] = null;
     this.remerge();
     this.version++;
+    // the device that just left (its owner held "leave" on it) is not the one the remaining solo
+    // hand uses: without this, the next join would hand that pad to the solo player
+    const solo = this.soloMerged;
+    if (solo && (raw.lastPhys === dev || this.physAtTick === dev)) { raw.lastPhys = solo.device; this.physAtTick = solo.device; }
   }
 
   /** the first scene that needs a player: claim slot 0 for whatever device was used last */

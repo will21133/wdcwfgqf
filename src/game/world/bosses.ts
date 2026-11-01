@@ -16,3 +16,15 @@ export function makeBoss(floor: number, x: number, y: number): Boss | null {
   const f = BOSSES[floor];
   return f ? f(x, y) : null;
 }
+
+/** boss ids in floor order (routes.ts names a floor's boss by id) */
+export const BOSS_IDS = ['foreman', 'moth', 'archivist', 'stillness'];
+const BOSS_BY_ID: Record<string, (x: number, y: number) => Boss> = {};
+BOSS_IDS.forEach((id, i) => { BOSS_BY_ID[id] = BOSSES[i]; });
+
+/** register a boss under an id (P3: new bosses for branches and secret routes) */
+export function registerBoss(id: string, make: (x: number, y: number) => Boss) { BOSS_BY_ID[id] = make; }
+export function makeBossById(id: string, x: number, y: number): Boss | null {
+  const f = BOSS_BY_ID[id];
+  return f ? f(x, y) : null;
+}

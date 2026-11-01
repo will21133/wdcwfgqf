@@ -27,6 +27,8 @@ export class Door extends Entity {
   need = 1;
   /** seconds a majority has been waiting */
   majorityT = 0;
+  /** the room keeps everyone in while this is true (a hand is still choosing its reward) */
+  hold: () => boolean = () => false;
   constructor(public spec: DoorSpec, public reward: RewardPreview | null, private onEnter: (d: Door) => void) {
     super();
     this.x = spec.tx * TS + TS;
@@ -65,6 +67,8 @@ export class Door extends Entity {
       for (const p of this.inside) p.sortBias = this.y + 1 - p.y;
     }
     const n = this.inside.length;
+    // co-op: nobody leaves while a hand is still choosing a reward
+    if (this.hold()) { this.majorityT = 0; return; }
     if (n > this.need / 2 && n < this.need) this.majorityT += dt; else this.majorityT = 0;
     if (n >= this.need || this.majorityT >= DOOR_MAJORITY_WAIT) {
       this.chosen = true;

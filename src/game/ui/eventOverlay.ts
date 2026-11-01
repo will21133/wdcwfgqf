@@ -11,6 +11,7 @@ import type { Sprite } from '../../engine/gfx/sprite';
 import { clamp, ease } from '../../engine/math';
 import type { EventDef, EventCtx } from '../progression/events';
 import type { Run } from '../run';
+import type { InputLike } from './overlay';
 
 export class EventOverlay implements Overlay {
   blocks = true;
@@ -21,7 +22,8 @@ export class EventOverlay implements Overlay {
   closing = 0;
   private hover = -1;
 
-  constructor(private ev: EventDef, private art: Sprite | null, private run: Run, private ctx: EventCtx, private onClose: () => void) {
+  /** `input`: co-op, the deciding hand's own device (solo: the menu aggregate, every device) */
+  constructor(private ev: EventDef, private art: Sprite | null, private run: Run, private ctx: EventCtx, private onClose: () => void, private input?: InputLike) {
     sfx('uiOpen');
     G.audio.muffle(true, 2000);
   }
@@ -31,7 +33,9 @@ export class EventOverlay implements Overlay {
 
   update(dt: number): boolean {
     this.t += dt;
-    const inp = G.input;
+    const inp = this.input ?? G.input;
+    const mouseAim = this.input ? !!this.input.usesMouse && G.input.mouseAim : G.input.mouseAim;
+    const mx = G.input.mx, my = G.input.my;
     if (this.closing > 0) {
       this.closing += dt;
       if (this.closing > 0.3) { G.audio.muffle(false); this.onClose(); return false; }
@@ -47,16 +51,16 @@ export class EventOverlay implements Overlay {
     const n = this.opts().length;
     if (nav.y) { this.sel = (this.sel + nav.y + n) % n; sfx('uiMove'); }
     // mouse
-    if (inp.mouseAim) {
+    if (mouseAim) {
       let h = -1;
       for (let i = 0; i < n; i++) {
         const y = this.optY(i);
-        if (inp.mx > 250 && inp.mx < 610 && inp.my >= y - 4 && inp.my < y - 4 + this.optH - 1) h = i;
+        if (mx > 250 && mx < 610 && my >= y - 4 && my < y - 4 + this.optH - 1) h = i;
       }
       if (h >= 0 && h !== this.hover) { this.sel = h; sfx('uiMove'); }
       this.hover = h;
     }
-    const click = inp.pressed('attack') && inp.mouseAim && this.hover >= 0;
+    const click = inp.pressed('attack') && mouseAim && this.hover >= 0;
     if (inp.pressed('confirm') || click || inp.pressed('interact')) {
       if (!this.ok(this.sel)) { sfx('denied'); return true; }
       this.result = this.opts()[this.sel].act(this.ctx);
@@ -102,7 +106,7 @@ export class EventOverlay implements Overlay {
       const rt = tr(this.result);
       const rs = Math.floor(clamp(this.resT * 70, 0, rt.length));
       G.font.draw(ctx, rt.slice(0, rs), x + 228, ry + 10, { color: 'K10', wrap: 340, lineH: 16 });
-      if (this.resT > 0.6 && Math.floor(this.t * 3) % 2 === 0) drawPrompt(ctx, 'confirm', x + w - 26, y + h - 9 - promptH());
+      if (this.resT > 0.6 && Math.floor(this.t * 3) % 2 === 0) drawPrompt(ctx, 'confirm', x + w - 26, y + h - 9 - promptH(), this.input);
     } else if (shown >= text.length || this.t > 1.2) {
       // rows hold a 12px label and a 10px detail line; they grow with the text and start below it
       this.optH = Math.max(32, Math.ceil(Text.lineH('body') + Text.lineH('small') + 5));

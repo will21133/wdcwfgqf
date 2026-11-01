@@ -6,36 +6,37 @@ import { G, sfx } from '../G';
 import { Run } from '../run';
 import { World } from '../world/world';
 import { generateRoom, RoomKind } from '../world/roomgen';
-import { THEMES } from '../../art/themes';
+import { RoomTypes } from '../rooms/registry';
+import { Routes } from '../routes';
+import { GameHooks, roomGrade } from '../hooks';
 import { TS } from '../world/room';
 import { Player } from '../entities/player';
 import { spawnStockProps } from '../world/stockProps';
 import { Door } from '../entities/door';
 import { HUD } from '../ui/hud';
-import { planWaves, Wave, findEnemy } from '../world/director';
+import { Wave, findEnemy } from '../world/director';
 import { RNG } from '../../engine/rng';
 import { damp, clamp, ease } from '../../engine/math';
-import { Dummy } from '../entities/enemies/gearworks';
-import { setupTutorial } from '../rooms/tutorial';
 import { botStep } from '../qa/bot';
 import { BIOMES } from '../../art/biomes';
-import { Overlay, ChoiceOverlay, Toast, ChoiceHeader } from '../ui/overlay';
+import { Overlay, ChoiceOverlay, Toast, ChoiceHeader, type ChoicePlace } from '../ui/overlay';
 import { PauseMenu, RunInfoPanel } from '../ui/pause';
 import {
-  RoomOption, nextOptions, rewardLook, memoryChoices, hourglassChoices, calibrationChoices, rollPart, partLook, Choice,
-  ROOMS_PER_FLOOR, FLOORS, rewardKindLook,
+  RoomOption, nextOptions, rewardLook, memoryChoices, hourglassChoices, calibrationChoices, rollPart, partLook, Choice, pickPatron,
+  ROOMS_PER_FLOOR, rewardKindLook,
 } from '../progression/rewards';
 import { PATRONS, MEMORIES, Patron } from '../progression/memories';
 import { PARTS_BY_ID, PartDef } from '../progression/parts';
 import { CAL_BY_ID } from '../progression/calibrations';
 import { RewardOrb, Chest } from '../entities/interact';
 import { Pickup } from '../entities/pickup';
-import { RoomHost, setupShop, setupRest, setupEvent, setupVault, setPartLookup } from '../rooms/special';
+import { RoomHost, setPartLookup } from '../rooms/special';
 import { tr, L, L10n, UI } from '../i18n';
 import { ICONS, patronSigil } from '../../art/sprites/icons';
 import { rumbleAll } from '../../engine/rumble';
-import { ensurePlayers } from '../players';
-import { makeBoss } from '../world/bosses';
+import { ensurePlayers, slotColor } from '../players';
+import { devices } from '../../engine/devices';
+import { joinSeat, leaveSeat, slotText, DisconnectOverlay } from '../ui/joinPanel';
 import { markSeen } from '../save';
 import { WEAPON_INFO } from '../ui/metaPanels';
 import type { Boss } from '../entities/boss';
@@ -88,10 +89,12 @@ export class GameScene implements Scene, RoomHost {
 
   enter() {
     const run = this.run;
-    const th = THEMES[Math.min(run.floor, THEMES.length - 1)];
+    const th = Routes.theme(Routes.floor(run));
     // mark this room's one-per-floor kinds before rolling the doors out of it
     if (this.opt.kind === 'shop') run.floorState.shop = true;
     if (this.opt.kind === 'vault') run.floorState.vault = true;
+    const fk = (run.floorState.kinds ??= {});
+    fk[this.opt.kind] = (fk[this.opt.kind] ?? 0) + 1;
     this.options = this.opt.kind === 'boss' ? [] : nextOptions(run, this.rng, run.floorState, this.opt.kind);
     const exits = this.opt.kind === 'boss' ? 1 : this.options.length;
     const map = generateRoom({ rng: new RNG(this.seed), kind: this.opt.kind, biome: run.floor, exits });
@@ -104,8 +107,12 @@ export class GameScene implements Scene, RoomHost {
     const ey = map.entry ? map.entry.ty * TS - 10 : map.ph / 2;
     // every seated player walks in through the entry door (solo: exactly the 1.0 spot)
     const seats = ensurePlayers();
+    const lane = (x: number) => [ey - 4, ey - 20, ey - 36].every((yy) => !map.solidAt(x - 4, yy) && !map.solidAt(x + 4, yy));
     const ps = seats.map((inp, i) => {
-      const ox = seats.length > 1 ? (i % 2 ? 9 : -9) : 0, oy = i >= 2 ? 11 : 0;
+      // co-op: two columns through the doorway, unless a prop just inside blocks one (then the middle)
+      let ox = seats.length > 1 ? (i % 2 ? 9 : -9) : 0;
+      if (ox && !lane(ex + ox)) ox = 0;
+      const oy = i >= 2 ? 11 : 0;
       const pl = new Player(ex + ox, ey + 18 + oy, inp);
       pl.autoWalk = 0.32;
       return w.add(pl);
@@ -114,7 +121,9 @@ export class GameScene implements Scene, RoomHost {
     map.exits.forEach((e, i) => {
       const o = this.options[i];
       const look = !o ? { icon: ICONS.boss, color: 'B5', label: L('向上', 'Ascend') } : rewardLook(o);
-      this.doors.push(w.add(new Door(e, { icon: look.icon, label: tr(look.label), color: look.color }, () => this.leave(o ?? null))));
+      const d = w.add(new Door(e, { icon: look.icon, label: tr(look.label), color: look.color }, () => this.leave(o ?? null)));
+      d.hold = () => this.anyChoosing();
+      this.doors.push(d);
     });
     w.flushAdds();
     // every hand's own inventory hooks, bound to that hand (PLAN2 §1.5)
@@ -125,37 +134,19 @@ export class GameScene implements Scene, RoomHost {
       lo.shieldReady = lo.mods.firstHitShield > 0;
       lo.onCharge = () => { sfx('charge'); pl.input.rumble(0.12, 0.25, 90); };
     }
-    const scale = coopScale(ps.length);
+    // a hand that joined mid-run catches up: one memory pick per floor already climbed
+    for (const pl of ps) {
+      const lo = run.lo(pl.slot);
+      for (; lo.catchup > 0; lo.catchup--) this.world.after(0.7, () => this.catchUpPick(pl));
+    }
     const dbgSpawn = G.debug.get('spawn');
     const kind = this.opt.kind;
+    const def = RoomTypes.get(kind);
     if (dbgSpawn && run.roomIndex === 0 && run.floor === Number(G.debug.get('floor') ?? 0)) {
       this.waves = [{ defs: dbgSpawn.split(',').map((id) => findEnemy(id)).filter((d) => !!d) as any }];
-    } else if (kind === 'combat' || kind === 'elite') {
-      this.waves = planWaves(this.rng, run.floor, run.roomIndex, kind === 'elite', run.overwind, scale.budget);
-      if (kind === 'elite') run.floorState.elites++;
-    } else if (kind === 'boss') {
-      const c = this.center();
-      const b = makeBoss(run.floor, c.x, c.y - 40);
-      if (b) {
-        this.boss = w.add(b);
-        this.waves = [];
-        this.cleared = false;
-        for (const pl of ps) pl.locked = true;
-        this.titleCard = { title: tr(b.bossName), sub: tr(b.bossTitle), t: -0.2 };
-      } else this.waves = planWaves(this.rng, run.floor, 8, true, run.overwind, scale.budget);
-    } else if (kind === 'tutorial') {
-      const c = this.center();
-      w.add(new Dummy(c.x, c.y - 30));
-      setupTutorial(w);
-      // a couple of coglings to practise on once you're ready
-      this.waves = [{ defs: [findEnemy('cogling')!, findEnemy('cogling')!].filter(Boolean) }];
-      this.waveDelay = 6;
-    } else if (kind === 'shop') { run.floorState.shop = true; setupShop(this); }
-    else if (kind === 'rest') setupRest(this);
-    else if (kind === 'event') setupEvent(this);
-    else if (kind === 'vault') { run.floorState.vault = true; setupVault(this); }
-    if (!this.waves.length && !this.boss && (kind === 'combat' || kind === 'elite' || kind === 'tutorial' || kind === 'boss')) this.cleared = true;
-    if (kind === 'shop' || kind === 'rest' || kind === 'event' || kind === 'vault') this.cleared = true;
+    } else def?.build(this);
+    // a fight with nothing to fight, and every peaceful room, start cleared
+    if (!def?.combat || (!this.waves.length && !this.boss)) this.cleared = true;
     w.flushAdds();
     G.r.params.lighting = true;
     G.music.play(kind === 'shop' ? 'shop' : this.boss ? (run.floor >= 3 ? 'boss_final' : 'boss') : th.music);
@@ -163,13 +154,19 @@ export class GameScene implements Scene, RoomHost {
     G.music.layer('boss', 0, 0.01);
     const off = G.debug.get('offer');
     if (off && run.roomIndex === Number(G.debug.get('roomIndex') ?? 0)) {
-      if (off === 'hourglass') this.offerHourglass();
-      else if (off === 'calibration') this.offerCalibration();
-      else if (off === 'part') { const pt = rollPart(run, this.rng); if (pt) this.grantPart(pt); }
-      else this.offerMemory(off as Patron);
+      // co-op: every hand gets the offer (one panel each)
+      for (const pl of w.playerCount > 1 ? w.players : [null]) {
+        if (off === 'hourglass') this.offerHourglass(pl);
+        else if (off === 'calibration') this.offerCalibration(pl);
+        else if (off === 'part') { const pt = rollPart(run, this.rng, pl ? { lo: run.lo(pl.slot) } : {}); if (pt) this.grantPart(pt, pl); }
+        else this.offerMemory(off as Patron, 0, pl);
+      }
     }
     if (run.roomIndex === 0 && !this.boss) this.titleCard = { title: tr(th.name), sub: tr(L(`第 ${run.floor + 1} 层`, `FLOOR ${run.floor + 1}`)), t: 0 };
     w.bus.emit('roomStart', { kind });
+    // global hooks (PLAN2 §1.5): the run's first room, then every room (bus fresh, hand hooks registered)
+    if (!run.started) { run.started = true; GameHooks.fire.runStart(run); }
+    GameHooks.fire.roomStart({ w, run, scene: this, kind });
   }
 
   /** the hand a reward / choice belongs to (default: the first one standing) */
@@ -183,14 +180,55 @@ export class GameScene implements Scene, RoomHost {
     if (!choices.length) { after?.(); return; }
     const pl = this.who(who);
     const lo = this.loFor(pl);
+    const coop = this.world.playerCount > 1;
+    // co-op: one panel per hand at a time; a second offer waits for the first to close
+    if (coop && this.panelOf(pl.slot)) { this.queueFor(pl.slot).push(() => this.openChoice(choices, header, after, regen, pl)); return; }
+    const place: ChoicePlace | undefined = coop ? { input: pl.input, rect: this.choiceRect(pl.slot), slot: pl.slot, blocks: this.world.aliveEnemies.length > 0, anchor: this.choiceRect(pl.slot).y > 150 ? 'bottom' : 'top' } : undefined;
     const ov = new ChoiceOverlay(choices, header, (c) => {
       this.world.fx.banner(pl.x, pl.y - 36, tr(c.title), c.color, 1.4);
       pl.input.rumble(0.2, 0.2, 100);
       if (MEMORIES[c.id]) markSeen('memories', c.id);
       after?.();
-    }, regen ? () => { if (lo.rerolls <= 0) return null; lo.rerolls--; return regen(); } : undefined);
+    }, regen ? () => { if (lo.rerolls <= 0) return null; lo.rerolls--; return regen(); } : undefined, place);
     ov.rerollsLeft = () => lo.rerolls;
+    // the choosing hand stands still while the others keep walking (GDD2 §5.8)
+    if (coop) { pl.locked = true; this.choosing.add(pl); }
     this.openOverlay(ov);
+  }
+
+  /** hands with a choice panel open (co-op) and offers waiting behind one */
+  private choosing = new Set<Player>();
+  private choiceQueue = new Map<number, (() => void)[]>();
+  private queueFor(slot: number) { let q = this.choiceQueue.get(slot); if (!q) this.choiceQueue.set(slot, (q = [])); return q; }
+  /** this hand's open co-op choice panel */
+  panelOf(slot: number): ChoiceOverlay | null {
+    for (const o of this.overlays) if (o instanceof ChoiceOverlay && o.place?.slot === slot) return o;
+    return null;
+  }
+  /** is anyone still choosing (doors wait; no new wave starts) */
+  anyChoosing(): boolean { return this.choosing.size > 0 || [...this.choiceQueue.values()].some((q) => q.length > 0); }
+
+  /**
+   * Where a hand's choice panel sits: its half of the screen (left I / III, right II / IV) under the
+   * top pods; with two hands on one side, its quarter (over its own pod).
+   */
+  choiceRect(slot: number) {
+    const slots = this.world.players.map((p) => p.slot);
+    const left = slot % 2 === 0;
+    const quarters = slots.some((a) => slots.some((b) => a !== b && a % 2 === b % 2));
+    const x = left ? 8 : 324, w = 308;
+    if (!quarters) return { x, y: 44, w, h: 360 - 44 - 8 };
+    return { x, y: slot < 2 ? 4 : 184, w, h: 172 };  // bottom quarters hug the bottom edge
+  }
+
+  /** after the overlays tick: free hands whose panel closed, open the next queued offer */
+  private settlePanels() {
+    for (const p of [...this.choosing]) {
+      if (this.panelOf(p.slot)) continue;
+      this.choosing.delete(p);
+      if (!this.leaving) p.locked = false;
+    }
+    for (const [slot, q] of this.choiceQueue) if (q.length && !this.panelOf(slot)) q.shift()!();
   }
 
   offerMemory(patron: Patron, boost = 0, who?: Player | null) {
@@ -205,6 +243,19 @@ export class GameScene implements Scene, RoomHost {
     };
     const gen = () => memoryChoices(this.run, lo, this.rng, patron, applied, boost);
     this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), quote: this.rng.pick(pd.lines), icon: patronSigil(patron), color: pd.color, term: 'memory' }, undefined, gen, pl);
+  }
+
+  /** a hand that joined mid-run: one memory pick (from any patron) per floor already climbed */
+  private catchUpPick(pl: Player) {
+    const patron = pickPatron(this.run, this.rng), pd = PATRONS[patron], lo = this.loFor(pl);
+    const gen = () => memoryChoices(this.run, lo, this.rng, patron, (om, replaced) => {
+      if (replaced) this.world.bus.off(replaced);
+      const d = MEMORIES[om.id];
+      const c = lo.liveCtx(om);
+      if (c) d.hook?.(c, d.v[om.rarity]);
+      this.syncPlayer(pl);
+    });
+    this.openChoice(gen(), { title: L(`${pd.name.zh} · ${pd.title.zh}`, `${pd.name.en}, ${pd.title.en}`), sub: S('f2', 'catchup'), icon: patronSigil(patron), color: pd.color, term: 'memory' }, undefined, gen, pl);
   }
 
   offerHourglass(who?: Player | null) {
@@ -229,11 +280,15 @@ export class GameScene implements Scene, RoomHost {
     const c = lo.liveCtx(lo.key(p.id));
     if (c) p.hook?.(c);
     const look = partLook(p);
-    this.toast(look.icon, tr(p.name), tr(p.desc), look.color);
+    this.toast(look.icon, tr(p.name), tr(p.desc), look.color, this.world.playerCount > 1 ? pl.slot : null);
     this.syncPlayer(pl);
   }
 
-  toast(icon: Sprite | null, title: string, desc: string, color = 'B5') { this.overlays.push(new Toast(icon, title, desc, color)); }
+  toast(icon: Sprite | null, title: string, desc: string, color = 'B5', slot: number | null = null) {
+    const t = new Toast(icon, title, desc, color, 3.2, slot);
+    t.lane = this.overlays.filter((o) => o instanceof Toast).length % 3;
+    this.overlays.push(t);
+  }
   unlockDoors() { for (const d of this.doors) d.unlock(); }
 
   center() {
@@ -293,7 +348,9 @@ export class GameScene implements Scene, RoomHost {
     sfx('roomClear');
     const bp = w.player!;
     w.fx.banner(bp.x, bp.y - 40, tr(UI.cleared), 'B5', 1.6);
-    w.bus.emit('roomClear', {});
+    const grade = roomGrade(w.stats.hitsTaken);
+    w.bus.emit('roomClear', { grade });
+    GameHooks.fire.roomClear({ w, run, scene: this, grade });
     w.slowmo(0.35, 0.35);
     rumbleAll(0.2, 0.3, 120);
     const c = this.center();
@@ -311,11 +368,23 @@ export class GameScene implements Scene, RoomHost {
     const w = this.world, run = this.run;
     if (!o.reward) return;
     const look = rewardKindLook(o.reward, o.patron);
-    // the hand that touches an orb gets that choice (F2c gives each hand its own orb)
+    // co-op (GDD2 §5.8): memory / hourglass / calibration → one orb per hand in its colour; parts →
+    // each hand rolls its own chest. Solo: the single 1.0 orb / chest.
+    const hands = w.players.length > 1 ? w.players.slice().sort((a, b) => a.slot - b.slot) : [null];
+    const spot = (i: number) => {
+      const n = hands.length;
+      if (n <= 1) return this.floorNear(c.x, c.y);
+      const k = i - (n - 1) / 2;
+      return this.floorNear(Math.round(c.x + k * 30), Math.round(c.y + Math.abs(k) * 6));
+    };
+    const orb = (make: (p: Player) => void) => hands.forEach((h, i) => {
+      const s = spot(i);
+      w.add(new RewardOrb(s.x, s.y, look.icon, look.color, make, h ? h.slot : null));
+    });
     switch (o.reward) {
-      case 'memory': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, (p) => this.offerMemory(o.patron ?? 'oren', boost + (o.kind === 'elite' ? 0.15 : 0), p))); break;
-      case 'hourglass': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, (p) => this.offerHourglass(p))); break;
-      case 'calibration': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, (p) => this.offerCalibration(p))); break;
+      case 'memory': orb((p) => this.offerMemory(o.patron ?? 'oren', boost + (o.kind === 'elite' ? 0.15 : 0), p)); break;
+      case 'hourglass': orb((p) => this.offerHourglass(p)); break;
+      case 'calibration': orb((p) => this.offerCalibration(p)); break;
       case 'heal': w.add(new RewardOrb(c.x, c.y, look.icon, look.color, () => {
         // oil heals the whole team (GDD2 §5.8)
         for (const p of w.alive()) {
@@ -326,12 +395,32 @@ export class GameScene implements Scene, RoomHost {
       })); break;
       case 'brass': for (let i = 0, n = Math.round((18 + run.floor * 6) * coopScale(w.playerCount).brass); i < n; i++) w.add(new Pickup(c.x, c.y, 'brass', 3)); break;
       case 'shards': for (let i = 0; i < 4; i++) w.add(new Pickup(c.x, c.y, 'shard', 1)); break;
-      case 'part': {
-        const part = rollPart(run, this.rng, { allowCursed: false });
-        w.add(new Chest(c.x, c.y, (p) => { if (part) this.grantPart(part, p); }, () => tr(UI.part)));
-        break;
-      }
+      case 'part': hands.forEach((h, i) => {
+        const part = rollPart(run, this.rng, h ? { allowCursed: false, lo: run.lo(h.slot) } : { allowCursed: false });
+        const s = spot(i);
+        w.add(new Chest(s.x, s.y, (p) => { if (part) this.grantPart(part, p ?? h); }, () => tr(UI.part), h ? h.slot : null));
+      }); break;
     }
+  }
+
+  /**
+   * (x, y) if it stands on open floor, else the centre of the nearest floor tile within 6 tiles (a
+   * room whose middle is a shelf island would otherwise float rewards over it, out of reach)
+   */
+  private floorNear(x: number, y: number): { x: number; y: number } {
+    const m = this.world.map;
+    const tx = Math.floor(x / TS), ty = Math.floor(y / TS);
+    if (m.isFloor(tx, ty)) return { x, y };
+    for (let r = 1; r <= 6; r++) {
+      let best: { x: number; y: number } | null = null, bd = Infinity;
+      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) {
+        if (Math.max(Math.abs(i), Math.abs(j)) !== r || !m.isFloor(tx + i, ty + j)) continue;
+        const cx = (tx + i) * TS + 8, cy = (ty + j) * TS + 8, d = Math.hypot(cx - x, cy - y);
+        if (d < bd) { bd = d; best = { x: cx, y: cy }; }
+      }
+      if (best) return best;
+    }
+    return { x, y };
   }
 
   /** bank this room's stats into the run */
@@ -342,20 +431,25 @@ export class GameScene implements Scene, RoomHost {
     this.world.stats = { damage: 0, kills: 0, rewinds: 0, paradoxes: 0, hitsTaken: 0 };
   }
 
+  /** the team is walking out (doors chosen) */
+  leaving = false;
+
   private leave(o: RoomOption | null) {
     const run = this.run;
+    this.leaving = true;
     for (const pl of this.world.players) { pl.locked = true; pl.syncRun(); }
     this.bankStats();
     if (this.opt.kind === 'boss' || !o) {
-      if (run.floor >= FLOORS - 1) { this.onVictory?.(run); return; }
+      if (Routes.isLast(run)) { this.onVictory?.(run); return; }
       run.floor++;
       run.roomIndex = 0;
-      run.floorState = { shop: false, elites: 0, vault: false };
+      run.floorState = { shop: false, elites: 0, vault: false, kinds: {} };
       for (const lo of run.all) lo.autoRewindLeft = lo.mods.autoRewindPerFloor;
       G.scenes.go(() => this.next({ kind: 'combat', reward: 'memory', patron: this.rng.pick(ALL_PATRONS) }), 'clock', 0.8);
       return;
     }
-    run.roomIndex++;
+    // a room kind may sit outside the floor's count (advancesRoom: false, e.g. a secret room)
+    if (RoomTypes.get(o.kind)?.advancesRoom !== false) run.roomIndex++;
     G.scenes.go(() => this.next(o), 'clock', 0.5);
   }
 
@@ -376,18 +470,38 @@ export class GameScene implements Scene, RoomHost {
     const out = w.players.every((q) => Down.isOut(q));
     this.run.time += dt;
     if (this.titleCard) { this.titleCard.t += dt; if (this.titleCard.t > 3.2) this.titleCard = null; }
-    // overlays: the topmost blocking overlay owns input; toasts tick underneath
+    // a free device can join at any moment (it walks in at the next room); its press is consumed
+    this.midRunJoin();
+    // overlays: the topmost full-screen blocking overlay owns input; toasts tick underneath.
+    // Co-op choice panels each read their own hand's device, so they all tick together (unless a
+    // full-screen menu such as pause sits on top of them).
     if (this.overlays.length) {
-      const top = this.overlays[this.overlays.length - 1];
+      const isPanel = (o: Overlay) => o instanceof ChoiceOverlay && o.compact;
+      let topFull: Overlay | null = null;
+      for (let i = this.overlays.length - 1; i >= 0 && !topFull; i--) if (this.overlays[i].blocks && !isPanel(this.overlays[i])) topFull = this.overlays[i];
       for (let i = this.overlays.length - 1; i >= 0; i--) {
         const o = this.overlays[i];
-        if (o === top || !o.blocks) { if (!o.update(dt)) this.overlays.splice(i, 1); }
+        const tick = o === topFull || (!o.blocks && !isPanel(o)) || (!topFull && isPanel(o));
+        if (tick && !o.update(dt)) this.overlays.splice(i, 1);
       }
-      if (top.blocks && this.overlays.includes(top)) { this.hud.update(dt, w); return; }
+      this.settlePanels();
       if (this.overlays.some((o) => o.blocks)) { this.hud.update(dt, w); return; }
+    } else if (this.choosing.size || this.choiceQueue.size) this.settlePanels();
+    if (G.input.pressed('pause') && !out) {
+      // co-op: the menu shows the opener's build and offers them "Leave" (GDD2 §5.1)
+      const by = w.players.find((q) => q.input.kind !== 'bot' && q.input.pressed('pause')) ?? p;
+      const slot = by.slot;
+      this.buildSlot = slot;
+      this.leaveItem = devices.humans.length > 1 && by.input.kind !== 'bot' ? { label: slotText('leaveHand', slot, true), act: () => this.leaveHand(slot) } : undefined;
+      this.overlays.push(new PauseMenu(this));
+      return;
     }
-    if (G.input.pressed('pause') && !out) { this.overlays.push(new PauseMenu(this)); return; }
-    if (G.input.pressed('info') && !out) { this.overlays.push(new RunInfoPanel(this.run)); return; }
+    if (G.input.pressed('info') && !out) {
+      // the pocket-watch button: your own build (co-op: whoever pressed it, unless they are
+      // holding it to read a choice card)
+      const by = w.players.find((q) => q.input.pressed('info')) ?? p;
+      if (!this.panelOf(by.slot)) { this.overlays.push(new RunInfoPanel(this.run, by.slot)); return; }
+    }
     w.update(dt);
     if (!w.frozen && !this.cleared) w.bus.emit('tick', { dt });
     if (this.boss) {
@@ -400,7 +514,8 @@ export class GameScene implements Scene, RoomHost {
     } else if (!this.cleared && w.alive().length > 0) {
       const alive = w.aliveEnemies.length;
       if (this.waveIdx < 0 || (alive <= (this.waveIdx < this.waves.length - 1 ? 1 : 0) && this.waveIdx < this.waves.length - 1)) {
-        this.waveDelay -= dt;
+        // nobody gets ambushed while picking a card (co-op catch-up picks at a room's start)
+        if (!this.anyChoosing()) this.waveDelay -= dt;
         if (this.waveDelay <= 0) { this.waveIdx++; this.waveDelay = 0.8; this.spawnWave(); }
       } else if (alive === 0 && this.waveIdx >= this.waves.length - 1) this.onClear();
       this.unstick(dt);
@@ -428,6 +543,54 @@ export class GameScene implements Scene, RoomHost {
         else G.scenes.go(() => new GameScene(new Run(), { kind: 'combat', reward: 'memory', patron: 'oren' }), 'clock', 0.6);
       }
     }
+  }
+
+  // ───────────────────────── joining & leaving mid-run (GDD2 §5.1) ─────────────────────────
+  /** PauseHost: whose build the pause menu shows, and the co-op "Leave" row */
+  buildSlot = 0;
+  leaveItem?: { label: L10n; act: () => void };
+
+  /**
+   * A free pad (A / Start) or keyboard (Enter) joins mid-run: the seat is taken now (the press does
+   * nothing else), the hand walks in at the next room with a fresh loadout and catches up with one
+   * memory pick per floor already climbed. Its pod waits in its corner until then.
+   */
+  private midRunJoin() {
+    if (this.deathT > 0 || this.leaving) return;
+    const id = devices.joinPressed({ split: false });
+    if (!id) return;
+    const slot = devices.freeSlot();
+    if (slot < 0) return;
+    if (!joinSeat(id, slot)) return;
+    this.hud.pending.push(slot);
+    const c = this.world.cam.centre();
+    this.world.fx.banner(c.x, c.y - 70, tr(slotText('joinsNext', slot)), slotColor(slot), 2.6);
+    sfx('cogWind');
+  }
+
+  /** a hand leaves the run (pause menu, or a lost pad the others gave up on); its build is kept */
+  leaveHand(slot: number) {
+    const w = this.world;
+    const p = w.players.find((q) => q.slot === slot);
+    if (p) {
+      p.syncRun();
+      for (const e of p.echoes) e.kill();
+      w.fx.ring(p.x, p.y - 8, 3, 24, 0.4, p.color, 2);
+      w.fx.banner(p.x, p.y - 34, tr(slotText('left', slot)), 'K8', 1.6);
+      p.kill();
+      this.choosing.delete(p);
+    }
+    for (let i = this.overlays.length - 1; i >= 0; i--) { const o = this.overlays[i]; if (o instanceof ChoiceOverlay && o.place?.slot === slot) this.overlays.splice(i, 1); }
+    this.choiceQueue.delete(slot);
+    this.hud.pending = this.hud.pending.filter((s) => s !== slot);
+    leaveSeat(slot);
+    sfx('uiBack');
+  }
+
+  /** a joined pad went away: pause until it is back, or drop that hand (DeviceLossHost) */
+  onDeviceLost(slot: number) {
+    if (this.overlays.some((o) => o instanceof DisconnectOverlay && o.slot === slot)) return;
+    this.overlays.push(new DisconnectOverlay(slot, (s) => this.leaveHand(s)));
   }
 
   /** pause when the window loses focus (alt-tab, overlay) */

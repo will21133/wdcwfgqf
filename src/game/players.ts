@@ -8,6 +8,7 @@ import { rect } from './ui/draw';
 import type { ColorKey } from './ui/text';
 import { SLOT_COLOR } from './ui/widgets';
 import { hintsHooks } from './ui/hints';
+import { noticesHooks } from './ui/notices';
 import type { Player } from './entities/player';
 import type { Loadout } from './run';
 
@@ -91,8 +92,12 @@ export function initPlayersFromUrl(q: URLSearchParams = G.debug) {
   }
 }
 
-// Ines's notes pause the game only in solo (GDD2 §9.2)
+// Ines's notes pause the game only in solo (GDD2 §9.2); with a pod in the bottom-left corner
+// (slot III seated) the note card sits above it
 hintsHooks.players = () => Math.max(1, devices.count);
+hintsHooks.bottom = () => (devices.count > 1 && devices.input(2) ? 314 : 326);
+// achievement / chime notices drop below the top-right pod (slot II) in co-op
+noticesHooks.top = () => (devices.count > 1 && devices.input(1) ? 44 : 36);
 
 // ───────────────────────── ownership (F2b) ─────────────────────────
 /**
@@ -115,3 +120,33 @@ export function loOf(owner: unknown): Loadout | null {
   const run = p?.world?.run;
   return p && run ? run.lo(p.slot) : null;
 }
+
+// ───────────────────────── slot plate (HUD pods, co-op panels) ─────────────────────────
+/** per slot: [lit top edge, rim, tinted column] */
+export const SLOT_SHADES: [ColorKey, ColorKey, ColorKey][] = [['R4', 'R3', 'R0'], ['B6', 'B4', 'B0'], ['G4', 'G3', 'G0'], ['U4', 'U3', 'U0']];
+
+/**
+ * A player's plate: ink outline with clipped corners, a rim in the slot colour with a lit top edge,
+ * a dark fill. `column` > 0 adds a slot-tinted column on the left (badge + numeral live there).
+ * `dim` greys it (stopped / ghost / not joined yet).
+ */
+export function drawSlotPlate(ctx: CanvasRenderingContext2D, slot: number, x: number, y: number, w: number, h: number, o: { dim?: boolean; column?: number; fillAlpha?: number } = {}) {
+  const s = ((slot % 4) + 4) % 4;
+  const [light, rim, tint] = o.dim ? (['K6', 'K4', 'K1'] as ColorKey[]) : SLOT_SHADES[s];
+  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  const a = ctx.globalAlpha;
+  rect(ctx, x + 1, y, w - 2, h, 'K0'); rect(ctx, x, y + 1, w, h - 2, 'K0');
+  rect(ctx, x + 1, y + 1, w - 2, h - 2, rim);
+  rect(ctx, x + 2, y + 1, w - 4, 1, light);
+  ctx.globalAlpha = a * (o.fillAlpha ?? 0.94);
+  rect(ctx, x + 2, y + 2, w - 4, h - 4, 'K1');
+  ctx.globalAlpha = a;
+  rect(ctx, x + 2, y + 2, w - 4, 1, 'K2');
+  if (o.column) {
+    rect(ctx, x + 2, y + 2, o.column, h - 4, tint);
+    rect(ctx, x + 2 + o.column, y + 2, 1, h - 4, rim);
+  }
+}
+
+/** latin numerals for the tiny font (the CJK fonts carry Ⅰ–Ⅳ; tiny is latin only) */
+export const ROMAN_LATIN = ['I', 'II', 'III', 'IV'];

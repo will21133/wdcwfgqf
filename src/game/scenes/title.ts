@@ -15,6 +15,9 @@ import { panel } from '../ui/draw';
 import { drawPixelArt } from '../ui/widgets';
 import { Text } from '../ui/text';
 import { frand } from '../../engine/rng';
+import { GameHooks } from '../hooks';
+import { JoinPanel, leaveSeat } from '../ui/joinPanel';
+import { S } from '../strings';
 
 export interface TitleHooks { start(): void; credits(): void; ledger(): void }
 
@@ -193,6 +196,8 @@ export class TitleScene implements Scene {
     for (let i = 0; i < 70; i++) this.drops.push({ x: frand(0, 640), y: frand(0, 360), l: frand(2, 6) });
     this.list = new MenuList([
       { label: () => tr(L('开始', 'Begin')), act: () => { sfx('uiSelect'); this.hooks.start(); } },
+      // local co-op (GDD2 §5.1): seat up to four hands, then off to the workshop together
+      { label: () => tr(S('f2', 'together')), act: () => this.overlays.push(new JoinPanel(() => this.hooks.start())) },
       { label: () => tr(L('账簿', 'Ledger')), act: () => this.hooks.ledger() },
       { label: () => tr(L('设置', 'Settings')), act: () => this.overlays.push(new SettingsPanel()) },
       { label: () => tr(L('制作人员', 'Credits')), act: () => this.hooks.credits() },
@@ -200,7 +205,10 @@ export class TitleScene implements Scene {
     this.list.rowH = 18;
   }
 
-  enter() { G.music.play('title', 2); }
+  enter() { G.music.play('title', 2); GameHooks.fire.title(this); }
+
+  /** a seated pad was unplugged at the title: just free its seat (nothing to pause here) */
+  onDeviceLost(slot: number) { leaveSeat(slot); }
 
   update(dt: number) {
     this.t += dt;
@@ -292,8 +300,8 @@ export class TitleScene implements Scene {
     const plaqueY = Math.max(203, Math.round(tagY + Text.lineH('small') + 10));
     // brass plaque that carries the menu (and the first "press any key" prompt)
     const pa = ease.outCubic(clamp((t - 0.9) / 0.6, 0, 1));
-    // the plaque holds four menu rows (they grow with the text) with 11 px of brass margin around them
-    const plaqueH = 90 + 4 * (this.list.rh - this.list.rowH);
+    // the plaque holds the menu rows (they grow with the text) with 11 px of brass margin around them
+    const plaqueH = 18 + this.list.items.length * this.list.rh;
     if (pa > 0) {
       ui.globalAlpha = pa;
       panel(ui, lx - 68, plaqueY, 136, plaqueH, { fill: 'K1' });
@@ -310,7 +318,7 @@ export class TitleScene implements Scene {
       ui.globalAlpha = ma;
       this.list.render(ui, lx - 55, plaqueY + 11, 110);
       ui.globalAlpha = 1;
-      drawHint(ui, 320, 340, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('确认', 'Confirm'))]]);
+      if (!this.overlays.length) drawHint(ui, 320, 340, [['nav', tr(L('选择', 'Select'))], ['confirm', tr(L('确认', 'Confirm'))]]);
     }
     // version line, centred on y 349 so it never touches the bottom edge
     Text.draw(ui, L('v0.9 · 抢先体验版', 'v0.9 · Early Access build'), 6, 349, { size: 'small', color: 'K7', valign: 'middle' });

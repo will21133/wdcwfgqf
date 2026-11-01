@@ -25,7 +25,7 @@ const { chromium } = require('playwright');
   });
   await p.goto((process.env.BASE || 'http://127.0.0.1:5173/') + '?' + query);
   await p.waitForTimeout(7000);
-  const tap = async (pi, i, hold = 140) => { await p.evaluate(([pi, i]) => window.__press(pi, i, true), [pi, i]); await p.waitForTimeout(hold); await p.evaluate(([pi, i]) => window.__press(pi, i, false), [pi, i]); await p.waitForTimeout(220); };
+  const tap = async (pi, i, hold = 260) => { await p.evaluate(([pi, i]) => window.__press(pi, i, true), [pi, i]); await p.waitForTimeout(hold); await p.evaluate(([pi, i]) => window.__press(pi, i, false), [pi, i]); await p.waitForTimeout(220); };
   const state = () => p.evaluate(() => {
     const s = window.__G.scenes.current;
     const w = s.world;

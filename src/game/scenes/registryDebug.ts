@@ -17,6 +17,9 @@ import { Notices } from '../ui/notices';
 import { debugRouteNames } from '../debugRoutes';
 import { RealClock } from '../clock';
 import { profile } from '../save';
+import { RoomTypes } from '../rooms/registry';
+import { Routes } from '../routes';
+import { GameHooks, Cutscenes } from '../hooks';
 
 function counts() {
   return {
@@ -29,6 +32,10 @@ function counts() {
     sfx: (G.audio as any).registry?.size ?? 0,
     save: { version: profile.version, shards: profile.shards, migratedFrom: profile.migration?.from ?? null, refund: profile.migration?.refund ?? 0 },
     clock: { now: RealClock.now().toString().slice(0, 24), season: RealClock.season() },
+    roomTypes: RoomTypes.all().map((d) => d.kind),
+    floors: Routes.defaults().map((f) => f.id),
+    hooks: GameHooks.counts(),
+    cutscenes: Cutscenes.ids(),
   };
 }
 
@@ -66,6 +73,8 @@ export class RegistryDebugScene implements Scene {
       ['debug routes · sfx', `${c.debugRoutes} · ${c.sfx}`],
       ['save', `v${c.save.version} · ${c.save.shards} shards${c.save.migratedFrom ? ` · from v1 (+${c.save.refund})` : ''}`],
       ['clock', `${c.clock.now}${c.clock.season ? ' · ' + c.clock.season : ''}`],
+      ['room types · floors', `${c.roomTypes.join(' ')} · ${c.floors.length} floors`],
+      ['hooks · cutscenes', `${Object.values(c.hooks).reduce((a, b) => a + b, 0)} listeners · ${c.cutscenes.join(' ') || '—'}`],
     ];
     // rows are measured first so the panel fits them (and spreads to the full width with larger text)
     const ruleY = Math.round(24 + Text.lineH('body') + 3);
