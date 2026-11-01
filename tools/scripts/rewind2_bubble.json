@@ -1,0 +1,22 @@
+[
+ {
+  "t": 0,
+  "eval": "(() => {\n  const G = window.__G;\n  const raf = () => new Promise((r) => requestAnimationFrame(() => r()));\n  const R = {\n    s: () => G.scenes.current,\n    w: () => G.scenes.current && G.scenes.current.world,\n    p: (i = 0) => G.scenes.current.world.players[i],\n    key: (code, down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code })),\n    async until(cond, ms = 15000) { const t0 = performance.now(); while (!cond()) { if (performance.now() - t0 > ms) return false; await raf(); } return true; },\n    /** wait `sec` of world (sim) time */\n    async simWait(sec) { const w = R.w(); const t0 = w.time; return R.until(() => R.w().time - t0 >= sec); },\n    /** hold a key for `sec` of world time */\n    async hold(code, sec) { R.key(code, true); await R.simWait(sec); R.key(code, false); },\n    near: (p) => { let b = null, bd = 1e9; for (const e of R.w().enemies) { if (e.dead) continue; const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < bd) { bd = d; b = e; } } return b; },\n    /** a hit from the nearest enemy (its id goes on the tape: Culprit) */\n    hit(p, amount, fixed) { const e = R.near(p); p.invuln = 0; return p.hurt({ amount, kind: 'melee', owner: e, x: e ? e.x : p.x + 10, y: e ? e.y : p.y, knock: 0, fixed: !!fixed }); },\n    info(i = 0) { const p = R.p(i); const pv = p.rewindPreview(); return { hp: p.hp, maxHp: p.maxHp, sand: Math.round(p.lo.sand), sandMax: p.lo.sandMax, tape: +p.rec.seconds.toFixed(2), can: p.canRewind(), rw: p.rw && { phase: p.rw.phase, scrub: p.rw.scrub, back: +((p.rec.length - p.rw.cursor) / 60).toFixed(2) }, pv: { gain: pv.hpGain, locked: pv.locked, cost: pv.cost, sec: +pv.seconds.toFixed(2) }, state: p.state }; },\n    /** freeze enemies in place so a screenshot is not a moving target */\n    freeze() { R.w().stop = 1e9; },\n    thaw() { R.w().stop = 0; },\n    calm() { for (const e of R.w().enemies) { e.spawnT = Math.max(e.spawnT || 0, 0); e.stateT = 0; } },\n  };\n  window.__rw = R;\n  return 'rwlib ready';\n})()\n"
+ },
+ {
+  "t": 5,
+  "eval": "(async()=>{const R=__rw;await R.until(()=>R.w()&&R.p()&&R.p().autoWalk<=0&&R.w().time>0.7); return R.info();})()"
+ },
+ {
+  "eval": "(async()=>{const R=__rw;const w=R.w(),p0=R.p(0); await R.until(()=>w.enemies.some(e=>!e.dead&&e.spawnT<=0)); const e=R.near(p0); if(Math.hypot(e.x-p0.x,e.y-p0.y)<210){ const far=w.map.spawnable.map(s=>({x:s.tx*16+8,y:s.ty*16+8})).filter(q=>Math.hypot(q.x-p0.x,q.y-p0.y)>=230).sort((a,b)=>Math.hypot(a.x-p0.x,a.y-p0.y)-Math.hypot(b.x-p0.x,b.y-p0.y))[0]; if(far){e.x=far.x;e.y=far.y;} } R.key('KeyQ',true); await R.until(()=>p0.rw&&p0.rw.scrub); const d=Math.hypot(e.x-p0.x,e.y-p0.y); const a={x:e.x,y:e.y,age:e.age,wt:w.time}; await R.simWait(0.4); const b={x:e.x,y:e.y,age:e.age,wt:w.time}; const near=w.timeScaleAt(p0.x+20,p0.y), farS=w.timeScaleAt(e.x,e.y); R.freeze(); return {test:'co-op bubble: enemy 200+ px away still moves', dist:Math.round(d), moved:+Math.hypot(b.x-a.x,b.y-a.y).toFixed(1), ageRate:+((b.age-a.age)/(b.wt-a.wt)).toFixed(2), scaleNear:near, scaleFar:farS, pass:d>=200&&Math.hypot(b.x-a.x,b.y-a.y)>0.5&&farS===1&&near<0.2};})()",
+  "t": 10
+ },
+ {
+  "shot": "bubble",
+  "t": 15
+ },
+ {
+  "eval": "(async()=>{const R=__rw;R.thaw(); R.key('KeyQ',false); await R.until(()=>!R.p(0).rw); return R.info(0);})()",
+  "t": 20
+ }
+]

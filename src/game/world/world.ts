@@ -15,6 +15,7 @@ import { VIEW_W } from '../../engine/gfx/post';
 import type { Run } from '../run';
 import type { Player } from '../entities/player';
 import { ownerPlayer } from '../players';
+import { TimeBubbles } from '../systems/timeBubble';
 
 /** a sim-time timer (world.after / world.every) */
 interface Timer { t: number; fn: () => void; owner: unknown; every: number; dead: boolean }
@@ -22,6 +23,14 @@ interface Timer { t: number; fn: () => void; owner: unknown; every: number; dead
 interface Aggro { target: Actor | null; slot: number; until: number }
 /** damage dealt to an enemy by a hand, for aggro scoring */
 interface DmgMark { t: number; slot: number; amount: number }
+
+/** Culprit marks wear off (GDD2 §3.8) */
+function tickCulprits(a: Actor, dt: number) {
+  for (const [slot, t] of a.culpritOf) {
+    if (t - dt <= 0) a.culpritOf.delete(slot);
+    else a.culpritOf.set(slot, t - dt);
+  }
+}
 
 /** aggro lock-in (s): an enemy keeps its target at least this long so it doesn't jitter */
 export const AGGRO_LOCK = 1.5;
@@ -76,8 +85,10 @@ export class World {
   /** global slow motion multiplier */
   timeScale = 1;
   slowT = 0;
-  /** freezes all entity updates except those flagged (rewind cinematic / time stop) */
+  /** freezes all entity updates except those flagged (the final boss's time stop) */
   frozen = false;
+  /** rewind time bubbles (systems/timeBubble.ts): solo = the whole room at 0.15×, co-op = r72 */
+  bubbles = new TimeBubbles();
   stats: WorldStats = { damage: 0, kills: 0, rewinds: 0, paradoxes: 0, hitsTaken: 0 };
   run: Run | null = null;
   /** 0..1 extra darkness (boss mechanics) */
@@ -244,8 +255,19 @@ export class World {
     if (due.length) this.timers = this.timers.filter((t) => !t.dead);
   }
 
-  /** local time scale at a point (F3: rewind time bubbles); F2: the world's */
-  timeScaleAt(_x: number, _y: number): number { return this.timeScale; }
+  /**
+   * local time scale at a point (PLAN2 §1.4 / F3): the world's slow motion × any time bubble
+   * covering it (a rewinding hand: solo the whole room, co-op r72; GDD2 §3.2). Players outside
+   * their own rewind run on the world's scale; a rewinding hand runs on real time.
+   */
+  timeScaleAt(x: number, y: number): number { return this.timeScale * this.bubbles.scaleAt(x, y); }
+
+  /** the dt an entity gets this tick: its own local time (time bubbles), real time while it rewinds */
+  private dtFor(e: Entity, dt: number, sdt: number): number {
+    if (e instanceof Actor && e.kind === 'player') return (e as unknown as Player).rewinding ? dt : sdt;
+    if (!this.bubbles.list.length) return sdt;
+    return sdt * this.bubbles.localAt(e.x, e.y);
+  }
 
   // ───────────────────────── navigation ─────────────────────────
   private updateFlow() {
@@ -354,7 +376,9 @@ export class World {
       this.slowT -= dt;
       if (this.slowT <= 0) this.timeScale = 1;
     }
-    const sdt = dt * this.timeScale;
+    // time bubbles: a rewinding hand slows the room (solo) or a circle around it (co-op)
+    this.bubbles.collect(this.players, this.players.length <= 1, dt);
+    const sdt = dt * this.timeScale * this.bubbles.global;
     this.time += sdt;
     this.tickTimers(sdt);
     this.flowT -= dt;
@@ -362,13 +386,15 @@ export class World {
     for (const e of this.entities) {
       if (e.dead) continue;
       if (this.frozen && !(e as any).ignoreFreeze) continue;
-      e.age += sdt;
+      const edt = this.dtFor(e, dt, sdt);
+      e.age += edt;
       if (e instanceof Actor) {
-        if (this.combat.tickStatus(e, sdt) && !e.dead) { this.physics(e, sdt, true); continue; }
+        if (e.culpritOf.size) tickCulprits(e, edt);
+        if (this.combat.tickStatus(e, edt) && !e.dead) { this.physics(e, edt, true); continue; }
       }
-      e.update(sdt);
-      if (e instanceof Actor && !e.dead) this.physics(e, sdt, false);
-      else if (!(e instanceof Actor) && !e.dead) { e.x += e.vx * sdt; e.y += e.vy * sdt; }
+      e.update(edt);
+      if (e instanceof Actor && !e.dead) this.physics(e, edt, false);
+      else if (!(e instanceof Actor) && !e.dead) { e.x += e.vx * edt; e.y += e.vy * edt; }
     }
     if (!this.frozen) this.separate();
     // hitboxes still resolve during a time stop (echoes keep fighting)
@@ -511,6 +537,25 @@ export class World {
     });
   }
 
+  /**
+   * The rewind ripple is local (GDD2 §3.2): centred on the hand rewinding hardest, radius 120
+   * (solo) or the 72 px bubble (co-op), the world outside desaturated by 30% while it scrubs.
+   * Scenes still drive params.rewind (the strength); post.ts keeps the effect inside the circle.
+   */
+  private rippleLast = { x: VIEW_W / 2, y: 180, r: 0 };
+  private rewindPost(r: Renderer, v: { x: number; y: number }) {
+    const pp = r.params;
+    let best: Player | null = null, fx = 0;
+    for (const p of this.players) if (p.rewindFx > fx) { fx = p.rewindFx; best = p; }
+    const L = this.rippleLast;
+    if (best) { L.x = best.x - v.x; L.y = best.y - 10 - v.y; L.r = best.rippleR(this.players.length <= 1); }
+    let desat = 0;
+    for (const p of this.players) desat = Math.max(desat, p.scrubDesat);
+    pp.rewindX = L.x; pp.rewindY = L.y;
+    pp.rewindR = Math.max(1, L.r);
+    pp.rewindDesat = desat;
+  }
+
   enemiesNear(x: number, y: number, r: number): Actor[] {
     const out: Actor[] = [];
     for (const e of this.enemies) if (!e.dead && Math.hypot(e.x - x, e.y - y) <= r + e.r) out.push(e);
@@ -532,6 +577,7 @@ export class World {
 
   render(r: Renderer) {
     const v = this.cam.view();
+    this.rewindPost(r, v);
     r.ambient = this.darkness > 0.01 ? mix(this.theme.ambient, '#06050c', this.darkness) : this.theme.ambient;
     r.begin(v.x, v.y, this.theme.clear);
     const w = r.w;

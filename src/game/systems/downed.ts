@@ -2,14 +2,16 @@
 //
 // A hand whose HP reaches 0 (after the 1.0 saves: hg_lastsecond / old watch, the second spring):
 //   · solo  — Last Second: the world runs at 0.2× for 1.5 s with a big "REWIND!" prompt. Rewinding
-//             out of it works like a normal rewind (DownedHooks.rewindOut; F3 swaps in the sand cost
-//             and the 6 s tape burn). Otherwise the clock stops and the run ends (1.0).
+//             out of it is a normal, paid rewind (tap or scrub) that stands the hand up and burns the
+//             tape for 6 s (DownedHooks.rewindOut → Player.rewindFromStop). Otherwise the clock stops
+//             and the run ends (1.0).
 //   · co-op — the hand freezes into a cracked clock face ringed by 12 ticks, one going dark every
 //             1.25 s (15 s). In that time it can be
 //               wound up    a teammate within 20 px holds Interact 1.2 s → 35% HP, 1.5 s invulnerable
 //               echo-saved  a teammate's armed echo walks over it → 20% HP ("Your past saved you")
-//               self-saved  first 3 s, rewinding out on its own (F3: sand cost + tape burn)
-//               pulled back first 3 s, a teammate holds Rewind 0.4 s within 48 px (F3: DownedHooks.pullBack)
+//               self-saved  first 3 s, rewinding out on its own (sand cost + 6 s tape burn)
+//               pulled back first 3 s, a teammate holds Rewind 0.4 s within 48 px and pays 100 Sand
+//                           (DownedHooks.pullBack → Player.pullBack)
 //             After 15 s it becomes a ghost hand: it can move and tap for 1 damage (the sand goes
 //             to the nearest standing teammate) and is wound up at 25% when the next room starts.
 // The run ends when every hand is stopped or a ghost (GameScene asks isOut()).
@@ -45,23 +47,26 @@ export const ROOM_REVIVE_HP = 0.25;
 export const REVIVE_INVULN = 1.5;
 /** how near a teammate must be to see the wind-up prompt */
 const PROMPT_RANGE = 44;
+/** Pull Back hold (GDD2 §5.5; Player.PULL_TIME) */
+const PULL_HOLD = 0.4;
 
 /**
  * Seams for F3 / P5. Each is safe to replace at module load.
  */
 export const DownedHooks = {
   /**
-   * F3: rewinding out of a stop (solo Last Second, co-op self-rescue). Return true if the hand
-   * rewound. Default (F2): the 1.0 rewind, paying one charge.
+   * Rewinding out of a stop (solo Last Second, co-op self-rescue). Return true if the hand started
+   * its rewind. F3: a normal paid rewind (Sand ≥ 25) that stands the hand up and burns the tape 6 s.
    */
   rewindOut: (p: Player): boolean => p.rewindFromStop(),
-  /** F3: can this hand rewind out right now (drives the prompt's colour) */
+  /** can this hand rewind out right now (drives the prompt's colour) */
   canRewindOut: (p: Player): boolean => p.canRewindFromStop(),
   /**
-   * F3: Pull Back — `rescuer` holds Rewind 0.4 s within 48 px of `target` during its first 3 s.
-   * Return true when it happened (F3 revives the target with source 'pullback'). null = off (F2).
+   * Pull Back — `rescuer` holds Rewind 0.4 s within 48 px of `target` during its first 3 s (the
+   * rescuer's Player tracks the hold). Return true when it happened (the target is revived with
+   * source 'pullback'). null = off.
    */
-  pullBack: null as null | ((rescuer: Player, target: Player) => boolean),
+  pullBack: ((rescuer: Player, target: Player) => !!rescuer.pull && rescuer.pull.target === target && rescuer.pull.t >= PULL_HOLD && rescuer.pullBack(target)) as null | ((rescuer: Player, target: Player) => boolean),
   /** P5: seconds a hand needs to wind a teammate up (Ling: 0.6) */
   windupTime: (_rescuer: Player): number => 1.2,
 };
@@ -82,8 +87,7 @@ export interface DownState {
 export const newDownState = (): DownState => ({ t: 0, lastSecond: 0, final: false, wind: 0, windBy: null });
 
 const solo = (w: World) => w.playerCount <= 1;
-// F2a stopgap until F3 builds fork: a pad's fork button (RB) rewinds too (see Player.update)
-const rewindPressed = (p: Player) => p.input.pressed('rewind') || p.input.pressedOnPad('fork');
+const rewindPressed = (p: Player) => p.input.pressed('rewind');
 
 /** HP reached 0 (after the 1.0 saves) */
 export function stop(p: Player) {

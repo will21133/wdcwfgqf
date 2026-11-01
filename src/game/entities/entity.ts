@@ -76,6 +76,11 @@ export abstract class Actor extends Entity {
   height = 16;
   /** last hit info (for death effects) */
   lastHit: DamageInfo | null = null;
+  /**
+   * Culprit marks (GDD2 §3.8, PLAN2 §1.9): slot → seconds left. A hand that rewinds past a hit marks
+   * whoever dealt it; that hand's echoes deal +50% to it. World.update counts them down.
+   */
+  culpritOf = new Map<number, number>();
   /** set by world while frozen by time-stop/stasis */
   get frozen() { return this.st.stasis > 0; }
 

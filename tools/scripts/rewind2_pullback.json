@@ -1,0 +1,30 @@
+[
+ {
+  "t": 0,
+  "eval": "(() => {\n  const G = window.__G;\n  const raf = () => new Promise((r) => requestAnimationFrame(() => r()));\n  const R = {\n    s: () => G.scenes.current,\n    w: () => G.scenes.current && G.scenes.current.world,\n    p: (i = 0) => G.scenes.current.world.players[i],\n    key: (code, down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code })),\n    async until(cond, ms = 15000) { const t0 = performance.now(); while (!cond()) { if (performance.now() - t0 > ms) return false; await raf(); } return true; },\n    /** wait `sec` of world (sim) time */\n    async simWait(sec) { const w = R.w(); const t0 = w.time; return R.until(() => R.w().time - t0 >= sec); },\n    /** hold a key for `sec` of world time */\n    async hold(code, sec) { R.key(code, true); await R.simWait(sec); R.key(code, false); },\n    near: (p) => { let b = null, bd = 1e9; for (const e of R.w().enemies) { if (e.dead) continue; const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < bd) { bd = d; b = e; } } return b; },\n    /** a hit from the nearest enemy (its id goes on the tape: Culprit) */\n    hit(p, amount, fixed) { const e = R.near(p); p.invuln = 0; return p.hurt({ amount, kind: 'melee', owner: e, x: e ? e.x : p.x + 10, y: e ? e.y : p.y, knock: 0, fixed: !!fixed }); },\n    info(i = 0) { const p = R.p(i); const pv = p.rewindPreview(); return { hp: p.hp, maxHp: p.maxHp, sand: Math.round(p.lo.sand), sandMax: p.lo.sandMax, tape: +p.rec.seconds.toFixed(2), can: p.canRewind(), rw: p.rw && { phase: p.rw.phase, scrub: p.rw.scrub, back: +((p.rec.length - p.rw.cursor) / 60).toFixed(2) }, pv: { gain: pv.hpGain, locked: pv.locked, cost: pv.cost, sec: +pv.seconds.toFixed(2) }, state: p.state }; },\n    /** freeze enemies in place so a screenshot is not a moving target */\n    freeze() { R.w().stop = 1e9; },\n    thaw() { R.w().stop = 0; },\n    calm() { for (const e of R.w().enemies) { e.spawnT = Math.max(e.spawnT || 0, 0); e.stateT = 0; } },\n  };\n  window.__rw = R;\n  return 'rwlib ready';\n})()\n"
+ },
+ {
+  "t": 5,
+  "eval": "(async()=>{const R=__rw;await R.until(()=>R.w()&&R.p()&&R.p().autoWalk<=0&&R.w().time>0.7); return R.info();})()"
+ },
+ {
+  "eval": "(async()=>{const R=__rw;const p0=R.p(0),p1=R.p(1); await R.simWait(0.6); p1.lo.sand=0; p1.hp=4; R.hit(p1,20); await R.until(()=>p1.state==='stopped'); const sp=p0.freeSpot(p1.x+26,p1.y); p0.catchUpTo(sp.x,sp.y); await R.simWait(0.4); R.key('KeyQ',true); await R.until(()=>p0.pull&&p0.pull.t>=0.22); R.freeze(); return {p0:R.info(0),p1:R.info(1),pull:p0.pull&&+p0.pull.t.toFixed(2)};})()",
+  "t": 10
+ },
+ {
+  "shot": "pullback",
+  "t": 15
+ },
+ {
+  "eval": "(async()=>{const R=__rw;R.thaw(); const p1=R.p(1); await R.until(()=>p1.state==='alive'); R.key('KeyQ',false); await R.simWait(0.12); R.freeze(); return {p0:R.info(0),p1:R.info(1),echoes:p1.echoes.length};})()",
+  "t": 20
+ },
+ {
+  "shot": "pulled",
+  "t": 25
+ },
+ {
+  "eval": "(async()=>{const R=__rw;R.thaw(); return R.info(1);})()",
+  "t": 30
+ }
+]

@@ -22,6 +22,8 @@ export class Echo extends Entity implements Wielder {
   /** > 0 while this echo draws aggro (Mina's taunt, GDD2 §5.2; P5) */
   taunt = 0;
   dmgScale: number;
+  /** Perfect Rewind (GDD2 §3.9): +50% damage and a brass outline */
+  gilded = false;
   lastSecond = false;
   flip = false;
   dir: Dir = 'down';
@@ -49,6 +51,14 @@ export class Echo extends Entity implements Wielder {
   }
 
   lunge() {}
+
+  /** a Perfect Rewind's echo: +50% damage, brass outline (once) */
+  gild() {
+    if (this.gilded || this.dead) return;
+    this.gilded = true;
+    this.dmgScale *= 1.5;
+    this.world?.fx.ring(this.x, this.y - 8, 2, 20, 0.35, 'B5', 2);
+  }
 
   get progress() { return this.i / this.rec.frames.length; }
 
@@ -137,6 +147,10 @@ export class Echo extends Entity implements Wielder {
     const behind = Math.sin(pose.angle) < -0.35 || this.dir === 'up';
     this.scarf.draw(r.w, 'C2', a * 0.8);
     if (behind) this.weapon.drawHeld(r, this.x + hand.x * fx, this.y + hand.y, pose, 'C3', a);
+    if (this.gilded) {
+      // brass rim (B5): the silhouette offset a pixel each way under the body
+      for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) drawSprite(r.w, spr, this.x + ox, this.y + oy, { flip: this.flip, tint: 'B5', alpha: a });
+    }
     drawSprite(r.w, spr, this.x, this.y, { flip: this.flip, alpha: a });
     if (!behind) this.weapon.drawHeld(r, this.x + hand.x * fx, this.y + hand.y, pose, 'C3', a);
     // additive ghost glow

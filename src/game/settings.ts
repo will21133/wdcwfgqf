@@ -45,9 +45,9 @@ export const settings: Settings = {
 /**
  * Settings whose consumers are not built yet stay out of the menu until the owning package wires
  * them up and flips the flag (an option that does nothing would only confuse players):
- * rewindMode → F3 (tap-only rewind), hudLabels → P1 (HUD 2.0 labels).
+ * rewindMode → F3 (tap-only rewind; live), hudLabels → P1 (HUD 2.0 labels).
  */
-export const settingsLive = { rewindMode: false, hudLabels: false };
+export const settingsLive = { rewindMode: true, hudLabels: false };
 
 /** the ?lang= debug override applies until the player picks a language in the menu */
 let urlLang = true;

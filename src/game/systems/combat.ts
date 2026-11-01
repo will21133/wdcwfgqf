@@ -7,6 +7,9 @@ import { settings } from '../settings';
 import { rumbleOwner, ownerPlayer } from '../players';
 import { BASE_MODS, type Mods, type Loadout } from '../run';
 const G_sfx = sfx;
+/** GDD2 §3.3: Sand from an echo's damage, and for a kill */
+const ECHO_SAND = 0.75;
+const KILL_SAND = 2;
 
 export type DmgKind = 'melee' | 'proj' | 'aoe' | 'dot' | 'paradox' | 'contact' | 'fall' | 'status';
 
@@ -154,17 +157,21 @@ export class Combat {
   }
   /** the 1.0 default owner for an effect with no recorded applier */
   private fallbackOwner(): Actor | null { return this.world.player; }
-  /** damage dealt by a hand refunds sand to that hand (a ghost's goes to the nearest standing teammate) */
-  private refundSand(owner: unknown, amount: number, echo: boolean | undefined) {
+  /** the loadout Sand earned by `owner` goes to (a ghost's goes to the nearest standing teammate) */
+  private sandTo(owner: unknown): Loadout | null {
     let p = ownerPlayer(owner);
-    if (!p || !this.world.run) return;
+    if (!p || !this.world.run) return null;
     if (p.state === 'ghost') {
       const q = this.world.nearestPlayer(p.x, p.y) as typeof p | null;
-      if (!q || ownerPlayer(q) !== q) return;
+      if (!q || ownerPlayer(q) !== q) return null;
       p = q;
     }
-    const lo = this.world.run.lo(p.slot);
-    lo.addSand(amount * (echo && !lo.mods.echoSand ? 0.5 : 1));
+    return this.world.run.lo(p.slot);
+  }
+  /** damage dealt by a hand refunds Sand to that hand (GDD2 §3.3: ×1, its echoes ×0.75) */
+  private refundSand(owner: unknown, amount: number, echo: boolean | undefined) {
+    const lo = this.sandTo(owner);
+    if (lo) lo.addSand(amount * (echo && !lo.mods.echoSand ? ECHO_SAND : 1));
   }
 
   /** Central damage resolution. Returns damage dealt. */
@@ -179,6 +186,8 @@ export class Combat {
     // rust: +4% damage taken per stack (the rust's applier's Rust Power)
     if (t.st.rust > 0 && info.kind !== 'fall') amt *= 1 + t.st.rust * 0.04 * this.modsOf(t.st.rustBy ?? info.owner).rustPower;
     if (om && om.freshDmg && t.hp / t.maxHp > 0.8) amt *= 1 + om.freshDmg;
+    // "the past's revenge" (GDD2 §3.8): a hand's echoes deal +50% to the Culprit it marked
+    if (om && info.echo && player && (t.culpritOf.get(player.slot) ?? 0) > 0) amt *= 1 + om.culpritBonus;
     // stasis: store instead of dealing
     if (t.st.stasis > 0 && !info.fromStasis && t.team === 'enemy') {
       t.st.stasisStored += amt;
@@ -233,6 +242,8 @@ export class Combat {
       if (t.team === 'enemy') {
         w.bus.emit('kill', { target: t, info, player: ownerPlayer(info.owner) ?? undefined });
         w.stats.kills++;
+        // +2 Sand a kill (GDD2 §3.3), to the hand behind it
+        if (fromPlayer) this.sandTo(info.owner)?.addSand(KILL_SAND);
       }
     }
     return dealt;

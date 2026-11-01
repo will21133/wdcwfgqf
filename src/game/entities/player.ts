@@ -4,7 +4,10 @@ import type { Renderer } from '../../engine/gfx/renderer';
 import { drawSprite, Sprite, spriteFromDef } from '../../engine/gfx/sprite';
 import { buildTick, TickFrames, Dir, KEY_FRAMES, KEY_PAL } from '../../art/sprites/tick';
 import { G, sfx } from '../G';
-import { Recorder, Recording } from '../systems/rewind';
+import { Recorder, type Recording, type Frame } from '../systems/rewind';
+import { RewindStyles, type RewindStyle } from '../systems/rewindStyles';
+import { renderShadow, renderRewindMarks } from '../ui/rewindHud';
+import { GameHooks } from '../hooks';
 import { Weapon, Wielder, Pose } from '../weapons/weapon';
 import { Rapier } from '../weapons/rapier';
 import { makeWeapon } from '../weapons';
@@ -27,6 +30,7 @@ import * as Down from '../systems/downed';
 import { tr } from '../i18n';
 import { S } from '../strings';
 import '../strings/f2';
+import '../strings/f3';
 
 export type PlayerState = 'alive' | 'stopped' | 'ghost';
 
@@ -55,6 +59,63 @@ const RING: [number, number][] = [[0, -4], [1, -4], [2, -4], [3, -4], [4, -3], [
 
 export interface PlayerPoseSnapshot { dir: Dir; flip: boolean; anim: Anim; animT: number; pose: Pose }
 
+// ───────────────────────── Rewind 2.0 (GDD2 §3.2 / §3.12) ─────────────────────────
+/** shortest tape a rewind needs (frames) and the least it rewinds */
+export const MIN_TAPE = 15;
+export const MIN_BACK = 6;
+/** scrub cursor: 3 s of tape per 0.9 s held */
+export const SCRUB_RATE = 3 / 0.9;
+/** travel back along the path (real s) */
+export const TRAVEL_TIME = 0.25;
+/** a rewind out of a stop burns the tape (GDD2 §3.10) */
+export const TAPE_BURN = 6;
+/** Pull Back (GDD2 §5.5): range, hold time, cost, least HP the pulled hand gets */
+export const PULL_RANGE = 48, PULL_TIME = 0.4, PULL_COST = 100, PULL_MIN_HP = 0.3;
+/** Sand for clearing a room (GDD2 §3.3; kills: combat.ts) */
+export const SAND_CLEAR = 30;
+/** what counts as an attack for Perfect Rewind (not standing in a hazard, burning or bumping a body) */
+const PERFECT_KINDS = new Set(['melee', 'proj', 'aoe']);
+/** how long the PERFECT stamp stays up (real s) */
+export const PERFECT_STAMP = 1.1;
+
+export type RewindRefusal = 'sand' | 'tape' | 'anchor' | 'burnt' | 'state';
+export interface RewindCheck { ok: boolean; reason?: RewindRefusal }
+export interface RewindPreview {
+  /** target frame index on the tape (0 = oldest) */
+  frame: number;
+  x: number; y: number;
+  /** HP a rewind gives back right now / fixed damage it cannot */
+  hpGain: number; locked: number;
+  /** Sand it costs / seconds of tape it rewinds */
+  cost: number; seconds: number;
+  /** a rewind is possible at all (else the Shadow is drawn grey and dotted) */
+  ok: boolean;
+}
+/** a rewind under way: held (tap or scrub) or travelling back */
+export interface RewindState {
+  phase: 'hold' | 'travel';
+  /** real seconds since the press */
+  t: number;
+  /** held past the tap threshold */
+  scrub: boolean;
+  /** scrub cursor: target frame index */
+  cursor: number;
+  clickT: number;
+  /** a rewind out of a stop (Last Second / self-rescue): cannot be cancelled, stands the hand up */
+  rescue: boolean;
+  /** costs nothing (Old Watch auto-rewind) */
+  free: boolean;
+  style: RewindStyle;
+  cut: Recording | null;
+  frameIdx: number;
+  tt: number; dur: number;
+  fromX: number; fromY: number;
+  cost: number; seconds: number;
+}
+
+// the pool refills at room clears (GDD2 §3.3); kills give +2 in combat.ts
+GameHooks.onRoomClear(({ w }) => { for (const p of w.players) if (p.state !== 'ghost') p.lo.addSand(SAND_CLEAR); });
+
 export class Player extends Actor implements Wielder {
   /** player slot 0..3 (I..IV) */
   slot: number;
@@ -74,8 +135,16 @@ export class Player extends Actor implements Wielder {
   aim = Math.PI / 2;
   moveX = 0; moveY = 0;
   weapon: Weapon = new Rapier();
-  recorder = new Recorder(180);
+  /** this hand's tape (Loadout.tape: kept across rooms; PLAN2 §1.8) */
+  get rec(): Recorder {
+    const lo = this.lo;
+    return (lo.tape ??= new Recorder(Math.round(lo.mods.tapeLen * 60)));
+  }
+  /** 1.0 name of the tape */
+  get recorder(): Recorder { return this.rec; }
   echoes: Echo[] = [];
+  /** the echo this hand's last rewind left (Perfect Rewind gilds it) */
+  lastEcho: Echo | null = null;
   scarfA = new Scarf(7, 2.2);
   scarfB = new Scarf(5, 2.2);
   keyAngle = 0;
@@ -89,10 +158,37 @@ export class Player extends Actor implements Wielder {
   airborne = false;
   // lunge (attack step forward)
   lungeT = 0; lungeVX = 0; lungeVY = 0;
-  // rewind cinematic
-  rewinding: { rec: Recording; t: number; dur: number; fromX: number; fromY: number } | null = null;
+  /** the rewind under way (GDD2 §3.2): held, scrubbing or travelling back; null otherwise */
+  rw: RewindState | null = null;
+  /** true from the press to the landing (the hand is intangible) */
+  get rewinding(): boolean { return this.rw !== null; }
+  /** 0..1 strength of this hand's rewind ripple (scenes feed it to post.ts) */
   rewindFx = 0;
+  /** 0..0.3: the world outside the ripple loses colour while this hand scrubs */
+  scrubDesat = 0;
+  /** seconds since the last landing (the ripple widens and fades); -1 = none */
+  private rippleT = -1;
   fixedTaken = 0;
+  /** damage that landed since the last taped frame (written into the next one) */
+  private pendHit = 0;
+  private pendFixed = 0;
+  private pendCulprits: number[] | null = null;
+  /** > 0 while the hand stands in a time anchor (P2 hazards set it every tick): no rewinds */
+  anchorT = 0;
+  /** Perfect Rewind window (game s) after the press, and what it refunds */
+  private perfect: { t: number; hit: boolean; refunded: boolean; cost: number } | null = null;
+  /** landing: invulnerability ring (s left, of landDur) and the '+N' it gave back */
+  landT = 0;
+  landDur = 0.5;
+  landGain = 0;
+  /** the cyan-and-gold PERFECT stamp over the hand (s left) */
+  perfectStampT = 0;
+  /** Pull Back hold on a stopped teammate (GDD2 §5.5) */
+  pull: { target: Player; t: number } | null = null;
+  /** this room's free scrub (mods.scrubFreeFirst) has been used */
+  private scrubFreeUsed = false;
+  private refuseT = 0;
+  private previewCache: { tick: number; key: string; v: RewindPreview } | null = null;
   lastSafeX = 0; lastSafeY = 0;
   /** control lock (cutscenes, room transitions) */
   locked = false;
@@ -109,8 +205,6 @@ export class Player extends Actor implements Wielder {
   down: Down.DownState = Down.newDownState();
   /** ghost hand: tap-attack cooldown */
   ghostCd = 0;
-  /** a rewind out of a stop is under way (it always restores at least 1 HP) */
-  private rescueRewind = false;
 
   constructor(x: number, y: number, input?: PlayerInput) {
     super();
@@ -134,6 +228,8 @@ export class Player extends Actor implements Wielder {
   }
 
   get run() { return this.world.run!; }
+  /** leaving the world mid-rewind (room change, a hand that left) must not leave the mix muffled */
+  removed() { if (this.rw) { this.rw = null; G.audio.muffle(false); } }
   /** this hand's loadout (PLAN2 §1.5) */
   get lo(): Loadout { return this.world.run!.lo(this.slot); }
   get mods() { return this.lo.mods; }
@@ -159,7 +255,34 @@ export class Player extends Actor implements Wielder {
       this.world.after(0, () => this.world.bus.emit('revived', { player: this, by: null, source: 'room' }), this);
     }
     this.dashCharges = this.mods.dashCharges;
-    this.recorder.setWindow(this.mods.rewindWindow);
+    // the pool is full at the start of every floor (GDD2 §3.3)
+    if (lo.sandFloor !== this.run.floor) { lo.sand = lo.sandMax; lo.sandFloor = this.run.floor; }
+    // the tape is kept across rooms, starting with three seconds standing at the entrance: a rewind
+    // works from the first frame (back to the door; GDD2 §3.2). The walk-in itself is never taped.
+    const rec = this.rec;
+    rec.setWindow(this.mods.tapeLen);
+    const ahead = this.autoWalk > 0 ? Math.round(this.mods.moveSpeed * this.autoWalk * 0.85) : 0;
+    const spot = this.freeSpot(this.x, this.y - ahead);
+    rec.prefill(spot.x, spot.y, rec.capacity, this.frameBase());
+  }
+
+  /** the nearest standable spot to (x, y) (searching outward a tile at a time), else (x, y) */
+  freeSpot(x: number, y: number): { x: number; y: number } {
+    const w = this.world;
+    const ok = (px: number, py: number) => w.boxFree(px, py, this.r) && !w.map.pitAt(px, py);
+    if (ok(x, y)) return { x, y };
+    for (let d = 4; d <= 48; d += 4) {
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * TAU, px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
+        if (ok(px, py)) return { x: px, y: py };
+      }
+    }
+    return { x: this.x, y: this.y };
+  }
+
+  /** the fields a standing frame copies from this hand (prefill) */
+  private frameBase(): Partial<Frame> {
+    return { hp: Math.max(1, this.hp), fixed: this.fixedTaken, tempo: this.lo.tempo, dir: this.dir === 'down' ? 0 : this.dir === 'up' ? 1 : 2, flip: this.flip };
   }
 
   // ───────────────────────── update ─────────────────────────
@@ -172,8 +295,9 @@ export class Player extends Actor implements Wielder {
     if (this.hurtT > 0) this.hurtT -= dt;
     this.blinkT -= dt;
     if (this.blinkT < -0.12) this.blinkT = frand(2, 5);
+    this.tickRewindFx(dt);
 
-    if (this.rewinding) { this.updateRewind(dt); this.syncRun(); return; }
+    if (this.rw) { this.updateRewind(dt); this.syncRun(); return; }
     if (this.state === 'stopped') { Down.updateStopped(this, dt); this.syncRun(); return; }
     if (this.state === 'ghost') { this.updateGhost(dt); return; }
     if (this.hp <= 0) { this.deadT += dt; return; }
@@ -199,13 +323,12 @@ export class Player extends Actor implements Wielder {
     const attackPressed = !this.locked && inp.pressed('attack');
     const specialPressed = !this.locked && inp.pressed('special');
     const dashPressed = !this.locked && inp.pressed('dash');
-    // F2a stopgap until F3 implements fork: a pad's fork button (RB) rewinds too, so a 1.0 pad
-    // player's RB still rewinds (GDD2 §2.1 moved fork onto RB). Keyboard R / I (fork) do nothing
-    // yet: neither rewound in 1.0.
-    const rewindPressed = !this.locked && (inp.pressed('rewind') || inp.pressedOnPad('fork'));
+    const rewindPressed = !this.locked && inp.pressed('rewind');
 
-    if (rewindPressed) this.tryRewind();
-    if (this.rewinding) return;
+    // Rewind (GDD2 §3.2) — or, next to a teammate who just stopped, Pull Back (GDD2 §5.5)
+    this.updatePull(dt, rewindPressed);
+    if (rewindPressed && !this.pull) this.tryRewind();
+    if (this.rw) return;
 
     if (dashPressed && this.dashT <= 0 && this.dashCharges > 0 && this.falling <= 0) this.startDash();
 
@@ -306,7 +429,7 @@ export class Player extends Actor implements Wielder {
     this.hurtT = 0;
     this.down = Down.newDownState();
     this.dashCharges = this.mods.dashCharges;
-    this.recorder.clear();
+    this.rec.prefill(this.x, this.y, 60, this.frameBase());
     this.syncRun();
     w.fx.ring(this.x, this.y - 8, 3, 34, 0.5, (by ?? this).color, 3);
     w.fx.burst(this.x, this.y - 10, 22, ['W', this.color, (by ?? this).color], 140, 0.5);
@@ -317,20 +440,6 @@ export class Player extends Actor implements Wielder {
     this.input.rumble(0.4, 0.5, 200);
     by?.input.rumble(0.2, 0.4, 160);
     w.bus.emit('revived', { player: this, by, source });
-  }
-
-  /** default Last Second / self-rescue rewind (DownedHooks.rewindOut; F3 replaces the cost) */
-  canRewindFromStop() { return this.state === 'stopped' && this.lo.charges >= 1 && this.recorder.length >= 20 && this.falling <= 0 && !this.rewinding; }
-  rewindFromStop(): boolean {
-    if (!this.canRewindFromStop()) { sfx('denied', { vol: 0.6 }); return false; }
-    this.state = 'alive';
-    this.solid = true;
-    this.down = Down.newDownState();
-    this.rescueRewind = true;
-    this.tryRewind(true);
-    this.lo.charges--;
-    this.world.bus.emit('revived', { player: this, by: null, source: 'self' });
-    return true;
   }
 
   /** a ghost hand drifts with the team and taps for 1 damage (sand goes to a teammate) */
@@ -431,46 +540,209 @@ export class Player extends Actor implements Wielder {
     this.world.add(new Afterimage(this.x, this.y, spr, this.flip, color, dur, a0));
   }
 
-  // ───────────────────────── recording & rewind ─────────────────────────
+  // ───────────────────────── recording & rewind (GDD2 §3) ─────────────────────────
   private record() {
     // never tape a spot a rewind could not stand on: the entry walk (collision off, still inside
-    // the sealed doorway) or anything else lodged in a wall would rewind the hand into the wall
-    if (!this.collides || !this.world.boxFree(this.x, this.y, this.r)) return;
+    // the sealed doorway), a fall, or anything lodged in a wall would rewind the hand into it
+    if (!this.collides || this.falling > 0 || !this.world.boxFree(this.x, this.y, this.r)) return;
     const pose = this.weapon.pose(this.aim);
-    this.recorder.push({
+    this.rec.push({
       x: this.x, y: this.y, dir: this.dir === 'down' ? 0 : this.dir === 'up' ? 1 : 2, flip: this.flip,
       anim: this.anim, animT: this.animT, wa: pose.angle, we: pose.ext, wv: pose.vis,
       hp: this.hp, fixed: this.fixedTaken, air: this.dashT > 0,
+      tempo: this.lo.tempo, culprits: this.pendCulprits, hit: this.pendHit, fixedHit: this.pendFixed,
     });
+    this.pendHit = 0; this.pendFixed = 0; this.pendCulprits = null;
   }
 
-  canRewind() { return this.lo.charges >= 1 && this.recorder.length >= 20 && !this.rewinding && this.hp > 0 && this.falling <= 0 && this.state === 'alive'; }
+  /** the style this hand rewinds with (hand.rewindStyle; P5 adds more) */
+  get rewindStyle(): RewindStyle { return RewindStyles.get(this.hand.rewindStyle); }
 
+  /** can this hand start a rewind now? (PLAN2 §1.8) `fromStop`: a stopped hand rewinding out */
+  canRewind(fromStop = false): RewindCheck {
+    const stateOk = fromStop ? this.state === 'stopped' && !this.down.final : this.state === 'alive' && this.hp > 0;
+    if (!stateOk || this.rw || this.falling > 0 || (this.locked && !fromStop) || !this.world) return { ok: false, reason: 'state' };
+    const rec = this.rec;
+    if (rec.burnT > 0) return { ok: false, reason: 'burnt' };
+    if (this.anchorT > 0) return { ok: false, reason: 'anchor' };
+    if (rec.length < MIN_TAPE) return { ok: false, reason: 'tape' };
+    if (this.lo.sand + 1e-6 < this.costFor(MIN_BACK / 60, false)) return { ok: false, reason: 'sand' };
+    return { ok: true };
+  }
+
+  /** Sand for rewinding `seconds` (a scrub may be free: mods.scrubFreeFirst, once per room) */
+  costFor(seconds: number, scrub: boolean): number {
+    const m = this.mods;
+    if (scrub && !this.scrubFreeUsed && m.scrubFreeFirst > 0 && seconds <= m.scrubFreeFirst + 1e-6) return 0;
+    return this.rewindStyle.cost(this, seconds);
+  }
+
+  /** the most frames back the pool pays for (0 = not even the shortest rewind) */
+  private maxBack(scrub: boolean): number {
+    const n = this.rec.length;
+    if (this.rw?.free) return n;
+    const sand = this.lo.sand + 1e-6;
+    if (n < MIN_BACK || this.costFor(MIN_BACK / 60, scrub) > sand) return 0;
+    let lo = MIN_BACK, hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.costFor(mid / 60, scrub) <= sand) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  /** frame i, or the nearest frame not over a pit (a dash over a pit is taped but never landed on) */
+  private standable(i: number): number {
+    const rec = this.rec, m = this.world.map;
+    const n = rec.length;
+    i = Math.max(0, Math.min(n - 1, i));
+    const ok = (k: number) => { const f = rec.at(k); return !m.pitAt(f.x, f.y); };
+    if (ok(i)) return i;
+    for (let d = 1; d < 60; d++) {
+      if (i - d >= 0 && ok(i - d)) return i - d;
+      if (i + d < n - MIN_BACK && ok(i + d)) return i + d;
+    }
+    return i;
+  }
+
+  /** where a tap lands: the Shadow — the oldest frame the pool pays for */
+  private tapTarget(): number {
+    const n = this.rec.length;
+    const back = this.maxBack(false);
+    if (back <= 0) return 0;
+    return this.standable(n - back);
+  }
+
+  /**
+   * What a rewind would do right now (PLAN2 §1.8): while scrubbing, at the cursor; otherwise a tap
+   * (the Shadow). Cached per tick.
+   */
+  rewindPreview(): RewindPreview {
+    const rec = this.rec;
+    const R = this.rw;
+    const scrub = !!R && R.phase === 'hold' && R.scrub;
+    const key = `${rec.tick}:${rec.length}:${scrub ? R!.cursor : -1}:${Math.round(this.lo.sand)}:${this.hp}:${this.fixedTaken}`;
+    const tick = this.world?.tickNo ?? 0;
+    const c = this.previewCache;
+    if (c && c.tick === tick && c.key === key) return c.v;
+    const n = rec.length;
+    let v: RewindPreview;
+    if (n < 2) v = { frame: 0, x: this.x, y: this.y, hpGain: 0, locked: 0, cost: 0, seconds: 0, ok: false };
+    else {
+      const idx = scrub ? R!.cursor : this.tapTarget();
+      const f = rec.at(idx);
+      const seconds = (n - idx) / 60;
+      const cost = R?.free ? 0 : this.costFor(seconds, scrub);
+      const { gain, locked } = this.hpFromFrame(f, false);
+      const ok = scrub || this.canRewind(this.state === 'stopped').ok;
+      v = { frame: idx, x: f.x, y: f.y, hpGain: gain, locked, cost, seconds, ok };
+    }
+    this.previewCache = { tick, key, v };
+    return v;
+  }
+
+  /** HP math (GDD2 §3.2): max(current, min(maxHp, frame HP − fixed damage taken since)) */
+  private hpFromFrame(f: Frame, rescue: boolean): { to: number; gain: number; locked: number } {
+    const fixedSince = Math.max(0, this.fixedTaken - f.fixed);
+    const cur = Math.max(0, this.hp);
+    let to = this.mods.noRewindHeal ? cur : Math.max(cur, Math.min(this.maxHp, f.hp - fixedSince));
+    if (rescue) to = Math.max(1, Math.min(this.maxHp, Math.max(to, f.hp - fixedSince)));
+    const gain = Math.max(0, Math.round(to - cur));
+    const locked = Math.max(0, Math.min(Math.round(fixedSince), Math.round(this.maxHp - cur - gain)));
+    return { to, gain, locked };
+  }
+
+  /** press Rewind (refuses with a reason when it can't) */
   tryRewind(auto = false) {
-    if (!this.canRewind() && !auto) {
-      if (!this.rewinding && this.hp > 0) { sfx('denied', { vol: 0.6 }); this.world.fx.banner(this.x, this.y - 30, this.lo.charges < 1 ? tr(S('f2', 'noSand')) : '……', 'K7', 0.6); }
+    if (auto) { this.beginRewind({ rescue: true, free: true, auto: true }); return; }
+    const c = this.canRewind();
+    if (!c.ok) { this.refuse(c.reason!); return; }
+    this.beginRewind({});
+  }
+
+  /** a short readable reason over the hand (GDD2 §3.1), never "……" */
+  refuse(reason: RewindRefusal, need?: number) {
+    if (this.refuseT > 0 || !this.world) return;
+    this.refuseT = 0.35;
+    const lo = this.lo, rec = this.rec;
+    const text = reason === 'sand' ? tr(S('f3', 'noSand')).replace('{n}', String(Math.floor(lo.sand))).replace('{m}', String(need ?? this.costFor(MIN_BACK / 60, false)))
+      : reason === 'tape' ? tr(S('f3', 'tapeShort')).replace('{s}', rec.seconds.toFixed(1))
+      : reason === 'anchor' ? tr(S('f3', 'anchored'))
+      : reason === 'burnt' ? tr(S('f3', 'burnt')).replace('{s}', String(Math.ceil(rec.burnT)))
+      : tr(S('f3', 'cantNow'));
+    if (reason === 'state' && (this.hp <= 0 || this.state !== 'alive')) return;
+    sfx('denied', { vol: 0.6 });
+    this.world.fx.banner(this.x, this.y - 32, text, reason === 'anchor' ? 'K9' : reason === 'burnt' ? 'O3' : 'C4', 1.1);
+  }
+
+  /** start holding Rewind: the hand turns intangible at once, time around it crawls */
+  private beginRewind(o: { rescue?: boolean; free?: boolean; auto?: boolean }) {
+    const rec = this.rec;
+    this.rw = {
+      phase: 'hold', t: 0, scrub: false, cursor: Math.max(0, rec.length - MIN_BACK), clickT: 0,
+      rescue: !!o.rescue, free: !!o.free, style: this.rewindStyle, cut: null, frameIdx: 0,
+      tt: 0, dur: TRAVEL_TIME, fromX: this.x, fromY: this.y, cost: 0, seconds: 0,
+    };
+    this.pull = null;
+    this.weapon.cancel();
+    this.dashT = 0; this.lungeT = 0; this.vx = this.vy = 0; this.kx = this.ky = 0;
+    // out of time until it lands: nothing pushes it, no pit takes it (the path may cross one)
+    this.airborne = true;
+    this.solid = false;
+    this.hurtT = 0;
+    this.perfect = { t: this.mods.perfectWindow, hit: false, refunded: false, cost: 0 };
+    sfx('rewindHold', { vol: 0.8 });
+    this.input.rumble(0.05, 0.3, 90);
+    G.audio.muffle(true, 900);
+    if (o.auto || settings.rewindMode === 'tap') this.confirmRewind();
+  }
+
+  /** dash while holding: a free cancel (GDD2 §3.2) */
+  private cancelRewind() {
+    this.rw = null;
+    this.solid = true;
+    this.airborne = false;
+    this.perfect = null;
+    G.audio.muffle(false);
+    sfx('tapeClick', { vol: 0.5 });
+  }
+
+  /** a held rewind / the travel back (real time: the hand scrubs while the world crawls) */
+  private updateRewind(dt: number) {
+    const R = this.rw!;
+    const m = this.mods;
+    const inp = this.input;
+    R.t += dt;
+    if (R.phase === 'hold') {
+      const held = inp.down('rewind');
+      if (!R.rescue && inp.pressed('dash')) {
+        this.cancelRewind();
+        if (this.dashCharges > 0 && this.falling <= 0) this.startDash();
+        return;
+      }
+      const thr = m.rewindTapThreshold;
+      if (!R.scrub && held && R.t >= thr && settings.rewindMode !== 'tap') {
+        R.scrub = true;
+        R.clickT = 0.5;
+        sfx('tapeClick', { vol: 0.7 });
+      }
+      if (R.scrub) {
+        const st = R.t - thr;
+        const n = this.rec.length;
+        const back = Math.min(this.maxBack(true), MIN_BACK + Math.round(st * SCRUB_RATE * 60));
+        R.cursor = back > 0 ? this.standable(n - back) : n - 1;
+        R.clickT -= dt;
+        if (R.clickT <= 0) { R.clickT += 0.5; sfx('tapeClick', { vol: 0.55 }); }
+        if (!held || st >= m.scrubMax) this.confirmRewind();
+      } else if (!held) this.confirmRewind();
+      this.anim = Anim.Idle;
+      this.updateScarf(dt);
       return;
     }
-    if (this.recorder.length < 2) return;
-    if (!auto) this.lo.charges--;
-    const rec = this.recorder.take();
-    this.rewinding = { rec, t: 0, dur: 0.42, fromX: this.x, fromY: this.y };
-    this.ignoreFreeze = true;
-    this.world.frozen = true;
-    this.weapon.cancel();
-    this.dashT = 0; this.lungeT = 0; this.vx = this.vy = 0;
-    this.world.stats.rewinds++;
-    sfx('rewind');
-    this.input.rumble(0.1, 0.5, 400);
-    G.audio.muffle(true, 1400);
-    G.audio.duck(0.3, 0.6);
-  }
-
-  private updateRewind(dt: number) {
-    const R = this.rewinding!;
-    R.t += dt;
-    const k = Math.min(1, R.t / R.dur);
-    const frames = R.rec.frames;
+    // travel: back along the path, newest → target
+    R.tt += dt;
+    const k = Math.min(1, R.tt / R.dur);
+    const frames = R.cut!.frames;
     const idx = Math.round((1 - ease.inOutQuad(k)) * (frames.length - 1));
     const f = frames[idx];
     this.x = f.x; this.y = f.y;
@@ -478,41 +750,137 @@ export class Player extends Actor implements Wielder {
     this.flip = f.flip;
     this.anim = f.anim as Anim;
     this.animT = f.animT;
-    if (Math.floor(R.t * 60) % 2 === 0) this.afterimage('C3', 0.35, 0.55);
+    if (this.world.tickNo % 2 === 0) this.afterimage('C3', 0.35, 0.55);
     this.updateScarf(dt);
-    this.rewindFx = Math.sin(k * Math.PI);
     if (k >= 1) this.finishRewind();
   }
 
+  /** release (or the scrub ran out): pay, cut the tape, start the travel back */
+  private confirmRewind() {
+    const R = this.rw!;
+    const rec = this.rec;
+    const n = rec.length;
+    const back = R.scrub ? n - R.cursor : (R.free ? n : this.maxBack(false));
+    if (n < MIN_BACK || back < MIN_BACK) {
+      this.cancelRewind();
+      if (R.rescue) { this.state = 'stopped'; this.solid = false; }
+      this.refuse(n < MIN_TAPE ? 'tape' : 'sand');
+      return;
+    }
+    const idx = R.scrub ? R.cursor : (R.free ? 0 : this.tapTarget());
+    const seconds = (n - idx) / 60;
+    const cost = R.free ? 0 : this.costFor(seconds, R.scrub);
+    if (cost > 0 && !this.lo.spendSand(cost)) {
+      this.cancelRewind();
+      if (R.rescue) { this.state = 'stopped'; this.solid = false; }
+      this.refuse('sand', cost);
+      return;
+    }
+    if (R.scrub && cost === 0 && !R.free) this.scrubFreeUsed = true;
+    R.cost = cost; R.seconds = seconds; R.frameIdx = idx;
+    if (this.perfect) this.perfect.cost = cost;
+    R.fromX = this.x; R.fromY = this.y;
+    R.cut = rec.cutFrom(idx);
+    R.phase = 'travel';
+    R.tt = 0;
+    R.dur = R.style.teleports ? TRAVEL_TIME : 0.01;
+    this.solid = false;
+    sfx('rewind', { vol: 0.85 });
+    this.input.rumble(0.1, 0.5, 250);
+    G.audio.duck(0.3, 0.5);
+  }
+
+  /** landed: the style commits (move, heal, echo), then the landing beat */
   private finishRewind() {
-    const R = this.rewinding!;
+    const R = this.rw!;
     const m = this.mods;
-    const first = R.rec.frames[0];
-    this.x = first.x; this.y = first.y;
-    const fixedDuring = this.fixedTaken - first.fixed;
-    let restoreTo = m.noRewindHeal ? this.hp : Math.max(this.hp, Math.min(this.maxHp, first.hp - fixedDuring));
-    // rewinding out of a stop always stands you back up (tape HP, at least 1)
-    if (this.rescueRewind) { restoreTo = Math.max(1, Math.min(this.maxHp, Math.max(restoreTo, first.hp - fixedDuring))); this.rescueRewind = false; }
-    const restored = restoreTo - this.hp;
-    this.hp = restoreTo;
-    this.rewinding = null;
-    this.ignoreFreeze = false;
-    this.world.frozen = false;
-    this.rewindFx = 0;
-    this.invuln = Math.max(this.invuln, m.rewindInvuln);
+    const w = this.world;
+    const hpBefore = Math.max(0, this.hp);
+    const rescue = R.rescue;
+    this.lastEcho = null;
+    // hits that never reached the tape (the blow that stopped the hand) are undone with the rest
+    this.pendHit = 0; this.pendFixed = 0; this.pendCulprits = null;
+    R.style.commit(this, R.frameIdx, R.cut!);
+    const restored = Math.max(0, Math.round(this.hp - hpBefore));
+    this.rw = null;
+    this.solid = true;
+    this.airborne = false;
     this.hurtT = 0;
-    // retire oldest echo if at cap
+    this.dashT = 0;
+    this.collides = true;
+    this.autoWalk = 0;
+    this.rippleT = 0;
+    // landing: half a second of invulnerability (a shrinking ring of clock ticks), '+N', a click
+    const inv = Math.max(m.landInvuln, m.rewindInvuln);
+    this.invuln = Math.max(this.invuln, inv);
+    this.landT = this.landDur = inv;
+    this.landGain = restored;
+    this.scarfA.reset(this.x, this.y - 10);
+    this.scarfB.reset(this.x, this.y - 10);
+    this.flash = 0.1;
+    w.fx.ring(this.x, this.y - 6, 2, 34, 0.35, 'C3', 2);
+    w.fx.burst(this.x, this.y - 8, 14, ['C4', 'C3', 'C2'], 120, 0.4);
+    w.shake(0.15);
+    w.stats.rewinds++;
+    sfx('rewindLand');
+    sfx('rewindEnd', { vol: 0.7 });
+    this.input.rumble(0.45, 0.3, 120);
+    G.audio.muffle(false);
+    // a blow dodged inside the Perfect window refunds the rewind and gilds its echo
+    if (this.perfect?.hit) this.payPerfect();
+    if (rescue) {
+      // rewinding out of a stop burns the tape for 6 s (GDD2 §3.10)
+      this.rec.burnT = Math.max(this.rec.burnT, TAPE_BURN);
+      this.down = Down.newDownState();
+      w.bus.emit('revived', { player: this, by: null, source: 'self' });
+    }
+    w.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored, player: this, seconds: R.seconds, cost: R.cost, perfect: !!this.perfect?.hit, scrub: R.scrub });
+    if (this.lastEcho) w.bus.emit('echoSpawn', { echo: this.lastEcho, player: this });
+  }
+
+  /** standard commit: HP (and, out of a stop, at least 1) and the tempo at that moment */
+  restoreFromFrame(f: Frame) {
+    const R = this.rw;
+    const { to } = this.hpFromFrame(f, !!R?.rescue);
+    this.hp = to;
+    this.lo.tempo = f.tempo;
+    if (R?.rescue) { this.state = 'alive'; this.deadT = 0; }
+  }
+
+  /**
+   * Culprits (GDD2 §3.8): whoever hurt this hand during the seconds it just undid is marked for
+   * 4 s; this hand's echoes deal +50% to them.
+   */
+  markCulprits(rec: Recording) {
+    const w = this.world;
+    const ids = new Set<number>();
+    for (const f of rec.frames) if (f.culprits) for (const id of f.culprits) ids.add(id);
+    if (!ids.size) return;
+    for (const e of w.enemies) {
+      if (e.dead || !ids.has(e.id)) continue;
+      const fresh = !e.culpritOf.has(this.slot);
+      e.culpritOf.set(this.slot, this.mods.culpritT);
+      if (fresh) w.bus.emit('culprit', { player: this, target: e });
+    }
+  }
+
+  /** leave an echo that replays `rec` (retires the oldest at the cap; Twin Mirror adds its twin) */
+  spawnEcho(rec: Recording, o: { gilded?: boolean } = {}): Echo | null {
+    const m = this.mods;
+    if (rec.frames.length < 2) return null;
     const alive = this.echoes.filter((e) => !e.dead);
     while (alive.length >= m.maxEchoes) { const old = alive.shift()!; old.shatter(false); }
-    const echo = this.world.add(new Echo(R.rec, this.weapon, m.echoDmg, m.echoSpeed));
+    const echo = this.world.add(new Echo(rec, this.weapon, m.echoDmg, m.echoSpeed));
     echo.player = this;
+    if (o.gilded) echo.gild();
     this.echoes.push(echo);
+    this.lastEcho = echo;
     if (m.mirrorEcho) {
       // mirrored twin: reflect the path horizontally around the start point
-      const sx = R.rec.frames[0].x;
+      const sx = rec.frames[0].x;
       const mir = {
-        frames: R.rec.frames.map((f) => ({ ...f, x: sx - (f.x - sx), flip: !f.flip, wa: Math.PI - f.wa })),
-        events: R.rec.events.map((e) => ({ ...e, angle: e.angle !== undefined ? Math.PI - e.angle : undefined, dx: e.dx !== undefined ? -e.dx : undefined })),
+        frames: rec.frames.map((f) => ({ ...f, x: sx - (f.x - sx), flip: !f.flip, wa: Math.PI - f.wa })),
+        events: rec.events.map((e) => ({ ...e, angle: e.angle !== undefined ? Math.PI - e.angle : undefined, dx: e.dx !== undefined ? -e.dx : undefined })),
       };
       // keep mirrored path inside walkable space
       if (mir.frames.every((f) => !this.world.map.solidAt(f.x, f.y))) {
@@ -521,18 +889,194 @@ export class Player extends Actor implements Wielder {
         this.echoes.push(twin);
       }
     }
-    this.recorder.clear();
+    return echo;
+  }
+
+  /** an attack that would have landed inside the Perfect window (GDD2 §3.9) */
+  private perfectHit() {
+    const pf = this.perfect!;
+    pf.hit = true;
+    const w = this.world;
+    this.perfectStampT = PERFECT_STAMP;
+    w.fx.ring(this.x, this.y - 8, 4, 30, 0.4, 'B5', 2);
+    w.fx.ring(this.x, this.y - 8, 2, 22, 0.3, 'C4', 2);
+    w.hitstop(0.06);
+    sfx('perfectRewind');
+    this.input.rumble(0.3, 0.6, 140);
+    w.bus.emit('perfectRewind', { player: this });
+    // already landed: pay out now (else at the landing)
+    if (!this.rw) this.payPerfect();
+  }
+  private payPerfect() {
+    const pf = this.perfect;
+    if (!pf || pf.refunded) return;
+    pf.refunded = true;
+    const lo = this.lo;
+    lo.sand = Math.min(lo.sandMax, lo.sand + pf.cost);
+    this.lastEcho?.gild();
+  }
+
+  /** per-tick rewind bookkeeping that runs in every state (ripple, timers, the Perfect window) */
+  private tickRewindFx(dt: number) {
+    const R = this.rw;
+    if (this.refuseT > 0) this.refuseT -= dt;
+    if (this.anchorT > 0) this.anchorT -= dt;
+    const rec = this.rec;
+    if (rec.burnT > 0) rec.burnT = Math.max(0, rec.burnT - dt);
+    if (this.landT > 0) this.landT = Math.max(0, this.landT - dt);
+    if (this.perfectStampT > 0) this.perfectStampT = Math.max(0, this.perfectStampT - (R ? dt : dt / Math.max(0.05, this.world.timeScale)));
+    if (this.perfect) {
+      // the window runs on the time around the hand (0.15× while it rewinds)
+      this.perfect.t -= R ? dt * this.world.timeScaleAt(this.x, this.y) : dt;
+      if (this.perfect.t <= 0 && !R) this.perfect = null;
+    }
+    // ripple strength: a soft hold, a stronger scrub, full while travelling, fading after landing
+    let fx = 0;
+    if (R) fx = R.phase === 'travel' ? 0.75 + 0.25 * Math.sin(Math.min(1, R.tt / R.dur) * Math.PI) : R.scrub ? 0.62 + Math.sin(R.t * 9) * 0.06 : 0.45;
+    else if (this.rippleT >= 0) {
+      this.rippleT += dt;
+      fx = Math.max(0, 0.7 * (1 - this.rippleT / 0.45));
+      if (this.rippleT > 0.45) this.rippleT = -1;
+    }
+    this.rewindFx = fx;
+    const want = R && R.phase === 'hold' && R.scrub ? 0.3 : 0;
+    this.scrubDesat += (want - this.scrubDesat) * Math.min(1, dt * (want > this.scrubDesat ? 10 : 6));
+  }
+
+  /** ripple radius in view px: 120 solo / the 72 px bubble in co-op; it widens as it fades after landing */
+  rippleR(solo: boolean): number {
+    const base = solo ? 120 : 72;
+    if (!this.rw && this.rippleT >= 0) return base * (1 + Math.min(1, this.rippleT / 0.45) * 0.45);
+    return base + (this.rw?.scrub ? Math.sin(this.world.time * 30) * 1.5 : 0);
+  }
+
+  // ───────────────────────── stops, Pull Back, catch-up (GDD2 §3.10, §5.5, §5.3) ─────────────────────────
+  /** Last Second / self-rescue: can this stopped hand rewind out now? (DownedHooks.canRewindOut) */
+  canRewindFromStop() { return this.canRewind(true).ok; }
+  /** rewind out of a stop (DownedHooks.rewindOut): a normal, paid rewind that stands the hand up */
+  rewindFromStop(): boolean {
+    const c = this.canRewind(true);
+    if (!c.ok) { if (c.reason !== 'state') this.refuseStopped(c.reason!); return false; }
+    this.state = 'alive';
+    this.solid = true;
+    this.beginRewind({ rescue: true });
+    return true;
+  }
+  private refuseStopped(reason: RewindRefusal) {
+    const st = this.state;
+    this.state = 'alive';
+    const hp = this.hp;
+    this.hp = 1;
+    this.refuse(reason);
+    this.hp = hp;
+    this.state = st;
+  }
+
+  /** the stopped teammate this hand could pull back right now (first 3 s, within 48 px) */
+  pullTarget(): Player | null {
+    const w = this.world;
+    if (w.playerCount < 2 || this.state !== 'alive' || this.hp <= 0) return null;
+    let best: Player | null = null, bd = PULL_RANGE;
+    for (const q of w.players) {
+      if (q === this || q.state !== 'stopped' || q.down.t > Down.SELF_RESCUE) continue;
+      const d = Math.hypot(q.x - this.x, q.y - this.y);
+      if (d <= bd) { bd = d; best = q; }
+    }
+    return best;
+  }
+
+  /** hold Rewind 0.4 s next to a teammate who just stopped (downed.ts asks DownedHooks.pullBack) */
+  private updatePull(dt: number, pressed: boolean) {
+    const P = this.pull;
+    if (P) {
+      const t = P.target;
+      const valid = t.state === 'stopped' && t.down.t <= Down.SELF_RESCUE && Math.hypot(t.x - this.x, t.y - this.y) <= PULL_RANGE + 8;
+      if (!valid || !this.input.down('rewind') || this.locked) { this.pull = null; return; }
+      P.t += dt;
+      return;
+    }
+    if (!pressed) return;
+    const tgt = this.pullTarget();
+    if (!tgt) return;
+    // short of 100 Sand the press is an ordinary rewind (the prompt over the teammate is greyed)
+    if (this.lo.sand + 1e-6 < PULL_COST) return;
+    this.pull = { target: tgt, t: 0 };
+    sfx('tapeClick', { vol: 0.6 });
+  }
+
+  /**
+   * Pull Back (GDD2 §5.5, PLAN2 §1.8): pay 100 Sand; the teammate goes back to its own state three
+   * seconds ago (its Shadow, its tape HP minus fixed damage, at least 30%) and leaves an echo that
+   * replays the fight that stopped it.
+   */
+  pullBack(target: Player): boolean {
+    if (target.state !== 'stopped' || target === this) return false;
+    if (!this.lo.spendSand(PULL_COST)) return false;
+    const w = this.world;
+    const rec = target.rec;
+    const fromX = target.x, fromY = target.y;
+    target.state = 'alive';
+    target.solid = true;
+    target.airborne = false;
+    target.deadT = 0;
+    target.hurtT = 0;
+    target.down = Down.newDownState();
+    target.dashCharges = target.mods.dashCharges;
+    target.pendHit = 0; target.pendFixed = 0; target.pendCulprits = null;
+    let restored = 0;
+    if (rec.length >= 2) {
+      const idx = target.standable(0);
+      const cut = rec.cutFrom(idx);
+      const f = cut.frames[0];
+      target.x = f.x; target.y = f.y;
+      const fixedSince = Math.max(0, target.fixedTaken - f.fixed);
+      target.hp = Math.round(Math.max(target.maxHp * PULL_MIN_HP, Math.min(target.maxHp, f.hp - fixedSince)));
+      target.lo.tempo = f.tempo;
+      target.lastEcho = null;
+      target.spawnEcho(cut);
+    } else target.hp = Math.round(target.maxHp * PULL_MIN_HP);
+    restored = target.hp;
+    target.syncRun();
+    target.invuln = Math.max(target.invuln, Down.REVIVE_INVULN);
+    target.landT = target.landDur = Down.REVIVE_INVULN;
+    target.landGain = restored;
+    target.rippleT = 0;
+    target.scarfA.reset(target.x, target.y - 10);
+    target.scarfB.reset(target.x, target.y - 10);
+    this.pull = null;
+    w.fx.ring(fromX, fromY - 8, 3, 26, 0.4, this.color, 2);
+    w.fx.ring(target.x, target.y - 8, 3, 34, 0.5, target.color, 3);
+    w.fx.burst(target.x, target.y - 10, 22, ['W', 'C3', target.color, this.color], 140, 0.5);
+    w.fx.banner(target.x, target.y - 46, tr(S('f3', 'pulled')), 'C3', 1.4);
+    sfx('rewind', { vol: 0.7 });
+    sfx('chimeRing', { vol: 0.7, pan: w.pan(target.x) });
+    target.input.rumble(0.4, 0.5, 200);
+    this.input.rumble(0.25, 0.4, 160);
+    w.bus.emit('rewind', { fromX, fromY, toX: target.x, toY: target.y, restored, player: target, seconds: 3, cost: 0, perfect: false, scrub: false });
+    if (target.lastEcho) w.bus.emit('echoSpawn', { echo: target.lastEcho, player: target });
+    w.bus.emit('revived', { player: target, by: this, source: 'pullback' });
+    return true;
+  }
+
+  /**
+   * Catch-up rewind (GDD2 §5.3, PLAN2 §1.8): a free hop to (x, y) for a hand left off screen or
+   * stuck; no echo, no Sand. The tape restarts standing there.
+   */
+  catchUpTo(x: number, y: number): void {
+    const w = this.world;
+    if (this.rw) { this.rw = null; this.solid = true; this.airborne = false; G.audio.muffle(false); }
+    w.fx.ring(this.x, this.y - 6, 2, 22, 0.3, 'C3', 2);
+    this.x = x; this.y = y;
+    this.vx = this.vy = 0; this.kx = this.ky = 0;
+    this.dashT = 0; this.lungeT = 0;
+    this.pendHit = 0; this.pendFixed = 0; this.pendCulprits = null;
+    this.rec.prefill(x, y, 60, this.frameBase());
     this.scarfA.reset(this.x, this.y - 10);
     this.scarfB.reset(this.x, this.y - 10);
-    if (restored > 0) this.world.fx.number(this.x, this.y - 26, restored, 'C3', true);
-    this.world.fx.ring(this.x, this.y - 6, 2, 34, 0.35, 'C3', 2);
-    this.world.fx.burst(this.x, this.y - 8, 14, ['C4', 'C3', 'C2'], 120, 0.4);
-    this.world.shake(0.2);
-    sfx('rewindEnd');
-    this.input.rumble(0.45, 0.3, 140);
-    G.audio.muffle(false);
-    this.world.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored, player: this, seconds: R.rec.frames.length / 60 });
-    this.world.bus.emit('echoSpawn', { echo, player: this });
+    this.invuln = Math.max(this.invuln, 0.5);
+    w.fx.ring(this.x, this.y - 6, 2, 30, 0.35, 'C3', 2);
+    w.fx.burst(this.x, this.y - 8, 12, ['C4', 'C3', 'C2'], 100, 0.35);
+    sfx('rewindEnd', { vol: 0.5, pan: w.pan(this.x) });
   }
 
   private paradox(e: Echo) {
@@ -561,7 +1105,12 @@ export class Player extends Actor implements Wielder {
 
   // ───────────────────────── damage ─────────────────────────
   hurt(info: DamageInfo): number {
-    if (this.hp <= 0 || this.rewinding || this.state !== 'alive') return 0;
+    // Perfect Rewind (GDD2 §3.9): an attack that would have landed within the window after the press
+    const pf = this.perfect;
+    if (pf && !pf.hit && pf.t > 0 && (this.rw || this.invuln > 0) && PERFECT_KINDS.has(info.kind) && this.state === 'alive') this.perfectHit();
+    // intangible from the press to the landing (GDD2 §3.2)
+    if (this.rw) return 0;
+    if (this.hp <= 0 || this.state !== 'alive') return 0;
     if ((this.invuln > 0 || this.dashT > 0) && !info.pierceInvuln) return 0;
     const m = this.mods;
     const lo = this.lo;
@@ -574,7 +1123,10 @@ export class Player extends Actor implements Wielder {
       return 0;
     }
     let amt = Math.max(1, Math.round(info.amount * (1 - m.armor) * (1 + 0.1 * this.run.overwind)));
-    if (info.fixed) this.fixedTaken += amt;
+    // onto the tape: a red notch (undoable) or a violet one (fixed), and who dealt it (Culprit)
+    if (info.fixed) { this.fixedTaken += amt; this.pendFixed += amt; } else this.pendHit += amt;
+    const by = info.owner;
+    if (by && by.team === 'enemy' && !(this.pendCulprits ??= []).includes(by.id)) this.pendCulprits.push(by.id);
     this.hp -= amt;
     this.flash = 0.12;
     this.hurtT = 0.22;
@@ -596,11 +1148,12 @@ export class Player extends Actor implements Wielder {
     this.input.rumble(0.55, 0.8, 180);
     w.bus.emit('damaged', { info, dealt: amt, player: this, undoable: !info.fixed });
     if (this.hp <= 0) {
-      if (lo.autoRewindLeft > 0 && this.recorder.length > 10) {
+      // Old Watch (1.0): once a floor, rewind on its own instead of stopping (free, to the Shadow)
+      if (lo.autoRewindLeft > 0 && this.rec.length > MIN_TAPE) {
         lo.autoRewindLeft--;
-        this.hp = 1;
+        this.hp = 0;
         this.tryRewind(true);
-        w.fx.banner(this.x, this.y - 36, '最后一秒！', 'C3', 1.2);
+        w.fx.banner(this.x, this.y - 36, tr(S('f3', 'autoRewind')), 'C3', 1.2);
         return amt;
       }
       if (lo.revivesUsed < m.revives) {
@@ -642,6 +1195,18 @@ export class Player extends Actor implements Wielder {
       default:
         if (this.blinkT < 0 && this.dir !== 'up') return F.blink[this.dir];
         return F.idle[this.dir][Math.floor(this.animT * 4) % 4];
+    }
+  }
+
+  /** the sprite of a taped frame (the Shadow, previews) */
+  spriteFor(f: Frame): Sprite {
+    const F = this.frames;
+    const dir: Dir = f.dir === 0 ? 'down' : f.dir === 1 ? 'up' : 'side';
+    switch (f.anim) {
+      case Anim.Run: return F.run[dir][Math.floor(f.animT * 12) % 6];
+      case Anim.Dash: return F.dash[dir];
+      case Anim.Hurt: return F.hurt[dir];
+      default: return F.idle[dir][Math.floor(f.animT * 4) % 4];
     }
   }
 
@@ -721,8 +1286,11 @@ export class Player extends Actor implements Wielder {
   }
 
   renderUnlit(r: Renderer) {
+    // the Shadow and its hairspring first (under everything else this hand marks)
+    renderShadow(r, this);
     // aim reticle (mouse) is drawn by HUD; here: future path of echoes
     for (const e of this.echoes) if (!e.dead) e.renderPath(r);
+    renderRewindMarks(r, this);
     if (this.state === 'stopped') { Down.renderStoppedUnlit(r, this); Down.renderStoppedLabel(r, this); return; }
     if (this.state === 'ghost') {
       if (this.world.playerCount > 1) drawSlotBadge(r.u, this.slot, Math.round(this.x), Math.round(this.y) - 27 + Math.round(Math.sin(this.world.time * 3)));

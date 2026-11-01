@@ -9,7 +9,6 @@ import type { Player } from '../entities/player';
 import { VIEW_W, VIEW_H } from '../../engine/gfx/post';
 import { rect } from '../ui/draw';
 import { drawSlotBadge } from '../players';
-import { sfx } from '../G';
 import { G } from '../G';
 
 /** tether half-size: 600×340 */
@@ -83,18 +82,10 @@ function catchUp(w: World, p: Player) {
     if (d < bd) { bd = d; best = q; }
   }
   if (!best) return;
-  w.fx.ring(p.x, p.y - 6, 2, 22, 0.3, 'C3', 2);
-  p.x = best.x + (p.slot % 2 ? 8 : -8);
-  p.y = best.y + 4;
-  if (!w.boxFree(p.x, p.y, p.r)) { p.x = best.x; p.y = best.y; }
-  p.vx = p.vy = 0;
-  p.recorder.clear();
-  p.scarfA.reset(p.x, p.y - 10);
-  p.scarfB.reset(p.x, p.y - 10);
-  p.invuln = Math.max(p.invuln, 0.5);
-  w.fx.ring(p.x, p.y - 6, 2, 30, 0.35, 'C3', 2);
-  w.fx.burst(p.x, p.y - 8, 12, ['C4', 'C3', 'C2'], 100, 0.35);
-  sfx('rewindEnd', { vol: 0.5, pan: w.pan(p.x) });
+  let x = best.x + (p.slot % 2 ? 8 : -8), y = best.y + 4;
+  if (!w.boxFree(x, y, p.r)) { x = best.x; y = best.y; }
+  // the hop itself (FX, a fresh tape standing there, brief invulnerability) is Player.catchUpTo
+  p.catchUpTo(x, y);
 }
 
 // ───────────────────────── UI layer ─────────────────────────

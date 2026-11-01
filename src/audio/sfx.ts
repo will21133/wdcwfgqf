@@ -77,6 +77,30 @@ export function registerSfx(a: AudioEngine) {
     a.tone(out, t, { type: 'sine', f: 180, f2: 60, dur: 0.25, vol: 0.4 });
     a.noise(out, t, { dur: 0.3, vol: 0.12, type: 'highpass', f: 6000, f2: 2000 });
   });
+  // Rewind 2.0 (GDD2 §3.2): press = the tape catches (a short downward wow), scrubbing clicks
+  // every 0.5 s, the landing is a hard mechanical click; a Perfect Rewind rings high
+  reg('rewindHold', (a, t, out) => {
+    a.tone(out, t, { type: 'triangle', f: 1400, f2: 320, dur: 0.16, vol: 0.09, curve: 'exp' });
+    a.noise(out, t, { dur: 0.12, vol: 0.14, type: 'bandpass', f: 4200, f2: 900, q: 1.4 });
+    a.tone(out, t, { type: 'sine', f: 220, f2: 140, dur: 0.18, vol: 0.18 });
+  }, { minGap: 0.1 });
+  reg('tapeClick', (a, t, out) => {
+    a.noise(out, t, { dur: 0.008, vol: 0.4, type: 'highpass', f: 5200 });
+    a.tone(out, t, { type: 'square', f: 1900 * R(0.97, 1.03), dur: 0.006, vol: 0.05 });
+    a.tone(out, t + 0.012, { type: 'square', f: 1250, dur: 0.008, vol: 0.035 });
+    a.noise(out, t + 0.03, { dur: 0.02, vol: 0.08, type: 'bandpass', f: 900, q: 2 });
+  }, { minGap: 0.06 });
+  reg('rewindLand', (a, t, out) => {
+    a.noise(out, t, { dur: 0.012, vol: 0.55, type: 'highpass', f: 3800 });
+    a.tone(out, t, { type: 'square', f: 2600, f2: 1800, dur: 0.012, vol: 0.06 });
+    a.tone(out, t, { type: 'sine', f: 140, f2: 70, dur: 0.09, vol: 0.32 });
+    a.noise(out, t + 0.025, { dur: 0.03, vol: 0.12, type: 'bandpass', f: 1400, q: 3 });
+  }, { minGap: 0.08 });
+  reg('perfectRewind', (a, t, out) => {
+    a.bell(out, t, 3136, { dur: 1.1, vol: 0.12, ratio: 2.01, index: 1.2 });
+    a.bell(out, t + 0.05, 4186, { dur: 0.9, vol: 0.08, ratio: 2.01, index: 0.8 });
+    a.noise(out, t, { dur: 0.25, vol: 0.12, type: 'highpass', f: 7000, f2: 3000 });
+  }, { minGap: 0.2 });
   reg('echoEnd', (a, t, out) => {
     a.bell(out, t, 2637 * R(0.97, 1.03), { dur: 0.6, vol: 0.06, ratio: 2.76, index: 0.8 });
     a.noise(out, t, { dur: 0.15, vol: 0.1, type: 'highpass', f: 7000 });

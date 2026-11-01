@@ -12,9 +12,29 @@ export type { BotInput };
 export const botLog: string[] = [];
 (window as any).__botLog = botLog;
 
-interface Brain { lastRoom: string; roomT: number; tapT: number; scene: GameScene | null }
+interface Brain { lastRoom: string; roomT: number; tapT: number; scene: GameScene | null; rwHold: number; rwCd: number; taps: number; scrubs: number }
 const brains: Brain[] = [];
-const brainOf = (slot: number): Brain => (brains[slot] ??= { lastRoom: '', roomT: 0, tapT: 0, scene: null });
+const brainOf = (slot: number): Brain => (brains[slot] ??= { lastRoom: '', roomT: 0, tapT: 0, scene: null, rwHold: 0, rwCd: 2, taps: 0, scrubs: 0 });
+(window as any).__botRewinds = () => brains.map((b) => b && { taps: b.taps, scrubs: b.scrubs });
+
+/**
+ * Rewind like a player would (GDD2 §3.2): after a hit the tape can still undo, either tap back to
+ * the Shadow or hold to scrub to just before the hit. Returns how long to hold Rewind (0 = not now).
+ */
+function planRewind(p: Player, br: Brain): number {
+  if (br.rwCd > 0 || p.rw || !p.canRewind().ok) return 0;
+  const rec = p.rec, n = rec.length;
+  let hit = -1;
+  for (let i = n - 1; i >= Math.max(0, n - 150); i--) if (rec.at(i).hit > 0) { hit = i; break; }
+  if (hit < 0 || Math.random() > 0.08) return 0;
+  br.rwCd = 2.5;
+  const m = p.mods;
+  const back = (n - hit) / 60 + 0.15;
+  const hold = m.rewindTapThreshold + Math.max(0, back - 0.1) / (3 / 0.9);
+  if (Math.random() < 0.5 || hold > m.rewindTapThreshold + m.scrubMax - 0.05) { br.taps++; return 1 / 60; }
+  br.scrubs++;
+  return hold;
+}
 
 /** BFS over walkable tiles from the player's tile to the goal tile; returns the next waypoint */
 function pathStep(s: GameScene, px: number, py: number, gx: number, gy: number): { x: number; y: number } | null {
@@ -58,6 +78,13 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   }
   br.roomT += dt;
   br.tapT -= dt;
+  br.rwCd -= dt;
+  // a rewind being held keeps being held until its planned release (a tap is one tick)
+  if (br.rwHold > 0) {
+    b.held.add('rewind');
+    br.rwHold -= dt;
+    return;
+  }
   const roomT = br.roomT;
   const tap = (a: Action) => { if (br.tapT <= 0) { b.pressed.add(a); br.tapT = 0.35; } };
   // stopped: try to rewind out (Last Second / self-rescue), otherwise wait for a teammate
@@ -70,11 +97,18 @@ export function botStep(s: GameScene, p: Player, dt: number) {
     const d = Math.hypot(tx - p.x, ty - p.y);
     if (d > 2) b.move = { x: (tx - p.x) / d, y: (ty - p.y) / d };
   };
-  // a teammate has stopped: walk over and hold Interact to wind them up (GDD2 §5.5)
+  // a teammate has stopped: pull them back while it is fresh and the Sand is there (even slots), or
+  // walk over and hold Interact to wind them up (GDD2 §5.5)
   if (p.state === 'alive') {
     let down: Player | null = null, dd = 320;
     for (const q of w.players) if (q !== p && q.state === 'stopped') { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < dd) { dd = d; down = q; } }
     if (down) {
+      const pull = p.slot % 2 === 0 && down.down.t < 2.4 && s.run.lo(p.slot).sand >= 100;
+      if (pull) {
+        if (dd > 30) go(down.x, down.y);
+        else { b.held.add('rewind'); if (!p.pull) b.pressed.add('rewind'); }
+        return;
+      }
       if (dd > 12) go(down.x, down.y);
       if (dd < 18) b.held.add('interact');
       return;
@@ -96,7 +130,8 @@ export function botStep(s: GameScene, p: Player, dt: number) {
     if (Math.random() < 0.01) b.pressed.add('special');
     const danger = enemies.some((e) => (e as any).attacking && Math.hypot(e.x - p.x, e.y - p.y) < 50);
     if (danger && Math.random() < 0.3) { b.pressed.add('dash'); b.move = { x: -Math.sin(a) * side, y: Math.cos(a) * side }; }
-    if (p.hp < p.maxHp * 0.6 && s.run.lo(p.slot).charges > 0 && Math.random() < 0.05) b.pressed.add('rewind');
+    const hold = planRewind(p, br);
+    if (hold > 0) { b.pressed.add('rewind'); b.held.add('rewind'); br.rwHold = hold - dt; }
     return;
   }
   // rewards first (give up after a while; skip vault chests — the cage needs the echo puzzle)

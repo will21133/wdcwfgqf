@@ -1,9 +1,12 @@
 // First-run tutorial: floor inscriptions with device-aware prompts, and a training automaton that
-// teaches the core verb — take a hit, then rewind it away.
+// teaches the core verb — take a hit, then rewind it away. Rewind 2.0 (F3): tap goes back to the
+// Shadow, holding scrubs the tape; the coach points at the Shadow once you are hurt.
 import { Entity } from '../entities/entity';
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Action } from '../../engine/input';
 import { tr, L, L10n } from '../i18n';
+import { S } from '../strings';
+import '../strings/f3';
 import { drawPrompt, drawPromptLabel, promptW, promptH } from '../ui/widgets';
 import { Text } from '../ui/text';
 import type { World } from '../world/world';
@@ -49,7 +52,7 @@ class RewindCoach extends Entity {
       this.done = true;
       const p = e.player ?? this.world.player!;
       this.who = p;
-      this.world.fx.banner(p.x, p.y - 44, tr(L('那是三秒前的你。', 'That is you, three seconds ago.')), 'C3', 2.4);
+      this.world.fx.banner(p.x, p.y - 44, tr(S('f3', 'tutShadow')), 'C3', 2.4);
       this.followUp = 2.5;
     }, this);
   }
@@ -58,14 +61,14 @@ class RewindCoach extends Entity {
     this.t += dt;
     if (this.followUp > 0 && (this.followUp -= dt) <= 0) {
       const p = this.who ?? this.world.player;
-      if (p) this.world.fx.banner(p.x, p.y - 44, tr(L('触碰它，引发{c:悖论}。', 'Touch it to cause a {c:Paradox}.')), 'C3', 2.4);
+      if (p) this.world.fx.banner(p.x, p.y - 44, tr(S('f3', 'tutParadox')), 'C3', 2.4);
     }
   }
   renderUnlit(r: Renderer) {
     if (!this.shown || this.done) return;
     const p = this.who ?? this.world.player;
     if (!p) return;
-    const t = tr(L('受伤了？按下回溯，撤销刚才的伤害！', 'Hurt? Rewind to undo the damage!'));
+    const t = tr(S('f3', 'tutCoach'));
     const blink = Math.floor(this.t * 3) % 2 === 0;
     const px = p.x, py = p.y - 52;
     const who = p.input;
@@ -81,7 +84,8 @@ export function setupTutorial(w: World) {
   w.add(new Sign(ex - 120, ey - 90, ['attack'], L('攻击（连按三下）', 'Attack (press three times)')));
   w.add(new Sign(ex + 120, ey - 90, ['dash'], L('冲刺：短暂无敌', 'Dash: brief invulnerability')));
   w.add(new Sign(ex + 120, ey - 70, ['special'], L('特技', 'Special')));
-  w.add(new Sign(ex, ey - 150, ['rewind'], L('回溯：回到三秒前，撤销受到的伤害', 'Rewind: return 3s into the past, undoing damage taken')));
-  w.add(new Sign(ex, ey - 134, ['attack'], L('造成伤害可以积攒{c:时砂}', 'Dealing damage fills your {c:Sand}')));
+  w.add(new Sign(ex, ey - 166, ['rewind'], S('f3', 'tutTap')));
+  w.add(new Sign(ex, ey - 150, ['rewind'], S('f3', 'tutHold')));
+  w.add(new Sign(ex, ey - 134, ['attack'], S('f3', 'tutSand')));
   w.add(new RewindCoach());
 }

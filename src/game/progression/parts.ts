@@ -19,7 +19,7 @@ export interface PartDef {
 }
 
 export const PARTS: PartDef[] = [
-  { id: 'spare_key', icon: 'key', rarity: 2, name: L('备用钥匙', 'Spare Key'), desc: L('回溯充能上限 +{g:1}。', 'Rewind charges +{g:1}.'), flavor: L('伊妮丝总说：总要留一把备用的。', 'Ines always said: keep a spare.'), mods: (m) => { m.rewindCharges += 1; } },
+  { id: 'spare_key', icon: 'key', rarity: 2, name: L('备用钥匙', 'Spare Key'), desc: L('多一个沙漏：{c:时砂}上限 +{g:100}。', 'One more hourglass: {c:Sand} cap +{g:100}.'), flavor: L('伊妮丝总说：总要留一把备用的。', 'Ines always said: keep a spare.'), mods: (m) => { m.rewindCharges += 1; } },
   { id: 'brass_heart', icon: 'heart', rarity: 0, name: L('黄铜心脏', 'Brass Heart'), desc: L('最大生命 +{y:20}。', 'Max HP +{y:20}.'), flavor: L('滴答、滴答，比你的那颗跳得更稳。', 'Tick, tick — steadier than yours.'), mods: (m) => { m.maxHp += 20; } },
   { id: 'oil_can', icon: 'oil', rarity: 0, name: L('润滑油', 'Oil Can'), desc: L('冲刺冷却 -{g:30%}。', 'Dash cooldown -{g:30%}.'), flavor: L('关节不再嘎吱作响。', 'No more creaking joints.'), mods: (m) => { m.dashCd *= 0.7; } },
   { id: 'cracked_lens', icon: 'lens', rarity: 0, name: L('裂纹镜片', 'Cracked Lens'), desc: L('暴击率 +{g:10%}。', 'Critical chance +{g:10%}.'), flavor: L('透过裂缝，弱点一清二楚。', 'Through the crack, every weakness shows.'), mods: (m) => { m.critChance += 0.1; } },

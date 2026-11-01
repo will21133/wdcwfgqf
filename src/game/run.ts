@@ -7,7 +7,7 @@ import type { World } from './world/world';
 import type { Player } from './entities/player';
 import type { BusEvents } from './systems/bus';
 import type { DeviceId } from '../engine/input';
-import type { Recording } from './systems/rewind';
+import { Recorder } from './systems/rewind';
 import { MEMORIES, type HookCtx, type Patron } from './progression/memories';
 import { HOURGLASS_BY_ID } from './progression/hourglass';
 import { PARTS_BY_ID } from './progression/parts';
@@ -64,6 +64,29 @@ export interface Mods {
   autoRewindPerFloor: number;
   firstHitShield: number;
   revives: number;
+  // ── Rewind 2.0 (PLAN2 §1.10, GDD2 §3.12) ──
+  /** tape length, s (hands: second 3, minute 5, alarm 2.5); 1.0's rewindWindow bonuses add to it */
+  tapeLen: number;
+  /** rewind cost = clamp(round(rewindCostPerSec × seconds), rewindMinCost, 100) × sandPerCharge / 100 */
+  rewindCostPerSec: number;
+  rewindMinCost: number;
+  /** a press released sooner than this is a tap (s) */
+  rewindTapThreshold: number;
+  /** the first scrub each room that goes back at most this many seconds is free (0 = none) */
+  scrubFreeFirst: number;
+  /** the longest a scrub can be held before it confirms itself (real s) */
+  scrubMax: number;
+  /** Perfect Rewind: an attack that would have hit within this long after the press (s) */
+  perfectWindow: number;
+  /** Culprit mark: seconds / echo damage bonus against it */
+  culpritT: number;
+  culpritBonus: number;
+  /** invulnerability after a rewind lands (s; 1.0's rewindInvuln still counts if longer) */
+  landInvuln: number;
+  /** Sand cap on top of 100 per hourglass */
+  sandMaxBonus: number;
+  /** catch-all switches for escapements and new parts (e.g. flags.transposition = 1) */
+  flags: Record<string, number>;
 }
 
 export const BASE_MODS: Mods = {
@@ -74,7 +97,12 @@ export const BASE_MODS: Mods = {
   burnMul: 1, burnMax: 10, rustPower: 1, corrodeMul: 1, stasisMul: 1, resonanceMax: 3, resonanceDmg: 1,
   constructDmg: 1, constructDur: 1, constructRate: 1,
   healMul: 1, brassMul: 1, shopMul: 1, extraChoice: 0, armor: 0, autoRewindPerFloor: 0, firstHitShield: 0, revives: 0,
+  tapeLen: 3, rewindCostPerSec: 33.4, rewindMinCost: 25, rewindTapThreshold: 0.18, scrubFreeFirst: 0, scrubMax: 1.2,
+  perfectWindow: 0.2, culpritT: 4, culpritBonus: 0.5, landInvuln: 0.5, sandMaxBonus: 0, flags: {},
 };
+
+/** Sand per hourglass (GDD2 §3.3: the cap is 100 × hourglasses) */
+export const SAND_PER_GLASS = 100;
 
 export interface OwnedMemory { id: string; rarity: number }
 export type RunEndKind = 'death' | 'quit' | 'victory';
@@ -104,11 +132,16 @@ export class Loadout {
   weapon: string;
   aspect: string | null = null;
   hp: number;
-  /** sand toward the next rewind charge (1.0 economy; F3 moves to a single sand pool) */
+  /**
+   * the Sand pool (GDD2 §3.3): 0..sandMax (100 × hourglasses + bonus). Full at the start of a run
+   * and of every floor; rewinds cost 25–100, a Fork 50.
+   */
   sand = 0;
-  /** 1.0 rewind charges (F3 replaces with sand costs) */
-  charges = 1;
-  mods: Mods = { ...BASE_MODS };
+  /** the floor this pool was last refilled on (Player.added refills it on a new floor) */
+  sandFloor = -1;
+  /** counts gains thrown away at a full pool (the HUD flashes "full" when it changes) */
+  sandOverflow = 0;
+  mods: Mods = { ...BASE_MODS, flags: {} };
   memories: OwnedMemory[] = [];
   hourglass: string[] = [];
   parts: string[] = [];
@@ -118,8 +151,8 @@ export class Loadout {
   rerolls = 0;
   banishes = 0;
   locks = 0;
-  /** the rewind tape, kept across rooms (F3) */
-  tape: Recording | null = null;
+  /** the rewind tape (systems/rewind.ts), kept across rooms; Player.rec */
+  tape: Recorder | null = null;
   tempo = 0;
   /** this player's own permanent bonuses (events: "drink the rain") on top of the run's meta bonuses */
   bonuses: MetaBonus[] = [];
@@ -132,7 +165,7 @@ export class Loadout {
   revivesUsed = 0;
   /** joined mid-run: memory picks still owed (one per floor already climbed, GDD2 §5.1) */
   catchup = 0;
-  /** fired when a rewind charge fills */
+  /** fired when the pool fills another hourglass (every 100 Sand) */
   onCharge?: () => void;
   /** live hook context of the current room (set by registerHooks) */
   hookCtx: HookCtx | null = null;
@@ -145,12 +178,16 @@ export class Loadout {
     this.pact = cfg?.pact?.slice() ?? [];
     this.recompute();
     this.hp = this.mods.maxHp;
+    this.sand = this.sandMax;
+    this.sandFloor = run.floor;
   }
 
   /** rebuild Mods from base + hand + run meta + own bonuses + memories + hourglass + parts + calibrations */
   recompute() {
     const prevMax = this.mods.maxHp;
-    const m: Mods = { ...BASE_MODS };
+    const prevSand = this.sandMax;
+    const m: Mods = { ...BASE_MODS, flags: {} };
+    m.tapeLen = this.hand.tape ?? BASE_MODS.tapeLen;
     this.hand.mods?.(m);
     for (const b of this.run.bonuses) b.apply(m);
     for (const b of this.bonuses) b.apply(m);
@@ -162,11 +199,18 @@ export class Loadout {
     m.armor = Math.min(0.6, m.armor);
     // GDD2 §5.8: three or four hands keep one echo fewer each (3 / 3 / 2 / 2)
     m.maxEchoes = Math.max(1, m.maxEchoes - (3 - coopScale(this.run.playerCount).echoCap));
+    // 1.0's "rewind window +x s" items lengthen the tape; rewindWindow stays readable as its length
+    m.tapeLen = Math.max(0.5, m.tapeLen + (m.rewindWindow - BASE_MODS.rewindWindow));
+    m.rewindWindow = m.tapeLen;
     this.mods = m;
     // gaining max HP also heals that amount
     if (this.hp !== undefined && m.maxHp > prevMax && prevMax > 0) this.hp += m.maxHp - prevMax;
     if (this.hp > m.maxHp) this.hp = m.maxHp;
-    if (this.charges > m.rewindCharges) this.charges = m.rewindCharges;
+    // a new hourglass arrives full; a smaller cap spills the excess
+    const max = this.sandMax;
+    if (prevSand > 0 && max > prevSand) this.sand += max - prevSand;
+    if (this.sand > max) this.sand = max;
+    this.tape?.setWindow(m.tapeLen);
   }
 
   /** a hook context bound to this player in world w; bus handlers are owned by `owner` (for bus.off) */
@@ -195,33 +239,34 @@ export class Loadout {
     for (const id of this.calibrations) CAL_BY_ID[id]?.hook?.(this.ctx(w, p, this.key(id)));
   }
 
+  /** gain Sand (scaled by sandGain); what does not fit is thrown away (the HUD flashes "full") */
   addSand(n: number) {
-    const m = this.mods;
-    if (this.charges >= m.rewindCharges) { this.sand = 0; return; }
-    this.sand += n * m.sandGain;
-    while (this.sand >= m.sandPerCharge && this.charges < m.rewindCharges) {
-      this.sand -= m.sandPerCharge;
-      this.charges++;
-      this.onCharge?.();
-    }
-    if (this.charges >= m.rewindCharges) this.sand = 0;
+    if (!(n > 0)) return;
+    const max = this.sandMax;
+    const before = this.sand;
+    const want = before + n * this.mods.sandGain;
+    if (want > max && before >= max - 0.001) this.sandOverflow++;
+    this.sand = Math.min(max, want);
+    if (Math.floor(this.sand / SAND_PER_GLASS) > Math.floor(before / SAND_PER_GLASS)) this.onCharge?.();
   }
 
-  /** total sand held (charges count as full measures) */
-  get sandTotal() { return this.charges * this.mods.sandPerCharge + this.sand; }
-  get sandMax() { return this.mods.rewindCharges * this.mods.sandPerCharge; }
-  /** pay n sand from charges + the filling measure; false (and nothing paid) if short */
+  /** Sand cap: 100 per hourglass (mods.rewindCharges, base 2) + bonus */
+  get sandMax() { return Math.max(SAND_PER_GLASS, Math.round(this.mods.rewindCharges * SAND_PER_GLASS + this.mods.sandMaxBonus)); }
+  /** 1.0 name of the pool */
+  get sandTotal() { return this.sand; }
+  /** pay n Sand; false (and nothing paid) if short */
   spendSand(n: number): boolean {
-    const per = this.mods.sandPerCharge;
-    let total = this.sandTotal;
-    if (total < n) return false;
-    total -= n;
-    this.charges = Math.floor(total / per);
-    this.sand = total - this.charges * per;
+    if (this.sand + 1e-6 < n) return false;
+    this.sand = Math.max(0, this.sand - n);
     return true;
   }
-
-  get sandFrac() { return this.charges >= this.mods.rewindCharges ? 1 : this.sand / this.mods.sandPerCharge; }
+  get sandFrac() { return this.sand / this.sandMax; }
+  /**
+   * 1.0 compatibility: "rewind charges" are full hourglasses. Reading gives the full ones; setting
+   * n fills the pool to n hourglasses (events and the workshop use it to top the pool up).
+   */
+  get charges() { return Math.floor(this.sand / SAND_PER_GLASS); }
+  set charges(n: number) { this.sand = Math.max(0, Math.min(this.sandMax, n * SAND_PER_GLASS)); }
 
   has(id: string) { return this.memories.some((m) => m.id === id) || this.parts.includes(id) || this.hourglass.includes(id) || this.calibrations.includes(id); }
 }
@@ -262,7 +307,7 @@ export class Run {
   luck = 0;
   /** meta: rerolls each new loadout starts with */
   startRerolls = 0;
-  /** meta: new loadouts start with full rewind charges */
+  /** meta (1.0 mainspring node): new loadouts start with full rewind charges — every pool starts full in 2.0 */
   startFullSand = false;
 
   constructor(seedOrConfig: number | RunConfig = (Math.random() * 2 ** 31) | 0) {
@@ -289,7 +334,7 @@ export class Run {
       l.luck = this.luck;
       l.rerolls = this.startRerolls;
       l.autoRewindLeft = l.mods.autoRewindPerFloor;
-      if (this.startFullSand) l.charges = l.mods.rewindCharges;
+      l.sand = l.sandMax;
       // a hand joining a run already under way catches up with a memory pick per floor climbed
       if (this.started) l.catchup = this.floor;
       // the echo cap depends on how many hands there are

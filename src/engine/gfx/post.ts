@@ -37,13 +37,27 @@ export interface PostParams {
   lighting: boolean;
   /** stasis/time-stop greyscale for world */
   timestop: number;
+  /**
+   * Local rewind ripple (GDD2 §3.2): centre in view px and radius. With rewindR > 0 the rewind
+   * wobble, scanlines, cyan tint and the rewind's share of `ca` (2.2 px × rewind, added by the
+   * scenes) stay inside the circle; rewindR = 0 is the 1.0 full-screen look.
+   */
+  rewindX: number;
+  rewindY: number;
+  rewindR: number;
+  /** 0..1: desaturate the world outside the ripple (0.3 while a hand scrubs the tape) */
+  rewindDesat: number;
 }
 
 export const defaultPost = (): PostParams => ({
   camFracX: 0, camFracY: 0, time: 0, rewind: 0, ca: 0, hurt: 0, flash: 0, fade: 0,
   saturation: 1, contrast: 1, tint: [1, 1, 1], lift: [0, 0, 0], vignette: 0.35, bloom: 0.55,
   bloomThreshold: 0.62, grain: 0.025, pixelPerfect: false, lighting: true, timestop: 0,
+  rewindX: VIEW_W / 2, rewindY: VIEW_H / 2, rewindR: 0, rewindDesat: 0,
 });
+
+/** the rewind's share of params.ca that game/hub scenes add (pp.ca = pp.rewind × 2.2 + …) */
+const REWIND_CA = 2.2;
 
 const VS = `#version 300 es
 in vec2 aPos;
@@ -112,6 +126,9 @@ uniform vec2 uSrcSize;   // world texture size (642x362)
 uniform vec2 uViewSize;  // 640x360
 uniform vec2 uCamFrac;
 uniform float uScale, uTime, uRewind, uCA, uHurt, uFlash, uFade, uVignette, uBloom, uGrain;
+uniform vec2 uRewindCenter;        // rewind ripple centre (view px)
+uniform float uRewindRadius, uRewindDesat, uRewindCA;   // radius (0 = full screen), outside desaturation, rewind CA share
+float lumaF(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
 
 vec2 sharp(vec2 px, vec2 size){
   // px in texel space -> sharp-bilinear uv
@@ -125,15 +142,21 @@ float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453)
 
 void main(){
   vec2 v = vec2(vUv.x, 1.0 - vUv.y) * uViewSize; // view pixel coords (0..640)
+  // local rewind ripple: everything rewind-coloured stays inside the circle around the rewinder
+  bool local = uRewindRadius > 0.5;
+  float dC = local ? length(v - uRewindCenter) : 0.0;
+  float mask = local ? 1.0 - smoothstep(uRewindRadius * 0.8, uRewindRadius, dC) : 1.0;
+  float rw = uRewind * mask;
   // rewind wobble: horizontal displacement per scanline band
   float band = floor(v.y / 2.0);
-  float wob = uRewind * (sin(band * 0.35 + uTime * 22.0) * 2.0 + sin(band * 0.07 - uTime * 9.0) * 3.0);
+  float wob = rw * (sin(band * 0.35 + uTime * 22.0) * 2.0 + sin(band * 0.07 - uTime * 9.0) * 3.0);
   vec2 sp = v + vec2(1.0) + uCamFrac + vec2(wob, 0.0);
+  float ca = local ? max(0.0, uCA - uRewindCA) + uRewindCA * mask : uCA;
   vec3 c;
-  if (uCA > 0.01) {
-    c.r = texture(uScene, sharp(sp + vec2(uCA, 0.0), uSrcSize)).r;
+  if (ca > 0.01) {
+    c.r = texture(uScene, sharp(sp + vec2(ca, 0.0), uSrcSize)).r;
     c.g = texture(uScene, sharp(sp, uSrcSize)).g;
-    c.b = texture(uScene, sharp(sp - vec2(uCA, 0.0), uSrcSize)).b;
+    c.b = texture(uScene, sharp(sp - vec2(ca, 0.0), uSrcSize)).b;
   } else {
     c = texture(uScene, sharp(sp, uSrcSize)).rgb;
   }
@@ -143,9 +166,21 @@ void main(){
   vec2 q = v / uViewSize - 0.5;
   float vig = 1.0 - dot(q, q) * uVignette * 2.2;
   c *= clamp(vig, 0.0, 1.0);
-  // rewind scanlines + cyan edge
-  c *= 1.0 - uRewind * 0.18 * step(1.0, mod(v.y, 3.0));
-  c += vec3(0.1, 0.55, 0.7) * uRewind * smoothstep(0.15, 0.55, length(q)) * 0.5;
+  if (local) {
+    // inside: cold cyan tape tint and travelling rings; on the rim a thin bright line; outside the
+    // world loses colour while the tape is being scrubbed
+    float g = lumaF(c);
+    c = mix(c, vec3(g * 0.72, g * 1.0, g * 1.18), rw * 0.6);
+    float rings = smoothstep(0.55, 1.0, sin(dC * 0.42 - uTime * 16.0));
+    c += vec3(0.12, 0.55, 0.7) * rw * rings * 0.11;
+    float rim = exp(-pow((dC - uRewindRadius) / 2.5, 2.0));
+    c += vec3(0.32, 0.86, 0.96) * uRewind * rim * 0.45;
+    float g2 = lumaF(c);
+    c = mix(c, vec3(g2), uRewindDesat * min(1.0, uRewind * 4.0) * (1.0 - mask));
+  }
+  // rewind scanlines + cyan edge (full screen only in the 1.0 look)
+  c *= 1.0 - rw * 0.18 * step(1.0, mod(v.y, 3.0));
+  if (!local) c += vec3(0.1, 0.55, 0.7) * uRewind * smoothstep(0.15, 0.55, length(q)) * 0.5;
   // hurt vignette
   c = mix(c, vec3(0.62, 0.04, 0.1), uHurt * smoothstep(0.32, 0.72, length(q)) * 0.55);
   c = mix(c, vec3(1.0), uFlash);
@@ -278,7 +313,8 @@ export class PostFX {
     gl.uniform1f(pr.u('uLighting'), p.lighting ? 1 : 0);
     gl.uniform1f(pr.u('uSat'), p.saturation);
     gl.uniform1f(pr.u('uContrast'), p.contrast);
-    gl.uniform1f(pr.u('uRewind'), p.rewind);
+    // the cyan mono wash is full-screen only in the 1.0 look; a local ripple tints inside its circle
+    gl.uniform1f(pr.u('uRewind'), p.rewindR > 0.5 ? 0 : p.rewind);
     gl.uniform1f(pr.u('uTime'), p.time);
     gl.uniform1f(pr.u('uTimestop'), p.timestop);
     gl.uniform3fv(pr.u('uTint'), p.tint);
@@ -329,6 +365,10 @@ export class PostFX {
     gl.uniform1f(pr.u('uVignette'), p.vignette);
     gl.uniform1f(pr.u('uBloom'), p.bloom);
     gl.uniform1f(pr.u('uGrain'), p.grain);
+    gl.uniform2f(pr.u('uRewindCenter'), p.rewindX, p.rewindY);
+    gl.uniform1f(pr.u('uRewindRadius'), p.rewindR);
+    gl.uniform1f(pr.u('uRewindDesat'), p.rewindDesat);
+    gl.uniform1f(pr.u('uRewindCA'), Math.min(p.ca, p.rewind * REWIND_CA));
     gl.viewport(L.x, this.canvas.height - L.y - L.h, L.w, L.h);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
