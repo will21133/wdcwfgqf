@@ -58,7 +58,7 @@ export class SporePod extends Enemy {
   static readonly N = 8;
   constructor(x: number, y: number) {
     super(x, y, 30);
-    this.r = 6; this.height = 16; this.mass = 99; this.poise = 14; this.speed = 0;
+    this.r = 6; this.height = 16; this.mass = 99; this.flinch = 14; this.speed = 0;
     this.kind = 'sporepod'; this.codexId = 'sporepod';
     this.debris = ['T2', 'T3', 'G2', 'B2', 'T1'];
     this.brass = [1, 2];
@@ -160,7 +160,7 @@ export class Snapvine extends Enemy {
   face = 1;
   constructor(x: number, y: number) {
     super(x, y, 40);
-    this.r = 6; this.height = 18; this.speed = 64; this.poise = 14;
+    this.r = 6; this.height = 18; this.speed = 64; this.flinch = 14;
     this.kind = 'snapvine'; this.codexId = 'snapvine';
     this.debris = ['G2', 'G3', 'B2', 'B3', 'R2'];
     this.brass = [2, 3];
@@ -338,7 +338,7 @@ export class BrassMoth extends Enemy {
   flapT = 0;
   constructor(x: number, y: number) {
     super(x, y, 20);
-    this.r = 5; this.height = 24; this.speed = 74; this.mass = 0.6; this.poise = 8;
+    this.r = 5; this.height = 24; this.speed = 74; this.mass = 0.6; this.flinch = 8;
     this.kind = 'brassmoth'; this.codexId = 'brassmoth';
     this.debris = ['B3', 'B4', 'B2', 'T3', 'K8'];
     this.brass = [0, 1];
@@ -459,7 +459,7 @@ export class Pruner extends Enemy {
   stepT = 0;
   constructor(x: number, y: number) {
     super(x, y, 55);
-    this.r = 6; this.height = 24; this.speed = 36; this.poise = 16; this.mass = 1.4;
+    this.r = 6; this.height = 24; this.speed = 36; this.flinch = 16; this.mass = 1.4;
     this.kind = 'pruner'; this.codexId = 'pruner';
     this.debris = ['B3', 'K8', 'G1', 'U3', 'B2'];
     this.brass = [2, 4];
@@ -610,7 +610,7 @@ export class Thornmother extends Enemy {
   static readonly RING = 22;
   constructor(x: number, y: number) {
     super(x, y, 360);
-    this.r = 12; this.height = 44; this.speed = 20; this.mass = 6; this.poise = 60;
+    this.r = 12; this.height = 44; this.speed = 20; this.mass = 6; this.flinch = 60;
     this.kind = 'thornmother'; this.codexId = 'thornmother';
     this.isElite = true;
     this.debris = ['G2', 'G3', 'T2', 'B2', 'K9', 'G1'];

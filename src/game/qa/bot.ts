@@ -6,16 +6,29 @@ import type { Player } from '../entities/player';
 import { angleTo } from '../../engine/math';
 import { RewardOrb, Chest, Interactable } from '../entities/interact';
 import { Door } from '../entities/door';
+import type { Echo } from '../entities/echo';
 
 export type { BotInput };
 
 export const botLog: string[] = [];
 (window as any).__botLog = botLog;
 
-interface Brain { lastRoom: string; roomT: number; tapT: number; scene: GameScene | null; rwHold: number; rwCd: number; taps: number; scrubs: number }
+interface Brain { lastRoom: string; roomT: number; tapT: number; scene: GameScene | null; rwHold: number; rwCd: number; taps: number; scrubs: number; forkCd: number; forks: number; forkEcho: Echo | null }
 const brains: Brain[] = [];
-const brainOf = (slot: number): Brain => (brains[slot] ??= { lastRoom: '', roomT: 0, tapT: 0, scene: null, rwHold: 0, rwCd: 2, taps: 0, scrubs: 0 });
-(window as any).__botRewinds = () => brains.map((b) => b && { taps: b.taps, scrubs: b.scrubs });
+const brainOf = (slot: number): Brain => (brains[slot] ??= { lastRoom: '', roomT: 0, tapT: 0, scene: null, rwHold: 0, rwCd: 2, taps: 0, scrubs: 0, forkCd: 3, forks: 0, forkEcho: null });
+(window as any).__botRewinds = () => brains.map((b) => b && { taps: b.taps, scrubs: b.scrubs, forks: b.forks });
+
+/**
+ * Fork like a player would (GDD2 §3.4): mid-fight with Sand to spare, leave an echo, keep fighting,
+ * and once it stands armed at the end of its path, walk back into it for a Paradox.
+ */
+function planFork(p: Player, br: Brain, near: number): boolean {
+  if (br.forkCd > 0 || near > 90 || p.rw) return false;
+  if (!p.canFork().ok || p.lo.sand < 150 || Math.random() > 0.02) return false;
+  br.forkCd = 4;
+  br.forks++;
+  return true;
+}
 
 /**
  * Rewind like a player would (GDD2 §3.2): after a hit the tape can still undo, either tap back to
@@ -79,6 +92,7 @@ export function botStep(s: GameScene, p: Player, dt: number) {
   br.roomT += dt;
   br.tapT -= dt;
   br.rwCd -= dt;
+  br.forkCd -= dt;
   // a rewind being held keeps being held until its planned release (a tap is one tick)
   if (br.rwHold > 0) {
     b.held.add('rewind');
@@ -131,7 +145,18 @@ export function botStep(s: GameScene, p: Player, dt: number) {
     const danger = enemies.some((e) => (e as any).attacking && Math.hypot(e.x - p.x, e.y - p.y) < 50);
     if (danger && Math.random() < 0.3) { b.pressed.add('dash'); b.move = { x: -Math.sin(a) * side, y: Math.cos(a) * side }; }
     const hold = planRewind(p, br);
-    if (hold > 0) { b.pressed.add('rewind'); b.held.add('rewind'); br.rwHold = hold - dt; }
+    if (hold > 0) { b.pressed.add('rewind'); b.held.add('rewind'); br.rwHold = hold - dt; return; }
+    // Fork, then go back into the armed echo when it stands at its end (a Paradox)
+    if (planFork(p, br, bd)) {
+      b.pressed.add('fork');
+      br.forkEcho = null;
+      const before = p.echoes.length;
+      w.after(0, () => { if (p.echoes.length > before || p.lastEcho?.kind === 'fork') br.forkEcho = p.echoes.filter((e) => e.kind === 'fork').pop() ?? null; });
+      return;
+    }
+    const fe = br.forkEcho;
+    if (fe && (fe.dead || fe.phase === 'recall')) br.forkEcho = null;
+    else if (fe && fe.armed && fe.phase === 'stand') { go(fe.x, fe.y); return; }
     return;
   }
   // rewards first (give up after a while; skip vault chests — the cage needs the echo puzzle)

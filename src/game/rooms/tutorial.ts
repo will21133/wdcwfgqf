@@ -1,6 +1,7 @@
 // First-run tutorial: floor inscriptions with device-aware prompts, and a training automaton that
 // teaches the core verb — take a hit, then rewind it away. Rewind 2.0 (F3): tap goes back to the
-// Shadow, holding scrubs the tape; the coach points at the Shadow once you are hurt.
+// Shadow, holding scrubs the tape; the coach points at the Shadow once you are hurt. After the first
+// rewind the Fork line appears (F3b).
 import { Entity } from '../entities/entity';
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Action } from '../../engine/input';
@@ -87,5 +88,7 @@ export function setupTutorial(w: World) {
   w.add(new Sign(ex, ey - 166, ['rewind'], S('f3', 'tutTap')));
   w.add(new Sign(ex, ey - 150, ['rewind'], S('f3', 'tutHold')));
   w.add(new Sign(ex, ey - 134, ['attack'], S('f3', 'tutSand')));
-  w.add(new RewindCoach());
+  const coach = w.add(new RewindCoach());
+  // one thing at a time (GDD2 §9.8): Fork is written on the floor once the first rewind is done
+  w.add(new Sign(ex, ey - 118, ['fork'], S('f3', 'tutFork'), () => coach.done));
 }

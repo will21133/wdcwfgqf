@@ -67,8 +67,8 @@ export const DownedHooks = {
    * source 'pullback'). null = off.
    */
   pullBack: ((rescuer: Player, target: Player) => !!rescuer.pull && rescuer.pull.target === target && rescuer.pull.t >= PULL_HOLD && rescuer.pullBack(target)) as null | ((rescuer: Player, target: Player) => boolean),
-  /** P5: seconds a hand needs to wind a teammate up (Ling: 0.6) */
-  windupTime: (_rescuer: Player): number => 1.2,
+  /** P5: seconds a hand needs to wind a teammate up (mods.reviveTime, 1.2; Ling: 0.6) */
+  windupTime: (rescuer: Player): number => rescuer.mods?.reviveTime ?? 1.2,
 };
 
 /** per-hand downed state (lives on Player.down) */

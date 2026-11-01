@@ -32,7 +32,7 @@ export class Rapier extends Weapon {
       world.combat.add({
         shape: { t: 'line', x0: ox + c * 4, y0: oy + sn * 4, x1: ox + c * 32 * reach, y1: oy + sn * 32 * reach, r: 6 },
         team: 'player', life: 3, follow: w as any,
-        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'attack' },
+        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, via: 'attack' },
       });
       world.add(new Smear(w, c * 6, -7 + sn * 6, 'thrust', angle, { len: Math.round(28 * reach), width: 7 }, pal, 0.11));
       sfx(w.isEcho ? 'swingEcho' : 'thrust', { pan: world.pan(w.x), vol: w.isEcho ? 0.5 : 1 });
@@ -40,7 +40,7 @@ export class Rapier extends Weapon {
       world.combat.add({
         shape: { t: 'arc', x: ox, y: oy, r: wide ? 42 : 34, a: angle, w: wide ? 1.6 : 1.25 },
         team: 'player', life: 4, follow: w as any,
-        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'attack' },
+        info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, via: 'attack' },
       });
       world.add(new Smear(w, 0, -7, 'arc', angle, { R: wide ? 38 : 30, thick: wide ? 11 : 9, sweep: wide ? 3.2 : 2.6, cw: true }, pal, 0.14));
       sfx(w.isEcho ? 'swingEcho' : 'swingHeavy', { pan: world.pan(w.x), vol: w.isEcho ? 0.5 : 1 });
@@ -67,7 +67,7 @@ export class Rapier extends Weapon {
     world.combat.add({
       shape: { t: 'line', x0: w.x, y0: w.y - 7, x1: w.x + c * 18, y1: w.y - 7 + sn * 18, r: 9 },
       team: 'player', life: 10, follow: w as any, rehit: flurry ? 0.05 : undefined,
-      info: { amount, crit, kind: 'melee', knock: 160, owner: w as any, echo: w.isEcho, src: 'special' },
+      info: { amount, crit, kind: 'melee', knock: 160, owner: w as any, echo: w.isEcho, via: 'special' },
     });
     world.add(new Smear(w, c * 4, -7 + sn * 4, 'thrust', angle, { len: 34, width: 10 }, w.isEcho ? 'echo' : 'brass', 0.2));
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });

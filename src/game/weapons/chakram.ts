@@ -61,7 +61,7 @@ class GearProj extends Entity {
       if (e.dead || set.has(e.id)) continue;
       if (Math.hypot(e.x - this.x, e.y - 8 - this.y) > e.r + 8) continue;
       set.add(e.id);
-      e.hurt({ amount: Math.max(1, Math.round(this.dmg * mul)), crit: this.crit, kind: 'proj', owner: this.owner as any, echo: this.owner.isEcho, x: this.x, y: this.y, knock: 90, src: 'attack' });
+      e.hurt({ amount: Math.max(1, Math.round(this.dmg * mul)), crit: this.crit, kind: 'proj', owner: this.owner as any, echo: this.owner.isEcho, x: this.x, y: this.y, knock: 90, via: 'attack' });
     }
   }
   renderUnlit(r: Renderer) {
@@ -80,7 +80,7 @@ class Saw extends Entity {
     this.t += dt; this.tick -= dt;
     if (this.tick <= 0) {
       this.tick = 0.2;
-      for (const e of this.world.enemiesNear(this.x, this.y, 22)) e.hurt({ amount: this.dmg, kind: 'aoe', owner: this.owner as any, echo: this.owner.isEcho, x: this.x, y: this.y, knock: 60, src: 'special', quiet: true });
+      for (const e of this.world.enemiesNear(this.x, this.y, 22)) e.hurt({ amount: this.dmg, kind: 'aoe', owner: this.owner as any, echo: this.owner.isEcho, x: this.x, y: this.y, knock: 60, via: 'special', quiet: true });
     }
     if (frand() < 0.5) this.world.particles.spawn({ kind: 'spark', x: this.x + frand(-6, 6), y: this.y - 2, vx: frand(-90, 90), vy: frand(-80, -20), life: 0.2, ramp: ['W', 'B6', 'O3'], layer: 'glow' });
     if (this.t > this.dur) this.kill();

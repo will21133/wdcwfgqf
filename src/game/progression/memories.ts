@@ -74,8 +74,8 @@ export interface MemoryDef {
   duo?: [Patron, Patron];
 }
 
-const isAtk = (i: DamageInfo) => i.src === 'attack';
-const isSpc = (i: DamageInfo) => i.src === 'special';
+const isAtk = (i: DamageInfo) => i.via === 'attack';
+const isSpc = (i: DamageInfo) => i.via === 'special';
 const R = (a: number, b: number, c: number, d: number): [number, number, number, number] => [a, b, c, d];
 const hasPatron = (lo: Loadout, p: Patron, n = 1) => lo.memories.filter((m) => MEMORIES[m.id]?.patron === p && MEMORIES[m.id]?.slot !== 'duo').length >= n;
 
@@ -110,7 +110,7 @@ const list: MemoryDef[] = [
       for (let i = 0; i <= n; i++) {
         const x = e.fromX + ((e.toX - e.fromX) * i) / n, y = e.fromY + ((e.toY - e.fromY) * i) / n;
         c.w.add(new FireZone(x, y, 14, 2.5, 2, c.p));
-        for (const t of c.w.enemiesNear(x, y, 18)) t.hurt({ amount: v / 2, kind: 'aoe', owner: c.p, x, y, src: 'memory', burn: 2 });
+        for (const t of c.w.enemiesNear(x, y, 18)) t.hurt({ amount: v / 2, kind: 'aoe', owner: c.p, x, y, via: 'memory', burn: 2 });
       }
       sfx('corrode', { vol: 0.5 });
     }),
@@ -131,7 +131,7 @@ const list: MemoryDef[] = [
     hook: (c, v) => c.onMine('kill', (e) => {
       if (e.target.st.burn <= 0) return;
       const { x, y } = e.target;
-      for (const t of c.w.enemiesNear(x, y, 34)) if (t !== e.target) t.hurt({ amount: v, kind: 'aoe', owner: c.p, x, y, src: 'memory', burn: 2, knock: 80 });
+      for (const t of c.w.enemiesNear(x, y, 34)) if (t !== e.target) t.hurt({ amount: v, kind: 'aoe', owner: c.p, x, y, via: 'memory', burn: 2, knock: 80 });
       c.w.fx.burst(x, y - 6, 18, ['O4', 'O3', 'O2', 'O1'], 150, 0.4);
       c.w.fx.ring(x, y, 3, 34, 0.3, 'O3', 2);
     }),
@@ -157,7 +157,7 @@ const list: MemoryDef[] = [
       c.onMine('attack', (e) => {
         if (e.echo) return;
         if (++n % 3) return;
-        c.w.add(new Bullet({ team: 'player', x: e.owner.x, y: e.owner.y - 8, ang: e.angle, speed: 280, dmg: v * c.lo.mods.dmg, style: 'orb', r: 3, owner: c.p, pierce: 3, pal: ['W', 'G4', 'B4'], info: { src: 'construct' } }));
+        c.w.add(new Bullet({ team: 'player', x: e.owner.x, y: e.owner.y - 8, ang: e.angle, speed: 280, dmg: v * c.lo.mods.dmg, style: 'orb', r: 3, owner: c.p, pierce: 3, pal: ['W', 'G4', 'B4'], info: { via: 'construct' } }));
         sfx('spit', { vol: 0.4 });
       });
     },
@@ -225,20 +225,20 @@ const list: MemoryDef[] = [
     desc: (v) => L(`特技结束时发出冲击波，造成 {g:${v}} 点伤害并施加 1 层{b:共鸣}。`, `Your Special ends with a shockwave dealing {g:${v}} damage and 1 {b:Resonance}.`),
     hook: (c, v) => c.onMine('special', (e) => {
       const o = e.owner;
-      c.w.after(0.16, () => c.w.add(new Shockwave(o.x, o.y - 4, 50, { amount: v * c.lo.mods.dmg, kind: 'aoe', owner: c.p, knock: 160, src: 'memory', resonance: 1, echo: e.echo })), c.p);
+      c.w.after(0.16, () => c.w.add(new Shockwave(o.x, o.y - 4, 50, { amount: v * c.lo.mods.dmg, kind: 'aoe', owner: c.p, knock: 160, via: 'memory', resonance: 1, echo: e.echo })), c.p);
       sfx('wave', { vol: 0.5 });
     }),
   },
   {
     id: 'marta_dash', patron: 'marta', slot: 'dash', name: L('回声步', 'Echo Step'), v: R(10, 14, 18, 22),
     desc: (v) => L(`冲刺结束时发出小型冲击波（{g:${v}} 点伤害），施加{b:共鸣}。`, `Dashes end with a small shockwave ({g:${v}} damage) that applies {b:Resonance}.`),
-    hook: (c, v) => c.onMine('dashEnd', (e) => { c.w.add(new Shockwave(e.owner.x, e.owner.y - 4, 34, { amount: v, kind: 'aoe', owner: c.p, knock: 100, src: 'memory', resonance: 1 })); }),
+    hook: (c, v) => c.onMine('dashEnd', (e) => { c.w.add(new Shockwave(e.owner.x, e.owner.y - 4, 34, { amount: v, kind: 'aoe', owner: c.p, knock: 100, via: 'memory', resonance: 1 })); }),
   },
   {
     id: 'marta_rewind', patron: 'marta', slot: 'rewind', name: L('晚钟', 'Vesper'), v: R(28, 36, 45, 56),
     desc: (v) => L(`回溯时敲响一记大钟：在你周围造成 {g:${v}} 点伤害并眩晕敌人 1 秒。`, `Rewinding tolls a great bell: {g:${v}} damage around you and stuns enemies for 1s.`),
     hook: (c, v) => c.onMine('rewind', (e) => {
-      c.w.add(new Shockwave(e.toX, e.toY - 4, 90, { amount: v * c.lo.mods.dmg, kind: 'aoe', owner: c.p, knock: 220, src: 'memory', stun: 1 }, 'U4', 0.4));
+      c.w.add(new Shockwave(e.toX, e.toY - 4, 90, { amount: v * c.lo.mods.dmg, kind: 'aoe', owner: c.p, knock: 220, via: 'memory', stun: 1 }, 'U4', 0.4));
       sfx('waveStart', { vol: 0.6 });
       c.w.shake(0.3);
     }),
@@ -246,7 +246,7 @@ const list: MemoryDef[] = [
   {
     id: 'marta_echo', patron: 'marta', slot: 'echo', name: L('共振体', 'Resonant Body'), v: R(1, 1, 2, 2),
     desc: (v) => L(`{c:残响}的攻击施加 {b:${v}} 层{b:共鸣}。`, `{c:Echo} attacks apply {b:${v}} {b:Resonance}.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.echo && e.info.src !== 'resonance') c.w.combat.addStatus(e.target, 'resonance', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.echo && e.info.via !== 'resonance') c.w.combat.addStatus(e.target, 'resonance', v, c.p); }),
   },
   {
     id: 'marta_greatbell', patron: 'marta', slot: 'passive', name: L('洪钟', 'Great Bell'), v: R(50, 70, 90, 120),
@@ -270,9 +270,9 @@ const list: MemoryDef[] = [
     hook: (c) => {
       let n = 0;
       c.onMine('hit', (e) => {
-        if (e.info.src === 'memory' || e.info.src === 'resonance') return;
+        if (e.info.via === 'memory' || e.info.via === 'resonance') return;
         if (++n % 12) return;
-        c.w.add(new Shockwave(c.p.x, c.p.y - 4, 80, { amount: 50 * c.lo.mods.dmg, kind: 'aoe', owner: c.p, knock: 180, src: 'memory', resonance: 1 }, 'U4', 0.35));
+        c.w.add(new Shockwave(c.p.x, c.p.y - 4, 80, { amount: 50 * c.lo.mods.dmg, kind: 'aoe', owner: c.p, knock: 180, via: 'memory', resonance: 1 }, 'U4', 0.35));
         sfx('wave', { vol: 0.6 });
       });
     },
@@ -374,7 +374,7 @@ const list: MemoryDef[] = [
   {
     id: 'asu_echo', patron: 'asu', slot: 'echo', name: L('星之残响', 'Starlit Echo'), v: R(0.4, 0.5, 0.6, 0.8),
     desc: (v) => L(`{c:残响}的攻击使敌人{v:定格} {g:${v}} 秒。`, `{c:Echo} attacks put enemies in {v:Stasis} for {g:${v}}s.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.echo && e.info.src === 'attack' && e.target.st.stasis <= 0) c.w.combat.addStatus(e.target, 'stasis', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.echo && e.info.via === 'attack' && e.target.st.stasis <= 0) c.w.combat.addStatus(e.target, 'stasis', v, c.p); }),
   },
   {
     id: 'asu_eternity', patron: 'asu', slot: 'passive', name: L('永恒', 'Eternity'), v: R(40, 55, 70, 90),
@@ -402,22 +402,22 @@ const list: MemoryDef[] = [
   {
     id: 'duo_firebell', patron: 'oren', duo: ['oren', 'marta'], slot: 'duo', name: L('炽钟', 'Firebell'), v: R(3, 3, 4, 5),
     desc: (v) => L(`{b:共鸣}敲响时施加 {o:${v}} 层{o:灼烧}。`, `{b:Resonance} rings apply {o:${v}} {o:Burn}.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'resonance') c.w.combat.addStatus(e.target, 'burn', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'resonance') c.w.combat.addStatus(e.target, 'burn', v, c.p); }),
   },
   {
     id: 'duo_frozenflame', patron: 'oren', duo: ['oren', 'asu'], slot: 'duo', name: L('冻焰', 'Frozen Flame'), v: R(2, 2, 2.5, 3),
     desc: (v) => L(`{v:定格}中的敌人身上的{o:灼烧}伤害按 {g:${v}} 倍储存。`, `{o:Burn} damage on enemies in {v:Stasis} is stored at {g:${v}}x.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'burn' && e.target.st.stasis > 0) e.target.st.stasisStored += e.dealt * (v - 1); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'burn' && e.target.st.stasis > 0) e.target.st.stasisStored += e.dealt * (v - 1); }),
   },
   {
     id: 'duo_wildfire', patron: 'oren', duo: ['oren', 'fen'], slot: 'duo', name: L('野火', 'Wildfire'), v: R(4, 5, 6, 8),
     desc: (v) => L(`{t:锈蚀}腐蚀爆发会点燃周围敌人（{o:${v}} 层{o:灼烧}）。`, `{t:Corrode} bursts ignite nearby enemies ({o:${v}} {o:Burn}).`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'corrode') for (const t of c.w.enemiesNear(e.target.x, e.target.y, 44)) c.w.combat.addStatus(t, 'burn', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'corrode') for (const t of c.w.enemiesNear(e.target.x, e.target.y, 44)) c.w.combat.addStatus(t, 'burn', v, c.p); }),
   },
   {
     id: 'duo_forge', patron: 'pip', duo: ['pip', 'oren'], slot: 'duo', name: L('熔炉', 'Forge'), v: R(1, 2, 2, 3),
     desc: (v) => L(`炮台、地雷与齿轮施加 {o:${v}} 层{o:灼烧}。`, `Turrets, mines and gears apply {o:${v}} {o:Burn}.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'construct') c.w.combat.addStatus(e.target, 'burn', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'construct') c.w.combat.addStatus(e.target, 'burn', v, c.p); }),
   },
   {
     id: 'duo_clocktower', patron: 'pip', duo: ['pip', 'marta'], slot: 'duo', name: L('钟楼', 'Clocktower'), v: R(12, 15, 18, 24),
@@ -428,7 +428,7 @@ const list: MemoryDef[] = [
         for (const t of c.w.entities) {
           if (!(t instanceof Turret) || t.dead || t.owner !== c.p) continue;
           const tt = (timers.get(t.id) ?? 1) - e.dt;
-          if (tt <= 0) { c.w.add(new Shockwave(t.x, t.y - 4, 40, { amount: v, kind: 'aoe', owner: c.p, knock: 80, src: 'memory', resonance: 1 })); timers.set(t.id, 2); }
+          if (tt <= 0) { c.w.add(new Shockwave(t.x, t.y - 4, 40, { amount: v, kind: 'aoe', owner: c.p, knock: 80, via: 'memory', resonance: 1 })); timers.set(t.id, 2); }
           else timers.set(t.id, tt);
         }
       });
@@ -437,7 +437,7 @@ const list: MemoryDef[] = [
   {
     id: 'duo_orrery', patron: 'pip', duo: ['pip', 'asu'], slot: 'duo', name: L('天文钟', 'Orrery'), v: R(0.3, 0.4, 0.5, 0.6),
     desc: (v) => L(`造物的攻击使敌人{v:定格} {g:${v}} 秒。`, `Construct hits put enemies in {v:Stasis} for {g:${v}}s.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'construct' && e.target.st.stasis <= 0) c.w.combat.addStatus(e.target, 'stasis', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'construct' && e.target.st.stasis <= 0) c.w.combat.addStatus(e.target, 'stasis', v, c.p); }),
   },
   {
     id: 'duo_garden', patron: 'pip', duo: ['pip', 'fen'], slot: 'duo', name: L('发条花园', 'Clockwork Garden'), v: R(2, 3, 3, 4),
@@ -449,12 +449,12 @@ const list: MemoryDef[] = [
   {
     id: 'duo_silentbell', patron: 'marta', duo: ['marta', 'asu'], slot: 'duo', name: L('寂静之钟', 'Silent Bell'), v: R(0.6, 0.7, 0.85, 1),
     desc: (v) => L(`{b:共鸣}敲响时使敌人{v:定格} {g:${v}} 秒。`, `{b:Resonance} rings put enemies in {v:Stasis} for {g:${v}}s.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'resonance' && e.target.st.stasis <= 0) c.w.combat.addStatus(e.target, 'stasis', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'resonance' && e.target.st.stasis <= 0) c.w.combat.addStatus(e.target, 'stasis', v, c.p); }),
   },
   {
     id: 'duo_rustbell', patron: 'marta', duo: ['marta', 'fen'], slot: 'duo', name: L('锈钟', 'Rusted Bell'), v: R(2, 2, 3, 4),
     desc: (v) => L(`{b:共鸣}敲响时施加 {t:${v}} 层{t:锈蚀}。`, `{b:Resonance} rings apply {t:${v}} {t:Rust}.`),
-    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.src === 'resonance') c.w.combat.addStatus(e.target, 'rust', v, c.p); }),
+    hook: (c, v) => c.onMine('hit', (e) => { if (e.info.via === 'resonance') c.w.combat.addStatus(e.target, 'rust', v, c.p); }),
   },
   {
     id: 'duo_spring', patron: 'fen', duo: ['fen', 'asu'], slot: 'duo', name: L('永恒之春', 'Eternal Spring'), v: R(1, 1, 2, 2),

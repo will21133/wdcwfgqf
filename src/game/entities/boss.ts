@@ -25,7 +25,7 @@ export abstract class Boss extends Enemy {
     this.isBoss = true;
     this.spawnT = 0;
     this.mass = 20;
-    this.poise = 9999;
+    this.flinch = 9999;
     this.canFall = false;
     this.shownHp = hp;
     this.brass = [30, 40];

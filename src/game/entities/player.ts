@@ -13,7 +13,10 @@ import { Rapier } from '../weapons/rapier';
 import { makeWeapon } from '../weapons';
 import { Scarf } from './scarf';
 import { Afterimage } from './fxents';
-import { Echo } from './echo';
+import { Echo, TEAM_ECHO_CAP, type EchoOpts } from './echo';
+import { Paradox } from '../systems/paradox';
+import { BUBBLE_R } from '../systems/timeBubble';
+import { outlineOf } from '../../engine/gfx/outline';
 import { angleTo, clamp, angleDiff, ease, TAU } from '../../engine/math';
 import { frand } from '../../engine/rng';
 import type { DamageInfo } from '../systems/combat';
@@ -77,8 +80,15 @@ export const SAND_CLEAR = 30;
 const PERFECT_KINDS = new Set(['melee', 'proj', 'aoe']);
 /** how long the PERFECT stamp stays up (real s) */
 export const PERFECT_STAMP = 1.1;
+/** Fork (GDD2 §3.4): the least tape it needs (s); Recall: hold Fork this long (mods.recall) */
+export const FORK_MIN_TAPE = 0.3, RECALL_HOLD = 0.4;
+/** Tick-Dodge (GDD2 §4.1): least time between two, the slow it gives, the Counter window (s) */
+export const TICK_SPACING = 0.5, TICK_SLOW_SCALE = 0.3, COUNTER_T = 1.2;
+/** what a dash can Tick-Dodge: an attack's hitbox or bullet (contact only from an enemy mid-attack) */
+const TICK_KINDS = new Set(['melee', 'proj', 'aoe']);
 
 export type RewindRefusal = 'sand' | 'tape' | 'anchor' | 'burnt' | 'state';
+export type ForkRefusal = 'sand' | 'tape' | 'anchor' | 'cooldown' | 'state' | 'noArmed';
 export interface RewindCheck { ok: boolean; reason?: RewindRefusal }
 export interface RewindPreview {
   /** target frame index on the tape (0 = oldest) */
@@ -111,6 +121,15 @@ export interface RewindState {
   tt: number; dur: number;
   fromX: number; fromY: number;
   cost: number; seconds: number;
+}
+
+/** an incoming blow a dash can Tick-Dodge: an attack's hitbox or bullet, or the body of an enemy mid-attack */
+function isAttack(info: DamageInfo): boolean {
+  if (info.hazard || info.fixed && info.kind === 'status') return false;
+  const by = info.owner as { team?: string; attacking?: boolean } | null | undefined;
+  if (by && by.team !== 'enemy') return false;
+  if (TICK_KINDS.has(info.kind)) return true;
+  return info.kind === 'contact' && !!by?.attacking;
 }
 
 // the pool refills at room clears (GDD2 §3.3); kills give +2 in combat.ts
@@ -187,6 +206,20 @@ export class Player extends Actor implements Wielder {
   pull: { target: Player; t: number } | null = null;
   /** this room's free scrub (mods.scrubFreeFirst) has been used */
   private scrubFreeUsed = false;
+  // ── F3b: Fork, Recall, Tick-Dodge, Counter (GDD2 §3.4, §4.1) ──
+  /** Fork cooldown left (s) */
+  forkCdT = 0;
+  /** Fork held (s; with mods.recall it becomes a Recall at 0.4 s); -1 = not held */
+  forkHold = -1;
+  private forkUsed = false;
+  /** seconds since the current/last dash started, and since the last dash ended */
+  dashAge = 99;
+  sinceDash = 99;
+  /** Tick-Dodge spacing left; the white clock ring after one (s) */
+  private tickCdT = 0;
+  tickRingT = 0;
+  /** > 0: the next hit of this hand is a Counter (crit ×2; combat.ts) */
+  counterT = 0;
   private refuseT = 0;
   private previewCache: { tick: number; key: string; v: RewindPreview } | null = null;
   lastSafeX = 0; lastSafeY = 0;
@@ -329,6 +362,8 @@ export class Player extends Actor implements Wielder {
     this.updatePull(dt, rewindPressed);
     if (rewindPressed && !this.pull) this.tryRewind();
     if (this.rw) return;
+    // Fork (GDD2 §3.4): an echo of the last 2 s without moving; with Recall, holding it calls them home
+    this.updateFork(dt);
 
     if (dashPressed && this.dashT <= 0 && this.dashCharges > 0 && this.falling <= 0) this.startDash();
 
@@ -338,13 +373,16 @@ export class Player extends Actor implements Wielder {
       if (Math.floor(this.dashT * 60) % 2 === 0) this.afterimage('C3', 0.18, 0.45);
       if (this.dashT <= 0) {
         this.airborne = false;
-        this.world.bus.emit('dashEnd', { owner: this, echo: false, player: this });
+        this.sinceDash = 0;
+        const dl = Math.hypot(this.dashVX, this.dashVY) || 1;
+        this.world.bus.emit('dashEnd', { owner: this, echo: false, player: this, dx: this.dashVX / dl, dy: this.dashVY / dl });
       }
     } else {
-      // weapon
+      // weapon (heavy / dash-attack hook points: GDD2 §4.1; P1 gives the weapons their moves)
       this.weapon.update(dt, {
         attackPressed, attackHeld: !this.locked && inp.down('attack'), specialPressed,
         specialHeld: !this.locked && inp.down('special'), specialReleased: inp.released('special'),
+        sinceDash: this.sinceDash,
       }, this.aim, m.atkSpeed, m.specialCd, {
         onAttack: (combo, angle) => {
           this.weapon.perform(this, combo, angle);
@@ -354,6 +392,14 @@ export class Player extends Actor implements Wielder {
           this.weapon.performSpecial(this, angle, charge);
           this.recorder.event({ type: 'special', angle, charge });
           this.invuln = Math.max(this.invuln, 0.18);
+        },
+        onHeavy: (angle, charge) => {
+          this.weapon.performHeavy(this, angle, charge);
+          this.recorder.event({ type: 'heavy', angle, charge });
+        },
+        onDashAttack: (angle) => {
+          this.weapon.performDashAttack(this, angle);
+          this.recorder.event({ type: 'dashAttack', angle });
         },
       });
       // movement
@@ -400,12 +446,9 @@ export class Player extends Actor implements Wielder {
       if (ok) { this.lastSafeX = this.x; this.lastSafeY = this.y; }
     }
 
-    // paradox: touch your own echo
-    for (const e of this.echoes) {
-      if (e.dead || !e.paradoxReady) continue;
-      if (Math.hypot(e.x - this.x, e.y - this.y) < 11) { this.paradox(e); break; }
-    }
-    this.echoes = this.echoes.filter((e) => !e.dead);
+    // Paradox (GDD2 §3.6): walk into an armed echo (anyone's), or dash through it
+    Paradox.touch(this);
+    if (this.echoes.some((e) => e.dead)) this.echoes = this.echoes.filter((e) => !e.dead);
 
     this.record();
     this.updateScarf(dt);
@@ -464,7 +507,7 @@ export class Player extends Actor implements Wielder {
       const c = Math.cos(this.aim), s2 = Math.sin(this.aim);
       this.world.combat.add({
         shape: { t: 'arc', x: this.x, y: this.y - 7, r: 22, a: this.aim, w: 0.9 }, team: 'player', life: 3,
-        info: { amount: 1, kind: 'melee', owner: this, knock: 20, src: 'ghost', quiet: true },
+        info: { amount: 1, kind: 'melee', owner: this, knock: 20, via: 'ghost', quiet: true },
       });
       this.world.fx.ring(this.x + c * 12, this.y - 7 + s2 * 12, 1, 7, 0.18, this.color, 1);
       sfx('swingEcho', { vol: 0.35, pan: this.world.pan(this.x) });
@@ -521,12 +564,9 @@ export class Player extends Actor implements Wielder {
     this.world.fx.dust(this.x, this.y, 4, Math.atan2(dy, dx));
     sfx('dash', { pan: this.world.pan(this.x) });
     this.input.rumble(0, 0.25, 60);
+    this.dashAge = 0;
     this.world.bus.emit('dash', { owner: this, dx, dy, echo: false, player: this });
-    // perfect dodge check: enemy projectile/hitbox nearby
-    if (this.world.enemies.some((e) => (e as any).attacking && Math.hypot(e.x - this.x, e.y - this.y) < 40)) {
-      this.world.bus.emit('perfectDodge', { x: this.x, y: this.y, player: this });
-      this.world.bus.emit('tickDodge', { x: this.x, y: this.y, player: this });
-    }
+    // Tick-Dodge is judged in hurt(): a blow this dash's invulnerability actually blocks (GDD2 §4.1)
   }
 
   lunge(dx: number, dy: number, dur: number) {
@@ -835,7 +875,6 @@ export class Player extends Actor implements Wielder {
       w.bus.emit('revived', { player: this, by: null, source: 'self' });
     }
     w.bus.emit('rewind', { fromX: R.fromX, fromY: R.fromY, toX: this.x, toY: this.y, restored, player: this, seconds: R.seconds, cost: R.cost, perfect: !!this.perfect?.hit, scrub: R.scrub });
-    if (this.lastEcho) w.bus.emit('echoSpawn', { echo: this.lastEcho, player: this });
   }
 
   /** standard commit: HP (and, out of a stop, at least 1) and the tempo at that moment */
@@ -864,32 +903,122 @@ export class Player extends Actor implements Wielder {
     }
   }
 
-  /** leave an echo that replays `rec` (retires the oldest at the cap; Twin Mirror adds its twin) */
-  spawnEcho(rec: Recording, o: { gilded?: boolean } = {}): Echo | null {
+  /**
+   * Leave an echo that replays `rec` (PLAN2 §1.8; rewind styles, Fork, Pull Back and P4/P5 call it).
+   * Caps (GDD2 §3.5): this hand keeps mods.maxEchoes (dash echoes don't count), the room keeps 8 —
+   * the oldest goes first. Twin Mirror adds a mirrored twin at half damage under the same caps.
+   * Every echo made here is announced with `echoSpawn`.
+   */
+  spawnEcho(rec: Recording, o: EchoOpts & { twin?: boolean } = {}): Echo | null {
     const m = this.mods;
-    if (rec.frames.length < 2) return null;
-    const alive = this.echoes.filter((e) => !e.dead);
-    while (alive.length >= m.maxEchoes) { const old = alive.shift()!; old.shatter(false); }
-    const echo = this.world.add(new Echo(rec, this.weapon, m.echoDmg, m.echoSpeed));
-    echo.player = this;
-    if (o.gilded) echo.gild();
+    const w = this.world;
+    if (rec.frames.length < 2 || !w) return null;
+    const kind = o.kind ?? 'walk';
+    if (kind !== 'dash') {
+      const mine = this.echoes.filter((e) => !e.dead && e.kind !== 'dash');
+      while (mine.length >= Math.max(1, m.maxEchoes)) mine.shift()!.shatter();
+    }
+    const all: Echo[] = [];
+    for (const q of w.players) for (const e of q.echoes) if (!e.dead) all.push(e);
+    all.sort((a, b) => b.age - a.age);
+    while (all.length >= TEAM_ECHO_CAP) all.shift()!.shatter();
+    const echo = w.add(new Echo(this, rec, o));
     this.echoes.push(echo);
-    this.lastEcho = echo;
-    if (m.mirrorEcho) {
-      // mirrored twin: reflect the path horizontally around the start point
+    if (!o.twin) this.lastEcho = echo;
+    w.bus.emit('echoSpawn', { echo, player: this });
+    if (m.mirrorEcho && !o.twin && kind !== 'dash' && kind !== 'statue') {
+      // Twin Mirror: the path reflected around its start, half damage
       const sx = rec.frames[0].x;
-      const mir = {
+      const mir: Recording = {
         frames: rec.frames.map((f) => ({ ...f, x: sx - (f.x - sx), flip: !f.flip, wa: Math.PI - f.wa })),
         events: rec.events.map((e) => ({ ...e, angle: e.angle !== undefined ? Math.PI - e.angle : undefined, dx: e.dx !== undefined ? -e.dx : undefined })),
       };
-      // keep mirrored path inside walkable space
-      if (mir.frames.every((f) => !this.world.map.solidAt(f.x, f.y))) {
-        const twin = this.world.add(new Echo(mir, this.weapon, m.echoDmg * 0.5, m.echoSpeed));
-        twin.player = this;
-        this.echoes.push(twin);
-      }
+      // only when the reflection stays on walkable floor
+      if (mir.frames.every((f) => !w.map.solidAt(f.x, f.y) && !w.map.pitAt(f.x, f.y))) this.spawnEcho(mir, { ...o, twin: true, dmgScale: (o.dmgScale ?? m.echoDmg) * 0.5 });
     }
     return echo;
+  }
+
+  // ───────────────────────── Fork & Recall (GDD2 §3.4) ─────────────────────────
+  /** can this hand Fork now? */
+  canFork(): { ok: boolean; reason?: ForkRefusal } {
+    const m = this.mods;
+    if (this.state !== 'alive' || this.hp <= 0 || this.rw || this.locked || this.falling > 0 || !this.world) return { ok: false, reason: 'state' };
+    if (this.anchorT > 0) return { ok: false, reason: 'anchor' };
+    if (this.forkCdT > 0) return { ok: false, reason: 'cooldown' };
+    if (this.rec.seconds < FORK_MIN_TAPE) return { ok: false, reason: 'tape' };
+    if (this.lo.sand + 1e-6 < m.forkCost) return { ok: false, reason: 'sand' };
+    return { ok: true };
+  }
+
+  /**
+   * Fork (PLAN2 §1.8, GDD2 §3.4): pay 50 Sand for an echo of the last 2 s. The hand does not move,
+   * heal or lose tape; the echo starts where the hand was 2 s ago and walks to where Fork was
+   * pressed (a clock face marks it), then stands there — walk back into it for a Paradox.
+   */
+  fork(): boolean {
+    const c = this.canFork();
+    if (!c.ok) { this.refuseFork(c.reason!); return false; }
+    const m = this.mods, w = this.world;
+    if (!this.lo.spendSand(m.forkCost)) { this.refuseFork('sand'); return false; }
+    const rec = this.rec.slice(m.forkLen);
+    const echo = this.spawnEcho(rec, { kind: 'fork' });
+    if (!echo) { this.lo.addSand(m.forkCost); return false; }
+    this.forkCdT = m.forkCd;
+    // the tape "unspools" back along the path to where the echo starts
+    const fr = rec.frames;
+    for (let k = 0; k < fr.length; k += 10) w.fx.ring(fr[k].x, fr[k].y - 2, 1, 5, 0.25 + (k / fr.length) * 0.2, 'C3', 1);
+    w.fx.ring(echo.x, echo.y - 8, 2, 20, 0.35, 'C4', 2);
+    w.fx.ring(this.x, this.y - 2, 2, 12, 0.3, 'C3', 1);
+    w.fx.burst(echo.x, echo.y - 8, 12, ['C4', 'C3', 'C2'], 90, 0.35);
+    sfx('fork', { pan: w.pan(this.x) });
+    this.input.rumble(0.15, 0.35, 90);
+    w.bus.emit('fork', { player: this, echo });
+    return true;
+  }
+  private refuseFork(reason: ForkRefusal) {
+    if (this.refuseT > 0 || !this.world || reason === 'state') return;
+    this.refuseT = 0.35;
+    const lo = this.lo;
+    const text = reason === 'sand' ? tr(S('f3', 'noSand')).replace('{n}', String(Math.floor(lo.sand))).replace('{m}', String(this.mods.forkCost))
+      : reason === 'anchor' ? tr(S('f3', 'anchored'))
+      : reason === 'cooldown' ? tr(S('f3', 'forkCd')).replace('{s}', this.forkCdT.toFixed(1))
+      : reason === 'noArmed' ? tr(S('f3', 'noArmed'))
+      : tr(S('f3', 'tapeShort')).replace('{s}', this.rec.seconds.toFixed(1));
+    sfx('denied', { vol: 0.6 });
+    this.world.fx.banner(this.x, this.y - 32, text, reason === 'anchor' ? 'K9' : 'C4', 1.1);
+  }
+
+  /** Recall (mods.recall): every armed echo of this hand flies home; true if any did */
+  recallEchoes(): boolean {
+    let n = 0;
+    for (const e of this.echoes) if (e.recall()) n++;
+    if (!n) return false;
+    const w = this.world;
+    w.fx.ring(this.x, this.y - 8, 18, 4, 0.3, 'C4', 2);
+    sfx('recall', { pan: w.pan(this.x) });
+    this.input.rumble(0.2, 0.5, 160);
+    w.bus.emit('custom', { id: 'recall', player: this, data: { echoes: n } });
+    return true;
+  }
+
+  /** Fork on press — or, with Recall unlocked, on release before 0.4 s (a longer hold recalls) */
+  private updateFork(dt: number) {
+    const inp = this.input;
+    if (this.locked) { this.forkHold = -1; return; }
+    const recall = this.mods.recall >= 1;
+    if (inp.pressed('fork')) {
+      if (!recall) { this.fork(); return; }
+      this.forkHold = 0; this.forkUsed = false;
+    }
+    if (this.forkHold < 0) return;
+    if (inp.down('fork')) {
+      this.forkHold += dt;
+      if (!this.forkUsed && this.forkHold >= RECALL_HOLD) { this.forkUsed = true; if (!this.recallEchoes()) this.refuseFork('noArmed'); }
+      return;
+    }
+    if (!this.forkUsed) this.fork();
+    this.forkHold = -1;
   }
 
   /** an attack that would have landed inside the Perfect window (GDD2 §3.9) */
@@ -920,6 +1049,13 @@ export class Player extends Actor implements Wielder {
   private tickRewindFx(dt: number) {
     const R = this.rw;
     if (this.refuseT > 0) this.refuseT -= dt;
+    // F3b timers (game time around the hand)
+    if (this.dashAge < 99) this.dashAge += dt;
+    if (this.sinceDash < 99) this.sinceDash += dt;
+    if (this.forkCdT > 0) this.forkCdT = Math.max(0, this.forkCdT - dt);
+    if (this.tickCdT > 0) this.tickCdT -= dt;
+    if (this.tickRingT > 0) this.tickRingT = Math.max(0, this.tickRingT - dt);
+    if (this.counterT > 0) this.counterT = Math.max(0, this.counterT - dt);
     if (this.anchorT > 0) this.anchorT -= dt;
     const rec = this.rec;
     if (rec.burnT > 0) rec.burnT = Math.max(0, rec.burnT - dt);
@@ -1053,7 +1189,6 @@ export class Player extends Actor implements Wielder {
     target.input.rumble(0.4, 0.5, 200);
     this.input.rumble(0.25, 0.4, 160);
     w.bus.emit('rewind', { fromX, fromY, toX: target.x, toY: target.y, restored, player: target, seconds: 3, cost: 0, perfect: false, scrub: false });
-    if (target.lastEcho) w.bus.emit('echoSpawn', { echo: target.lastEcho, player: target });
     w.bus.emit('revived', { player: target, by: this, source: 'pullback' });
     return true;
   }
@@ -1079,39 +1214,19 @@ export class Player extends Actor implements Wielder {
     sfx('rewindEnd', { vol: 0.5, pan: w.pan(this.x) });
   }
 
-  private paradox(e: Echo) {
-    const m = this.mods;
-    const w = this.world;
-    const x = (e.x + this.x) / 2, y = (e.y + this.y) / 2;
-    const dmg = m.paradoxDmg * m.dmg;
-    for (const t of w.enemiesNear(x, y - 4, m.paradoxRadius)) {
-      t.hurt({ amount: dmg, kind: 'paradox', owner: this, x, y, knock: 260, src: 'paradox', hitstop: 0.02 });
-    }
-    w.fx.ring(x, y - 4, 4, m.paradoxRadius + 6, 0.45, 'C4', 3);
-    w.fx.ring(x, y - 4, 2, m.paradoxRadius * 0.7, 0.3, 'W', 2);
-    w.fx.burst(x, y - 6, 30, ['W', 'C4', 'C3', 'C2'], 240, 0.55);
-    w.fx.banner(x, y - 34, '悖论！', 'C3', 0.9);
-    w.hitstop(0.1);
-    w.shake(0.45);
-    w.stats.paradoxes++;
-    if (settings.flashes) G.r.params.flash = 0.35;
-    sfx('paradox');
-    this.input.rumble(1, 0.8, 260);
-    G.audio.duck(0.4, 0.7);
-    w.bus.emit('paradox', { x, y, echo: e, player: this, kind: 'overlap', chain: 1, duet: false });
-    if (!m.paradoxKeepsEcho) e.shatter(true);
-    else e.paradoxReady = false;
-  }
-
   // ───────────────────────── damage ─────────────────────────
   hurt(info: DamageInfo): number {
     // Perfect Rewind (GDD2 §3.9): an attack that would have landed within the window after the press
     const pf = this.perfect;
-    if (pf && !pf.hit && pf.t > 0 && (this.rw || this.invuln > 0) && PERFECT_KINDS.has(info.kind) && this.state === 'alive') this.perfectHit();
+    if (pf && !pf.hit && pf.t > 0 && (this.rw || this.invuln > 0) && PERFECT_KINDS.has(info.kind) && !info.hazard && this.state === 'alive') this.perfectHit();
     // intangible from the press to the landing (GDD2 §3.2)
     if (this.rw) return 0;
     if (this.hp <= 0 || this.state !== 'alive') return 0;
-    if ((this.invuln > 0 || this.dashT > 0) && !info.pierceInvuln) return 0;
+    if ((this.invuln > 0 || this.dashT > 0) && !info.pierceInvuln) {
+      // Tick-Dodge (GDD2 §4.1): a blow this dash's invulnerability blocked within 0.16 s of its start
+      if (this.dashAge <= this.mods.tickDodgeWindow && this.tickCdT <= 0 && isAttack(info)) this.tickDodge(info);
+      return 0;
+    }
     const m = this.mods;
     const lo = this.lo;
     if (lo.shieldReady) {
@@ -1172,6 +1287,28 @@ export class Player extends Actor implements Wielder {
       this.syncRun();
     }
     return amt;
+  }
+
+  /**
+   * Tick-Dodge (GDD2 §4.1): the world slows to 0.3× for 0.35 s (co-op: a bubble around this hand),
+   * a white clock ring and "TICK!", +25 Sand, and the next hit within 1.2 s is a Counter.
+   */
+  private tickDodge(info: DamageInfo) {
+    const m = this.mods, w = this.world;
+    this.tickCdT = TICK_SPACING;
+    this.tickRingT = 0.45;
+    this.counterT = COUNTER_T;
+    this.lo.addSand(m.tickDodgeSand);
+    const solo = w.playerCount <= 1;
+    w.bubbles.push({ x: this.x, y: this.y, r: solo ? Infinity : BUBBLE_R, scale: TICK_SLOW_SCALE, dur: m.tickDodgeSlow, owner: this });
+    w.fx.ring(this.x, this.y - 8, 6, 30, 0.4, 'W', 2);
+    w.fx.burst(this.x, this.y - 8, 10, ['W', 'K10', 'C4'], 110, 0.3);
+    w.fx.stamp(this.x, this.y - 38, S('f3', 'tick'), 'K10', 0.9, { rule: 'C4', term: 'tickDodge' });
+    sfx('tickDodge', { pan: w.pan(this.x) });
+    this.input.rumble(0.2, 0.6, 90);
+    void info;
+    w.bus.emit('tickDodge', { x: this.x, y: this.y, player: this });
+    w.bus.emit('perfectDodge', { x: this.x, y: this.y, player: this });
   }
 
   onFall() {
@@ -1288,9 +1425,13 @@ export class Player extends Actor implements Wielder {
   renderUnlit(r: Renderer) {
     // the Shadow and its hairspring first (under everything else this hand marks)
     renderShadow(r, this);
-    // aim reticle (mouse) is drawn by HUD; here: future path of echoes
-    for (const e of this.echoes) if (!e.dead) e.renderPath(r);
+    // aim reticle (mouse) is drawn by HUD; here: future path of echoes (co-op: 40%, imminent beads only)
+    const dim = this.world.playerCount > 1;
+    for (const e of this.echoes) if (!e.dead) e.renderPath(r, dim);
+    // what touching the nearest armed echo would set off (GDD2 §3.6)
+    if (this.state === 'alive') Paradox.render(r, this);
     renderRewindMarks(r, this);
+    this.renderVerbMarks(r);
     if (this.state === 'stopped') { Down.renderStoppedUnlit(r, this); Down.renderStoppedLabel(r, this); return; }
     if (this.state === 'ghost') {
       if (this.world.playerCount > 1) drawSlotBadge(r.u, this.slot, Math.round(this.x), Math.round(this.y) - 27 + Math.round(Math.sin(this.world.time * 3)));
@@ -1302,6 +1443,37 @@ export class Player extends Actor implements Wielder {
     if (this.hp > 0 && this.hp / this.maxHp < 0.25 && Math.floor(this.world.time * 3) % 2 === 0) {
       const spr = this.currentSprite();
       drawSprite(r.u, spr, this.x, this.y, { flip: this.flip, tint: 'R3', alpha: 0.35 });
+    }
+  }
+
+  /** Tick-Dodge's white clock ring, the Counter glint, the Recall hold (GDD2 §4.1, §3.4) */
+  private renderVerbMarks(r: Renderer) {
+    const u = r.u;
+    if (this.tickRingT > 0) {
+      const k = this.tickRingT / 0.45;
+      const rad = 10 + (1 - k) * 14, cx = this.x, cy = this.y - 8;
+      u.globalAlpha = Math.min(1, k * 1.5);
+      for (let i = 0; i < 12; i++) {
+        const a = -Math.PI / 2 + (i / 12) * TAU;
+        const x = Math.round(cx + Math.cos(a) * rad), y = Math.round(cy + Math.sin(a) * rad * 0.8);
+        u.fillStyle = col(i % 3 === 0 ? 'W' : 'K9');
+        u.fillRect(x, y, i % 3 === 0 ? 2 : 1, i % 3 === 0 ? 2 : 1);
+      }
+      u.globalAlpha = 1;
+    }
+    // a loaded Counter: the hand's rim glints white
+    if (this.counterT > 0 && this.state === 'alive' && Math.floor(this.world.time * 12) % 3 !== 0) {
+      drawSprite(u, outlineOf(this.currentSprite(), 'W', 'solid'), this.x, this.y, { flip: this.flip, alpha: 0.35 + 0.4 * Math.min(1, this.counterT / 0.3) });
+    }
+    // Recall: holding Fork fills a ring; at 0.4 s every armed echo flies home
+    if (this.forkHold > 0.08 && !this.forkUsed && this.mods.recall >= 1) {
+      const k = Math.min(1, this.forkHold / RECALL_HOLD), cx = Math.round(this.x), cy = Math.round(this.y) - 8;
+      const n = Math.round(16 * k);
+      for (let i = 0; i < 16; i++) {
+        const a = -Math.PI / 2 + (i / 16) * TAU;
+        u.fillStyle = col(i < n ? 'C4' : 'K3');
+        u.fillRect(Math.round(cx + Math.cos(a) * 13), Math.round(cy + Math.sin(a) * 10), 1, 1);
+      }
     }
   }
 

@@ -268,8 +268,8 @@ export class Stillness extends Boss {
           this.stopT = 0;
           this.stopDmg = 0;
           this.world.frozen = true;
+          // every hand's echoes keep moving (Echo.ignoreFreeze is always on): only the past acts now
           (this as any).ignoreFreeze = true;
-          for (const pl of this.world.players) for (const e of pl.echoes) (e as any).ignoreFreeze = true;
           sfx('stasisBreak');
           G.audio.muffle(true, 500);
           rumbleAll(0.3, 0.9, 400);
@@ -301,7 +301,6 @@ export class Stillness extends Boss {
     this.world.frozen = false;
     this.world.timeStop = 0;
     (this as any).ignoreFreeze = false;
-    for (const pl of this.world.players) for (const e of pl.echoes) (e as any).ignoreFreeze = false;
     G.audio.muffle(false);
     if (broken) {
       this.world.fx.banner(this.x, this.y - 100, tr(L('过去击碎了静止！', 'The past shatters the stillness!')), 'C3', 1.6);

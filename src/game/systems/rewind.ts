@@ -32,7 +32,8 @@ export interface Frame {
   fixedHit: number;
 }
 
-export type EventType = 'attack' | 'special' | 'specialRelease' | 'dash';
+/** heavy / dashAttack: the 2.0 verbs (weapon.ts hook points; P1 gives each weapon its moves) */
+export type EventType = 'attack' | 'special' | 'specialRelease' | 'dash' | 'heavy' | 'dashAttack';
 export interface RecEvent { tick: number; type: EventType; combo?: number; angle?: number; charge?: number; dx?: number; dy?: number }
 
 export interface Recording { frames: Frame[]; events: RecEvent[] }

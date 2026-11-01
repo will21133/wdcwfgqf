@@ -25,20 +25,24 @@ export class Maul extends Weapon {
     const { amount, crit } = this.roll(w, s.dmg);
     const pal = w.isEcho ? 'echo' : 'ember';
     if (s.kind === 'swing') {
-      world.combat.add({ shape: { t: 'arc', x: ox, y: oy, r: 40, a: angle, w: 1.45 }, team: 'player', life: 5, follow: w as any, info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'attack', hitstop: 0.07 } });
+      world.combat.add({ shape: { t: 'arc', x: ox, y: oy, r: 40, a: angle, w: 1.45 }, team: 'player', life: 5, follow: w as any, info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, via: 'attack', hitstop: 0.07 } });
       world.add(new Smear(w, 0, -7, 'arc', angle, { R: 38, thick: 12, sweep: 3.0, cw: true }, pal, 0.16));
       sfx(w.isEcho ? 'swingEcho' : 'swingHeavy', { pan: world.pan(w.x) });
     } else {
       const sx = ox + c * 22, sy = oy + sn * 22;
-      world.combat.add({ shape: { t: 'circle', x: sx, y: sy, r: 26 }, team: 'player', life: 3, info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, src: 'attack', hitstop: 0.09 } });
+      world.combat.add({ shape: { t: 'circle', x: sx, y: sy, r: 26 }, team: 'player', life: 3, info: { amount, crit, kind: 'melee', knock: s.knock, owner: w as any, echo: w.isEcho, x: ox, y: oy, via: 'attack', hitstop: 0.09 } });
       world.fx.ring(sx, sy + 7, 4, 34, 0.3, w.isEcho ? 'C3' : 'O3', 3);
       world.fx.dust(sx, sy + 7, 10);
       world.fx.scorch(sx, sy + 7, 12);
       world.shake(0.25);
       sfx('slam', { vol: w.isEcho ? 0.4 : 0.8, pan: world.pan(w.x) });
     }
-    // echo trait: every echo swing releases a shockwave
-    if (w.isEcho) world.add(new Shockwave(w.x, w.y - 4, 46, { amount: 14 * wielderLo(w).mods.dmg, kind: 'aoe', owner: w as any, knock: 140, echo: true, src: 'attack' }, 'C3', 0.25));
+    // echo trait: every echo swing releases a shockwave — scaled by the echo's damage (60%, gilded
+    // 90% …) like its swing, and credited to the echo's hand (GDD2 §3.5; it was a flat 14 × dmg)
+    if (w.isEcho) {
+      const sw = 14 * wielderLo(w).mods.dmg * w.dmgScale / 0.6;
+      world.add(new Shockwave(w.x, w.y - 4, 46, { amount: Math.round(sw), kind: 'aoe', owner: w as any, knock: 140, echo: true, via: 'attack', player: wielderPlayer(w) }, 'C3', 0.25));
+    }
     world.bus.emit('attack', { owner: w as any, combo, angle, echo: w.isEcho, player: wielderPlayer(w) });
   }
 
@@ -46,7 +50,7 @@ export class Maul extends Weapon {
   performSpecial(w: Wielder, angle: number) {
     const world = w.world;
     const { amount, crit } = this.roll(w, 12, true);
-    world.combat.add({ shape: { t: 'circle', x: w.x, y: w.y - 7, r: 36 }, team: 'player', life: 39, follow: w as any, rehit: 0.13, info: { amount, crit, kind: 'melee', knock: 120, owner: w as any, echo: w.isEcho, src: 'special', hitstop: 0.02 } });
+    world.combat.add({ shape: { t: 'circle', x: w.x, y: w.y - 7, r: 36 }, team: 'player', life: 39, follow: w as any, rehit: 0.13, info: { amount, crit, kind: 'melee', knock: 120, owner: w as any, echo: w.isEcho, via: 'special', hitstop: 0.02 } });
     for (let i = 0; i < 4; i++) world.after(i * 0.15, () => world.add(new Smear(w, 0, -7, 'arc', angle + i * 1.6, { R: 36, thick: 10, sweep: 3.4 }, w.isEcho ? 'echo' : 'ember', 0.16)), w);
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });
     world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho, player: wielderPlayer(w) });

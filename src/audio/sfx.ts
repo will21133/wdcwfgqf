@@ -111,6 +111,61 @@ export function registerSfx(a: AudioEngine) {
     for (const [f, d] of [[1318.5, 0], [1760, 0.03], [2349, 0.06], [3136, 0.09]]) a.bell(out, t + d, f, { dur: 1.6, vol: 0.09, ratio: 2.76, index: 2 });
     a.tone(out, t, { type: 'sawtooth', f: 2400, f2: 200, dur: 0.3, vol: 0.06 });
   });
+  // F3b (GDD2 §3.4–3.7, §4.1): the echo arming "pip", Fork, Recall, chained blasts, Sync's
+  // tick·tock, Tick-Dodge, the Counter, an interrupt and an echo breaking like glass
+  reg('echoArm', (a, t, out) => {
+    a.bell(out, t, 2793, { dur: 0.22, vol: 0.07, ratio: 2.01, index: 0.6 });
+    a.tone(out, t, { type: 'square', f: 3520, dur: 0.01, vol: 0.025 });
+  }, { minGap: 0.06 });
+  reg('fork', (a, t, out) => {
+    a.noise(out, t, { dur: 0.01, vol: 0.45, type: 'highpass', f: 5000 });
+    a.tone(out, t, { type: 'triangle', f: 520, f2: 1560, dur: 0.14, vol: 0.08, curve: 'exp' });
+    a.bell(out, t + 0.06, 1760, { dur: 0.7, vol: 0.08, ratio: 2.76, index: 1.1 });
+    a.bell(out, t + 0.1, 2637, { dur: 0.5, vol: 0.05, ratio: 2.01, index: 0.8 });
+  }, { minGap: 0.12 });
+  reg('recall', (a, t, out) => {
+    a.noise(out, t, { dur: 0.35, vol: 0.3, type: 'bandpass', f: 900, f2: 5200, q: 1.4, a: 0.05 });
+    a.tone(out, t, { type: 'sawtooth', f: 180, f2: 720, dur: 0.3, vol: 0.05 });
+    a.bell(out, t + 0.25, 2093, { dur: 0.6, vol: 0.07, ratio: 2.01, index: 1 });
+  }, { minGap: 0.2 });
+  reg('paradoxChain', (a, t, out, o) => {
+    const k = Math.pow(1.122, Number((o as { pitch?: number }).pitch ?? 1));
+    a.tone(out, t, { type: 'sine', f: 140 * k, f2: 45, dur: 0.4, vol: 0.5 });
+    a.noise(out, t, { dur: 0.25, vol: 0.35, type: 'lowpass', f: 6500, f2: 500 });
+    a.bell(out, t, 2349 * k, { dur: 1.1, vol: 0.1, ratio: 2.76, index: 1.8 });
+  }, { minGap: 0.04, maxVoices: 4 });
+  reg('sync', (a, t, out) => {
+    a.tone(out, t, { type: 'square', f: 2637, dur: 0.012, vol: 0.06 });
+    a.bell(out, t, 1975, { dur: 0.25, vol: 0.07, ratio: 2.01, index: 0.7 });
+    a.tone(out, t + 0.07, { type: 'square', f: 1760, dur: 0.012, vol: 0.06 });
+    a.bell(out, t + 0.07, 1318.5, { dur: 0.3, vol: 0.07, ratio: 2.01, index: 0.7 });
+  }, { minGap: 0.05 });
+  reg('chord', (a, t, out, o) => {
+    const n = Math.max(3, Math.min(8, Number((o as { pitch?: number }).pitch ?? 3)));
+    const k = Math.pow(1.0595, (n - 3) * 2);
+    for (const [f, d] of [[1318.5, 0], [1661, 0.025], [1975, 0.05], [2637, 0.075]]) a.bell(out, t + d, f * k, { dur: 0.9, vol: 0.07, ratio: 2.01, index: 0.9 });
+    a.tone(out, t, { type: 'square', f: 2637 * k, dur: 0.012, vol: 0.06 });
+  }, { minGap: 0.08 });
+  reg('tickDodge', (a, t, out) => {
+    a.noise(out, t, { dur: 0.006, vol: 0.6, type: 'highpass', f: 6000 });
+    a.tone(out, t, { type: 'square', f: 3136, dur: 0.008, vol: 0.08 });
+    a.bell(out, t + 0.01, 4186, { dur: 0.6, vol: 0.09, ratio: 2.01, index: 0.5 });
+    a.noise(out, t + 0.02, { dur: 0.25, vol: 0.12, type: 'highpass', f: 2500, f2: 7000 });
+  }, { minGap: 0.2 });
+  reg('counter', (a, t, out) => {
+    a.noise(out, t, { dur: 0.12, vol: 0.65, type: 'lowpass', f: 7000, f2: 700 });
+    a.tone(out, t, { type: 'sine', f: 180, f2: 38, dur: 0.22, vol: 0.65 });
+    a.bell(out, t, 2637, { dur: 0.7, vol: 0.12, ratio: 2.76, index: 2.2 });
+  }, { minGap: 0.1 });
+  reg('interrupt', (a, t, out) => {
+    a.bell(out, t, 784, { dur: 0.6, vol: 0.16, ratio: 2.76, index: 3.5 });
+    a.noise(out, t, { dur: 0.08, vol: 0.4, type: 'bandpass', f: 2400, q: 1.2 });
+    a.tone(out, t, { type: 'square', f: 420, f2: 160, dur: 0.1, vol: 0.08 });
+  }, { minGap: 0.1 });
+  reg('echoShatter', (a, t, out) => {
+    a.noise(out, t, { dur: 0.22, vol: 0.32, type: 'highpass', f: 5200, f2: 2600 });
+    for (let i = 0; i < 4; i++) a.bell(out, t + i * R(0.02, 0.05), R(2600, 4400), { dur: 0.3, vol: 0.05, ratio: 2.76, index: 1 });
+  }, { minGap: 0.05 });
 
   // ── combat impacts ──
   reg('hit', (a, t, out) => {

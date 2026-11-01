@@ -1,0 +1,7 @@
+[
+ {"t": 0, "eval": "(async()=>{const G=window.__G;const raf=()=>new Promise(r=>requestAnimationFrame(()=>r()));const t0=performance.now();while(!(window.__drill&&window.__drill.ticks>=1)){if(performance.now()-t0>20000)return 'timeout';await raf();}const w=G.scenes.current.world;const t1=w.time;while(w.time-t1<0.05&&performance.now()-t0<25000)await raf();w.stop=1e9;return JSON.stringify(window.__drill);})()"},
+ {"t": 100, "shot": "tick"},
+ {"t": 200, "eval": "(async()=>{const G=window.__G;const raf=()=>new Promise(r=>requestAnimationFrame(()=>r()));const w=G.scenes.current.world;w.stop=0;const t0=performance.now();while(!(window.__drill.counters>=1)){if(performance.now()-t0>20000)return 'timeout';await raf();}w.stop=1e9;return JSON.stringify(window.__drill);})()"},
+ {"t": 300, "shot": "counter"},
+ {"t": 400, "eval": "(async()=>{const G=window.__G;G.scenes.current.world.stop=0;const raf=()=>new Promise(r=>requestAnimationFrame(()=>r()));const t0=performance.now();while(performance.now()-t0<12000)await raf();return JSON.stringify({test:'tickdodge drill',...window.__drill,pass:window.__drill.ticks>=1&&window.__drill.counters>=1&&window.__drill.counters===window.__drill.crits});})()"}
+]

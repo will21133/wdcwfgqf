@@ -85,6 +85,70 @@ export interface Mods {
   landInvuln: number;
   /** Sand cap on top of 100 per hourglass */
   sandMaxBonus: number;
+  // ── Fork / Recall (GDD2 §3.4) ──
+  /** Sand a Fork costs / seconds of tape it replays / cooldown (s) */
+  forkCost: number;
+  forkLen: number;
+  forkCd: number;
+  /** 1 = holding Fork 0.4 s recalls every armed echo (Mainspring IV) */
+  recall: number;
+  /** a recalled echo's line damage (× damage coefficient) */
+  recallDmg: number;
+  // ── Echo 2.0 (GDD2 §3.5) ──
+  /** seconds before an echo is armed (◆) */
+  echoArm: number;
+  /** seconds an echo stands at the end of its path before it shatters */
+  echoStandT: number;
+  /** contact radius for a paradox (px) */
+  echoContactR: number;
+  /** intent correction: replayed attacks turn up to this many degrees toward the nearest enemy */
+  echoIntentDeg: number;
+  /** seconds after its birth nearby enemies go after the echo */
+  echoTauntT: number;
+  /** times an echo replays its path (escapement Loop: 2; later loops deal 50%) */
+  echoLoops: number;
+  /** escapement Sentinel: stand this long at the end (0 = off) and repeat the last attack every echoSentinelRate s */
+  echoSentinelT: number;
+  echoSentinelRate: number;
+  /** escapement Clockwork Heart: echoes are decoys with this much HP (0 = off; P4) */
+  echoDecoyHp: number;
+  /** hits (an Eraser's, a contact) an echo takes before it shatters */
+  echoIntegrity: number;
+  // ── Paradox 2.0 (GDD2 §3.6) ──
+  /** dash-through (pierce) paradox damage (× damage coefficient) */
+  paradoxPierceDmg: number;
+  /** chain: ring n deals ×(1 + paradoxChainMul × n); a blast reaches echoes this far from its centre (px) */
+  paradoxChainMul: number;
+  paradoxChainRange: number;
+  /** a paradox leaves a standing echo at its centre for this many seconds (0 = off; Mainspring VI) */
+  paradoxLeavesEcho: number;
+  /** invulnerability (s) and Sand a paradox gives the hand that set it off */
+  paradoxInvuln: number;
+  paradoxSand: number;
+  // ── Sync, Tick-Dodge, counters (GDD2 §3.7, §4.1) ──
+  /** two different sources within syncWindow s: +syncBonus; three or more: +chordBonus */
+  syncWindow: number;
+  syncBonus: number;
+  chordBonus: number;
+  /** a blow your dash blocks within this long after the dash starts is a Tick-Dodge */
+  tickDodgeWindow: number;
+  /** seconds of 0.3× slow a Tick-Dodge gives (solo: the world; co-op: a bubble) */
+  tickDodgeSlow: number;
+  tickDodgeSand: number;
+  /** a Counter (the hit after a Tick-Dodge) is a crit ×counterMult */
+  counterMult: number;
+  /** a reversed bullet's damage multiplier (P1) */
+  deflectMul: number;
+  /** Break (poise) damage multiplier / heavy attack damage multiplier (P1) */
+  poiseMul: number;
+  heavyMul: number;
+  // ── Tempo (GDD2 §4.3; P1) ──
+  /** points lost each second after 2.5 s idle / lowest rank kept / highest rank reachable */
+  tempoDecay: number;
+  tempoFloor: number;
+  tempoCap: number;
+  /** seconds to wind a stopped teammate up (GDD2 §5.5) */
+  reviveTime: number;
   /** catch-all switches for escapements and new parts (e.g. flags.transposition = 1) */
   flags: Record<string, number>;
 }
@@ -92,13 +156,21 @@ export interface Mods {
 export const BASE_MODS: Mods = {
   maxHp: 50, moveSpeed: 96, dashCharges: 2, dashCd: 0.55, dashDist: 58, dashInvuln: 0.22,
   rewindCharges: 2, sandPerCharge: 100, sandGain: 1, rewindWindow: 3, echoDmg: 0.6, maxEchoes: 3, echoSpeed: 1, echoSand: 0,
-  paradoxDmg: 40, paradoxRadius: 44, paradoxKeepsEcho: 0, rewindInvuln: 0.4, noRewindHeal: 0, mirrorEcho: 0,
+  paradoxDmg: 50, paradoxRadius: 48, paradoxKeepsEcho: 0, rewindInvuln: 0.4, noRewindHeal: 0, mirrorEcho: 0,
   dmg: 1, freshDmg: 0, atkSpeed: 1, critChance: 0.05, critMult: 2, specialDmg: 1, specialCd: 1, knockMul: 1, wallSlam: 0,
   burnMul: 1, burnMax: 10, rustPower: 1, corrodeMul: 1, stasisMul: 1, resonanceMax: 3, resonanceDmg: 1,
   constructDmg: 1, constructDur: 1, constructRate: 1,
   healMul: 1, brassMul: 1, shopMul: 1, extraChoice: 0, armor: 0, autoRewindPerFloor: 0, firstHitShield: 0, revives: 0,
   tapeLen: 3, rewindCostPerSec: 33.4, rewindMinCost: 25, rewindTapThreshold: 0.18, scrubFreeFirst: 0, scrubMax: 1.2,
-  perfectWindow: 0.2, culpritT: 4, culpritBonus: 0.5, landInvuln: 0.5, sandMaxBonus: 0, flags: {},
+  perfectWindow: 0.2, culpritT: 4, culpritBonus: 0.5, landInvuln: 0.5, sandMaxBonus: 0,
+  forkCost: 50, forkLen: 2, forkCd: 1, recall: 0, recallDmg: 24,
+  echoArm: 0.4, echoStandT: 0.6, echoContactR: 16, echoIntentDeg: 30, echoTauntT: 0.6, echoLoops: 1,
+  echoSentinelT: 0, echoSentinelRate: 0.6, echoDecoyHp: 0, echoIntegrity: 3,
+  paradoxPierceDmg: 70, paradoxChainMul: 0.25, paradoxChainRange: 48, paradoxLeavesEcho: 0, paradoxInvuln: 0.5, paradoxSand: 20,
+  syncWindow: 0.25, syncBonus: 0.5, chordBonus: 1,
+  tickDodgeWindow: 0.16, tickDodgeSlow: 0.35, tickDodgeSand: 25, counterMult: 2, deflectMul: 2, poiseMul: 1, heavyMul: 1,
+  tempoDecay: 6, tempoFloor: 0, tempoCap: 5, reviveTime: 1.2,
+  flags: {},
 };
 
 /** Sand per hourglass (GDD2 §3.3: the cap is 100 × hourglasses) */

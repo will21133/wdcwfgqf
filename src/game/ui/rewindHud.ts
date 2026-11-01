@@ -19,8 +19,8 @@
 import type { Renderer } from '../../engine/gfx/renderer';
 import type { Player } from '../entities/player';
 import type { Frame } from '../systems/rewind';
-import { Sprite, drawSprite } from '../../engine/gfx/sprite';
-import { makeCanvas } from '../../engine/gfx/canvas';
+import { drawSprite } from '../../engine/gfx/sprite';
+import { outlineOf } from '../../engine/gfx/outline';
 import { col } from '../../art/palette';
 import { G } from '../G';
 import { Hud, type HudRect } from './hud';
@@ -32,38 +32,12 @@ import { damp, TAU } from '../../engine/math';
 import { tr } from '../i18n';
 import { S, term } from '../strings';
 import { ROMAN, SLOT_COLOR } from '../players';
+import { VIEW_W, VIEW_H } from '../../engine/gfx/post';
 /** Sand per hourglass icon (run.ts SAND_PER_GLASS; not imported to keep this module off run.ts's import graph) */
 const SAND_PER_GLASS = 100;
 import '../strings/f3';
 
-// ───────────────────────── outline sprites ─────────────────────────
-const OUTLINES = new WeakMap<Sprite, Map<string, Sprite>>();
-/**
- * A sprite's silhouette edge (the pixels with a transparent neighbour) in one colour: the hollow
- * Shadow. `dash` keeps 2 of every 3 edge pixels (dashed) or 1 of 2 (dotted).
- */
-function outlineOf(s: Sprite, color: string, dash: 'solid' | 'dash' | 'dot'): Sprite {
-  let m = OUTLINES.get(s);
-  if (!m) OUTLINES.set(s, (m = new Map()));
-  const key = color + dash;
-  let o = m.get(key);
-  if (o) return o;
-  const w = s.w, h = s.h;
-  const src = s.img.getContext('2d')!.getImageData(0, 0, w, h).data;
-  const [cv, ctx] = makeCanvas(w, h);
-  ctx.fillStyle = col(color);
-  const on = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && src[(y * w + x) * 4 + 3] > 0;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    if (!on(x, y)) continue;
-    if (on(x - 1, y) && on(x + 1, y) && on(x, y - 1) && on(x, y + 1)) continue;
-    if (dash === 'dash' && (x + y) % 3 === 2) continue;
-    if (dash === 'dot' && (x + y) % 2 === 1) continue;
-    ctx.fillRect(x, y, 1, 1);
-  }
-  o = new Sprite(cv, s.ox, s.oy);
-  m.set(key, o);
-  return o;
-}
+// outline sprites: engine/gfx/outline.ts (shared with the echoes' rims)
 
 // ───────────────────────── small pixel icons ─────────────────────────
 /** 5×6 padlock (violet = locked HP) */
@@ -114,6 +88,57 @@ function seenThisRoom(world: object, id: string) {
 /** first sight: plain-language lines show for this long at the start of each room (while Terms says so) */
 const TERM_SECONDS = 12;
 const termOn = (p: Player, id: string) => p.world.time < TERM_SECONDS && Terms.showPlain(id);
+
+// ───────────────────────── term callouts (GDD2 §9.8) ─────────────────────────
+/**
+ * World term callouts ("旧影 – 3 秒前的你 · 回溯会回到这里" under the Shadow, "就绪 ◆ – …" under an
+ * echo, "悖论 – …" by a paradox preview …) are requested during the world render and placed together
+ * when the UI layer is flushed: highest priority first, each moved below or above a callout it would
+ * cover, dropped if it still collides. One callout per term per frame; each counts as seen once a room.
+ */
+interface CalloutReq { w: object; id: string; x: number; y: number; prio: number; color: string; above: boolean; supersedes?: string[] }
+const callouts: CalloutReq[] = [];
+const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+let calloutFrame = -1;
+export function termCallout(r: Renderer, w: object, id: string, x: number, y: number, o: { prio?: number; color?: string; above?: boolean; supersedes?: string[] } = {}): void {
+  if (!Terms.showPlain(id)) return;
+  if (calloutFrame !== G.frame) { calloutFrame = G.frame; callouts.length = 0; r.worldUi(drawCallouts); }
+  if (callouts.some((c) => c.id === id)) return;
+  callouts.push({ w, id, x, y, prio: o.prio ?? 0, color: o.color ?? 'C3', above: !!o.above, supersedes: o.supersedes });
+}
+function drawCallouts(ctx: CanvasRenderingContext2D, toUi: (x: number, y: number) => { x: number; y: number }) {
+  callouts.sort((a, b) => b.prio - a.prio);
+  placed.length = 0;
+  const lh = Text.lineH('small');
+  // a callout that says the same thing as a higher one (the paradox preview's line covers "armed") is dropped
+  const gone = new Set<string>();
+  for (const c of callouts) if (c.supersedes) for (const id of c.supersedes) gone.add(id);
+  for (const c of callouts) {
+    if (gone.has(c.id)) continue;
+    const t = term(c.id);
+    if (!t) continue;
+    const q = toUi(c.x, c.y);
+    const tw = Math.ceil(Math.max(Text.measure(t.name, 'small').w, Text.measure(t.plain, 'small').w));
+    const bw = tw + 6, bh = Math.ceil(lh * 2) + 2;
+    // kept on screen (4 px in from the edges, below the top pods)
+    const cxq = Math.max(bw / 2 + 4, Math.min(VIEW_W - bw / 2 - 4, q.x));
+    const x0 = Math.round(cxq - tw / 2) - 3;
+    const clampY = (ty: number) => Math.max(48, Math.min(VIEW_H - bh - 4, ty));
+    const y0 = clampY(c.above ? Math.round(q.y) - bh : Math.round(q.y));
+    let y = NaN;
+    for (const ty of [y0, clampY(y0 + bh + 2), clampY(y0 - bh - 2)]) {
+      if (!placed.some((b) => x0 < b.x1 && x0 + bw > b.x0 && ty < b.y1 && ty + bh > b.y0)) { y = ty; break; }
+    }
+    if (Number.isNaN(y)) continue;
+    placed.push({ x0, y0: y, x1: x0 + bw, y1: y + bh });
+    seenThisRoom(c.w, c.id);
+    const a = ctx.globalAlpha;
+    ctx.globalAlpha = a * 0.8;
+    rect(ctx, x0, y, bw, bh, 'K0');
+    ctx.globalAlpha = a;
+    drawTermLabel(ctx, c.id, Math.round(cxq), y + 1, { size: 'small', color: c.color, align: 'center', layout: 'below', forcePlain: true });
+  }
+}
 
 export function renderShadow(r: Renderer, p: Player) {
   const w = p.world;
@@ -215,27 +240,10 @@ export function renderShadow(r: Renderer, p: Player) {
 }
 
 /** the first few rooms: "旧影 – 3 秒前的你 · 回溯会回到这里" under the Shadow (one hand's at a time) */
-let shadowTermFrame = -1;
 function shadowTerm(r: Renderer, p: Player, f: Frame, scrub: boolean) {
   if (scrub || p.state !== 'alive' || !termOn(p, 'shadow')) return;
   if (Math.hypot(f.x - p.x, f.y - p.y) < 20) return;
-  if (shadowTermFrame === G.frame) return;
-  shadowTermFrame = G.frame;
-  seenThisRoom(p.world, 'shadow');
-  const x = f.x, y = f.y + 5;
-  r.worldUi((ctx, toUi) => {
-    const q = toUi(x, y);
-    const t = term('shadow');
-    if (!t) return;
-    // an 85% plate behind both lines so they read over any floor
-    const lh = Text.lineH('small');
-    const tw = Math.ceil(Math.max(Text.measure(t.name, 'small').w, Text.measure(t.plain, 'small').w));
-    const a = ctx.globalAlpha;
-    ctx.globalAlpha = a * 0.8;
-    rect(ctx, Math.round(q.x - tw / 2) - 3, Math.round(q.y), tw + 6, Math.ceil(lh * 2) + 2, 'K0');
-    ctx.globalAlpha = a;
-    drawTermLabel(ctx, 'shadow', Math.round(q.x), Math.round(q.y) + 1, { size: 'small', color: 'C3', align: 'center', layout: 'below', forcePlain: true });
-  });
+  termCallout(r, p.world, 'shadow', f.x, f.y + 5, { prio: 1 });
 }
 
 /** an action bead on the future echo's path: a blade for attacks, » for dashes, a star for specials */
@@ -270,23 +278,12 @@ export function renderRewindMarks(r: Renderer, p: Player) {
     // the word follows the mark once the landing's '+N' has faded (they would sit on each other)
     const age = p.mods.culpritT - t;
     if (age > 0.6 && (termOn(p, 'culprit') || age < 3)) {
-      seenThisRoom(w, 'culprit');
       const lx = x, ly = y - 18;
-      const plain = Terms.showPlain('culprit');
-      r.worldUi((ctx, toUi) => {
-        const q = toUi(lx, ly);
-        if (!plain) { Text.draw(ctx, S('f3', 'culprit'), q.x, q.y, { size: 'small', color: 'R4', align: 'center', outline: 'K0' }); return; }
-        const t = term('culprit');
-        if (!t) return;
-        const lh = Text.lineH('small');
-        const y0 = Math.round(q.y) - Math.ceil(lh);
-        const tw = Math.ceil(Math.max(Text.measure(t.name, 'small').w, Text.measure(t.plain, 'small').w));
-        const a = ctx.globalAlpha;
-        ctx.globalAlpha = a * 0.8;
-        rect(ctx, Math.round(q.x - tw / 2) - 3, y0, tw + 6, Math.ceil(lh * 2) + 2, 'K0');
-        ctx.globalAlpha = a;
-        drawTermLabel(ctx, 'culprit', Math.round(q.x), y0 + 1, { size: 'small', color: 'R4', align: 'center', forcePlain: true });
-      });
+      if (Terms.showPlain('culprit')) termCallout(r, w, 'culprit', lx, ly + 4, { prio: 3, color: 'R4', above: true });
+      else {
+        seenThisRoom(w, 'culprit');
+        r.worldUi((ctx, toUi) => { const q = toUi(lx, ly); Text.draw(ctx, S('f3', 'culprit'), q.x, q.y, { size: 'small', color: 'R4', align: 'center', outline: 'K0' }); });
+      }
     }
   }
   // landing: a ring of twelve clock ticks closing in over the invulnerability, and '+N'
@@ -638,7 +635,12 @@ function termPlate(ctx: CanvasRenderingContext2D, id: string, x: number, y: numb
 /** the top-centre "CHAIN ×N" slot (F3b's paradox chains call show) */
 export const HudChain = {
   n: 0, t: 0, color: 'C3' as string,
-  show(n: number, color = 'C3') { this.n = n; this.t = 1.6; this.color = color; },
+  /** first chains: "连锁 – 爆炸引爆其他残响" under the counter (GDD2 §9.8) */
+  plain: false,
+  show(n: number, color = 'C3') {
+    if (this.t <= 0 || n < this.n) { this.plain = Terms.showPlain('chain'); if (this.plain && n >= 2) Terms.seen('chain'); }
+    this.n = n; this.t = 1.6; this.color = color;
+  },
 };
 Hud.register({
   id: 'chain', area: 'top', order: 20,
@@ -651,6 +653,8 @@ Hud.register({
     const a0 = ctx.globalAlpha;
     ctx.globalAlpha = a0 * Math.max(0, Math.min(1, a));
     Text.draw(ctx, text, r.x + r.w / 2, r.y + 10, { size: 'title', align: 'center', color: HudChain.color, outline: 'K0', valign: 'middle' });
+    const t = HudChain.plain ? term('chain') : null;
+    if (t) Text.draw(ctx, t.plain, r.x + r.w / 2, r.y + 10 + Math.ceil(Text.lineH('title') / 2) + 2, { size: 'small', align: 'center', color: 'K9', plate: true });
     ctx.globalAlpha = a0;
   },
 });

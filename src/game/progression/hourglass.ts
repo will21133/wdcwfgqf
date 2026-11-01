@@ -20,7 +20,8 @@ export const HOURGLASS: HourglassDef[] = [
   { id: 'hg_paradox', name: L('悖论增幅', 'Paradox Amplifier'), desc: L('{c:悖论}伤害 +{g:60%}，范围 +{g:20%}。', '{c:Paradox} damage +{g:60%}, radius +{g:20%}.'), max: 2, mods: (m) => { m.paradoxDmg *= 1.6; m.paradoxRadius *= 1.2; } },
   { id: 'hg_multi', name: L('重叠的过去', 'Overlapping Pasts'), desc: L('同时存在的{c:残响}上限 +{g:1}。', 'Max simultaneous {c:Echoes} +{g:1}.'), max: 2, mods: (m) => { m.maxEchoes += 1; } },
   { id: 'hg_slow', name: L('慢放', 'Slow Replay'), desc: L('{c:残响}以 {g:0.8} 倍速重演（存在更久），伤害 +{g:10%}。', '{c:Echoes} replay at {g:0.8}x speed (lasting longer) and deal +{g:10%}.'), max: 1, mods: (m) => { m.echoSpeed *= 0.8; m.echoDmg += 0.1; } },
-  { id: 'hg_stable', name: L('稳定悖论', 'Stable Paradox'), desc: L('触发{c:悖论}不再让{c:残响}消散。', 'Triggering a {c:Paradox} no longer shatters the {c:Echo}.'), max: 1, mods: (m) => { m.paradoxKeepsEcho = 1; } },
+  // 2.0 fix (GDD2 §3.6): the kept echo can go off again only after 1 s (1.0 fired every 0.1 s)
+  { id: 'hg_stable', name: L('稳定悖论', 'Stable Paradox'), desc: L('触发{c:悖论}不再让{c:残响}消散（同一个{c:残响}每秒最多引发一次）。', 'Triggering a {c:Paradox} no longer shatters the {c:Echo} (each {c:Echo} can go off once a second).'), max: 1, mods: (m) => { m.paradoxKeepsEcho = 1; } },
   { id: 'hg_ward', name: L('回溯庇护', 'Rewind Ward'), desc: L('回溯后的无敌时间延长至 {g:1.2} 秒。', 'Invulnerability after rewinding extended to {g:1.2}s.'), max: 1, mods: (m) => { m.rewindInvuln = Math.max(m.rewindInvuln, 1.2); } },
   { id: 'hg_siphon', name: L('时砂虹吸', 'Sand Siphon'), desc: L('{c:残响}造成的伤害获得完整的{c:时砂}，{c:时砂}获取 +{g:15%}。', '{c:Echo} damage grants full {c:Sand}; {c:Sand} gain +{g:15%}.'), max: 1, mods: (m) => { m.echoSand = 1; m.sandGain *= 1.15; } },
   // hg_lastsecond is gone (GDD2 §3.10 / §6.6): the Last Second is now everyone's base rule

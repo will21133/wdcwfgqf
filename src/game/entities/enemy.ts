@@ -10,6 +10,27 @@ import type { DamageInfo } from '../systems/combat';
 import { col } from '../../art/palette';
 import { coopScale } from '../world/coopScale';
 import { ownerPlayer, slotColor } from '../players';
+import type { Player } from './player';
+
+/** what a windup draws on the ground (Enemy.windup's `tele`; GDD2 §4.7 colours) */
+export type TeleSpec =
+  | { kind: 'line'; ang: number; len: number; width: number; x?: number; y?: number; color?: string }
+  | { kind: 'circle'; r: number; x?: number; y?: number; color?: string }
+  | { kind: 'cone'; ang: number; len: number; half: number; x?: number; y?: number; color?: string };
+export interface WindupOpts {
+  /** a heavy hit in the last 0.18 s cancels it (default true; armored windups never) */
+  interruptible?: boolean;
+  /** gold-outlined super armour: only a Break cancels it (GDD2 §4.1) */
+  armored?: boolean;
+  tele?: TeleSpec;
+}
+export type StaggerWhy = 'hit' | 'interrupt' | 'break' | 'wall';
+/** the last stretch of a windup flashes white; a heavy hit inside it interrupts (GDD2 §4.1, §4.7) */
+export const INTERRUPT_WINDOW = 0.18;
+/** Break (GDD2 §4.4): stagger, cap growth after a Break, idle time before the bar drains, drain rate */
+export const BREAK_T = 2.5, BREAK_T_BOSS = 3, BREAK_GROWTH = 1.25, POISE_IDLE = 2, POISE_DRAIN = 8;
+
+const RIM: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
 export abstract class Enemy extends Actor {
   state = 'idle';
@@ -32,6 +53,20 @@ export abstract class Enemy extends Actor {
   /** elite glow colour */
   auraColor = 'O1';
   tier = 1;
+  /** the windup under way (Enemy.windup): its state, length and armour; null otherwise */
+  wind: { state: string; dur: number; interruptible: boolean; armored: boolean; tele?: TeleSpec } | null = null;
+  /** true during the last 0.18 s of an interruptible windup (the enemy flashes white) */
+  interruptWindow = false;
+  /**
+   * Break bar (GDD2 §4.4, PLAN2 §1.9): points so far / cap (0 = this enemy has no bar) / seconds of
+   * Break left (stunned, takes +50%). P1 sets poiseMax on elites, bosses and heavies.
+   */
+  poise = 0;
+  poiseMax = 0;
+  breakT = 0;
+  private poiseIdle = 0;
+  /** P2 fills: elite affixes */
+  affixes: string[] = [];
 
   constructor(x: number, y: number, hp: number) {
     super();
@@ -69,7 +104,63 @@ export abstract class Enemy extends Actor {
   distT() { const t = this.target; return t ? Math.hypot(t.x - this.x, t.y - this.y) : 9999; }
   angT() { const t = this.target; return t ? angleTo(this.x, this.y, t.x, t.y) : 0; }
 
-  setState(s: string) { this.state = s; this.stateT = 0; this.attacking = false; }
+  setState(s: string) {
+    this.state = s; this.stateT = 0; this.attacking = false;
+    if (this.wind && this.wind.state !== s) { this.wind = null; this.interruptWindow = false; }
+  }
+
+  /**
+   * Enter an attack's windup (PLAN2 §1.9, GDD2 §4.1): `state` for `dur` seconds. The last 0.18 s
+   * flash white and set interruptWindow (a heavy hit then interrupts it), unless it is armored
+   * (gold outline: only a Break stops it). `tele` is drawn on the ground while it lasts. The
+   * enemy's own think() still moves on when stateT passes dur.
+   */
+  windup(state: string, dur: number, o: WindupOpts = {}): void {
+    this.setState(state);
+    const armored = !!o.armored;
+    this.wind = { state, dur, interruptible: o.interruptible !== false && !armored, armored, tele: o.tele };
+    this.interruptWindow = false;
+  }
+  /** 0 → 1 over the current windup (0 when none) */
+  get windupK(): number { return this.wind ? clamp(this.stateT / Math.max(0.01, this.wind.dur), 0, 1) : 0; }
+
+  /**
+   * Stagger for `t` seconds (PLAN2 §1.9). The state timer pauses while staggered (1.0 kept counting
+   * it, so a windup finished during a stagger). An interrupt cancels an interruptible windup; a
+   * Break cancels any windup, armored or not (cancelAttack()).
+   */
+  stagger(t: number, why: StaggerWhy): void {
+    if (t <= 0 || this.dead) return;
+    this.hitstun = Math.max(this.hitstun, t);
+    this.attacking = false;
+    const w = this.wind;
+    if (w && (why === 'break' || (why === 'interrupt' && w.interruptible))) { this.wind = null; this.interruptWindow = false; this.cancelAttack(why); }
+    if (why === 'break') this.breakT = Math.max(this.breakT, t);
+    if (why !== 'hit') this.squash = Math.max(this.squash, 0.5);
+  }
+  /** an interrupt or Break cancelled the attack being wound up; default: back to 'idle' */
+  cancelAttack(_why: StaggerWhy) { this.setState('idle'); }
+
+  /**
+   * Break damage (GDD2 §4.4; P1 tunes the sources). Filling the bar Breaks the enemy: a 2.5 s
+   * stagger (bosses 3 s) that cancels its attack, +50% damage taken, and the cap grows 25%.
+   */
+  addPoise(n: number, by?: Player | null): void {
+    if (this.poiseMax <= 0 || this.breakT > 0 || !(n > 0) || this.dead) return;
+    this.poise += n;
+    this.poiseIdle = 0;
+    if (this.poise < this.poiseMax) return;
+    const w = this.world;
+    this.poise = 0;
+    this.stagger(this.isBoss ? BREAK_T_BOSS : BREAK_T, 'break');
+    this.poiseMax = Math.round(this.poiseMax * BREAK_GROWTH);
+    w.fx.ring(this.x, this.y - this.height / 2, 4, 40, 0.45, 'B5', 3);
+    w.fx.burst(this.x, this.y - this.height / 2, 24, ['W', 'B6', 'B4', 'K6'], 200, 0.6);
+    w.hitstop(0.14);
+    w.shake(0.4);
+    sfx('stasisBreak', { pan: w.pan(this.x) });
+    w.bus.emit('poiseBreak', { player: by ?? undefined, target: this });
+  }
 
   update(dt: number) {
     if (this.spawnT > 0) {
@@ -79,9 +170,15 @@ export abstract class Enemy extends Actor {
       return;
     }
     if (this.squash > 0) this.squash = Math.max(0, this.squash - dt * 3);
-    this.stateT += dt;
     this.vx = this.vy = 0;
-    if (this.st.stun > 0 || this.hitstun > 0) { this.attacking = false; this.onStagger(dt); return; }
+    if (this.breakT > 0) this.breakT = Math.max(0, this.breakT - dt);
+    if (this.poise > 0) { this.poiseIdle += dt; if (this.poiseIdle > POISE_IDLE) this.poise = Math.max(0, this.poise - POISE_DRAIN * dt); }
+    // staggered: the state timer holds still (GDD2 §4.4 fix — a windup no longer runs out under a stagger)
+    if (this.st.stun > 0 || this.hitstun > 0) { this.attacking = false; this.interruptWindow = false; this.onStagger(dt); return; }
+    this.stateT += dt;
+    const wd = this.wind;
+    if (wd && this.state !== wd.state) this.wind = null;
+    this.interruptWindow = !!this.wind && this.wind.interruptible && this.stateT >= this.wind.dur - INTERRUPT_WINDOW && this.stateT < this.wind.dur;
     // nobody left standing (every hand stopped, a ghost, or the solo Last Second): hold still
     if (!this.target) { this.attacking = false; return; }
     this.think(dt);
@@ -146,7 +243,9 @@ export abstract class Enemy extends Actor {
   drawBody(r: Renderer, s: Sprite, o: DrawOpts = {}) {
     const k = this.squash;
     const sx = 1 + k * 0.25, sy = 1 - k * 0.2;
-    const tint = this.flash > 0 ? '#ffffff' : this.st.stasis > 0 ? undefined : o.tint;
+    // the interrupt window blinks white (GDD2 §4.7: "the last 0.18 s of a windup flashes white")
+    const iw = this.interruptWindow && Math.floor(this.world.time * 30) % 2 === 0;
+    const tint = this.flash > 0 || iw ? '#ffffff' : this.st.stasis > 0 ? undefined : o.tint;
     let spr = s;
     if (this.st.stasis > 0) spr = s.recolor(['V0', 'V1', 'V2', 'V3', 'V4']);
     const opts: DrawOpts = { flip: this.flip, ...o, tint };
@@ -161,6 +260,8 @@ export abstract class Enemy extends Actor {
       const f = this.falling / 0.55;
       opts.sx = f; opts.sy = f; opts.alpha = f;
     }
+    // an armored windup (super armour) wears a gold rim (GDD2 §4.7)
+    if (this.wind?.armored && this.spawnT <= 0) for (const [ox, oy] of RIM) drawSprite(r.w, spr, this.x + ox, this.y + oy, { ...opts, tint: 'B5' });
     drawSprite(r.w, spr, this.x, this.y + (this.falling > 0 ? (1 - this.falling / 0.55) * 8 : 0), opts);
     if (this.isElite) {
       r.g.globalCompositeOperation = 'lighter';
@@ -178,6 +279,13 @@ export abstract class Enemy extends Actor {
     ctx.ellipse(Math.round(this.x), Math.round(this.y), this.r * 1.3 * s, this.r * 0.55 * s, 0, 0, TAU);
     ctx.fill();
     if (this.spawnT > 0) this.renderSpawn(r);
+    const tl = this.wind?.tele;
+    if (tl) {
+      const k = this.windupK, x = tl.x ?? this.x, y = tl.y ?? this.y - 2;
+      if (tl.kind === 'line') this.teleLine(r, x, y, tl.ang, tl.len, tl.width, k, tl.color);
+      else if (tl.kind === 'circle') this.teleCircle(r, x, y, tl.r, k, tl.color);
+      else this.teleCone(r, x, y, tl.ang, tl.len, tl.half, k, tl.color);
+    }
     this.renderTelegraph(r);
   }
 
@@ -273,12 +381,18 @@ export abstract class Enemy extends Actor {
     this.teleTip(r, x + Math.cos(ang) * len, y + Math.sin(ang) * len);
   }
 
-  /** small HP pip bar shown after being damaged */
+  /** small HP pip bar shown after being damaged (and the brass Break bar under it once it has any) */
   renderUnlit(r: Renderer) {
     if (this.hp >= this.maxHp || this.dead || this.isBoss || this.spawnT > 0) return;
     const w = Math.max(10, Math.round(this.r * 2.5));
     const x = Math.round(this.x - w / 2), y = Math.round(this.y - this.height - 6);
     const ctx = r.u;
+    if (this.poiseMax > 0 && (this.poise > 0 || this.breakT > 0)) {
+      ctx.fillStyle = col('K0');
+      ctx.fillRect(x - 1, y + 4, w + 2, 3);
+      ctx.fillStyle = col(this.breakT > 0 ? 'B6' : 'B4');
+      ctx.fillRect(x, y + 5, this.breakT > 0 ? w : Math.max(1, Math.round((w * this.poise) / this.poiseMax)), 1);
+    }
     ctx.fillStyle = col('K0');
     ctx.fillRect(x - 1, y - 1, w + 2, 4);
     ctx.fillStyle = col('K3');

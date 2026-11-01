@@ -31,6 +31,15 @@ function tickCulprits(a: Actor, dt: number) {
     else a.culpritOf.set(slot, t - dt);
   }
 }
+/** status marks wear off (PLAN2 §1.9: Actor.marks) */
+function tickMarks(a: Actor, dt: number) {
+  for (const [id, m] of a.marks) {
+    m.t -= dt;
+    if (m.t <= 0) a.marks.delete(id);
+  }
+}
+/** a taunting echo draws enemies this close (GDD2 §3.5: 60 px) */
+export const TAUNT_R = 60;
 
 /** aggro lock-in (s): an enemy keeps its target at least this long so it doesn't jitter */
 export const AGGRO_LOCK = 1.5;
@@ -130,7 +139,7 @@ export class World {
       if (d < bd) { bd = d; best = p; }
     }
     if (o.taunts) for (const p of this.players) for (const e of p.echoes) {
-      if (e.dead || !((e as unknown as { taunt?: number }).taunt! > 0)) continue;
+      if (e.dead || !(e.taunt > 0)) continue;
       const d = Math.hypot(e.x - x, e.y - y);
       if (d < bd) { bd = d; best = e as unknown as Actor; }
     }
@@ -201,16 +210,27 @@ export class World {
       const d = Math.max(0.5, Math.hypot(p.x - e.x, p.y - e.y) / TS);
       consider(p, 1 / d + (sum > 0 ? 0.5 * (by[p.slot % 4] / sum) : 0), p.slot);
     }
+    // a fresh echo taunts (GDD2 §3.5): ordinary enemies within 60 px go for it while it lasts
+    let tauntUntil = Infinity;
     for (const p of this.players) for (const ec of p.echoes) {
-      if (ec.dead || !((ec as unknown as { taunt?: number }).taunt! > 0)) continue;
-      const d = Math.max(0.5, Math.hypot(ec.x - e.x, ec.y - e.y) / TS);
-      consider(ec as unknown as Actor, 1 / d, p.slot);
+      if (ec.dead || !(ec.taunt > 0) || e.isBoss || e.isElite) continue;
+      const dd = Math.hypot(ec.x - e.x, ec.y - e.y);
+      if (dd > (ec.tauntR ?? TAUNT_R)) continue;
+      const d = Math.max(0.5, dd / TS);
+      const s0 = bs;
+      consider(ec as unknown as Actor, 1 / d + 2, p.slot);
+      if (bs > s0) tauntUntil = this.time + ec.taunt;
     }
-    this.aggro.set(e.id, { target: best, slot, until: this.time + AGGRO_LOCK });
+    this.aggro.set(e.id, { target: best, slot, until: Math.min(this.time + AGGRO_LOCK, tauntUntil) });
     return best;
   }
+  /** the target an enemy locked onto last (read-only: render code uses it; never recomputes) */
+  lockedTarget(e: Actor): Actor | null {
+    const a = this.aggro.get(e.id);
+    return a && a.target && this.time < a.until ? a.target : null;
+  }
   private anyTaunt(): boolean {
-    for (const p of this.players) for (const ec of p.echoes) if (!ec.dead && ((ec as unknown as { taunt?: number }).taunt ?? 0) > 0) return true;
+    for (const p of this.players) for (const ec of p.echoes) if (!ec.dead && ec.taunt > 0) return true;
     return false;
   }
   /** slot of the hand an enemy is after (telegraph tip dots); -1 when none */
@@ -224,6 +244,9 @@ export class World {
     if (t.dead) return false;
     const p = t as unknown as Player;
     if (typeof p.state === 'string') return p.state === 'alive';
+    // an echo is a target only while it taunts
+    const ec = t as unknown as { isEcho?: boolean; taunt?: number };
+    if (ec.isEcho) return (ec.taunt ?? 0) > 0;
     return true;
   }
 
@@ -390,6 +413,7 @@ export class World {
       e.age += edt;
       if (e instanceof Actor) {
         if (e.culpritOf.size) tickCulprits(e, edt);
+        if (e.marks.size) tickMarks(e, edt);
         if (this.combat.tickStatus(e, edt) && !e.dead) { this.physics(e, edt, true); continue; }
       }
       e.update(edt);
@@ -435,7 +459,7 @@ export class World {
         // the hand that sent it flying owns the slam (and its Anvil bonus)
         const by = ownerPlayer(a.lastHit?.owner) ?? this.player;
         const slam = by && this.run ? this.run.lo(by.slot).mods.wallSlam : 0;
-        if (slam > 0) a.hurt({ amount: slam, kind: 'contact', owner: by, src: 'wallslam', quiet: true });
+        if (slam > 0) a.hurt({ amount: slam, kind: 'contact', owner: by, via: 'wallslam', quiet: true });
         a.kx = a.ky = 0;
       }
       a.kx *= k; a.ky *= k;

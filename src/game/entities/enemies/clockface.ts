@@ -83,7 +83,7 @@ export class MinuteKnight extends Enemy {
   combo = 0; atkA = 0; swingDir = 1; bladeA = 1.1; guardDur = 1.2; glint = 0; strafe = frand() < 0.5 ? 1 : -1;
   constructor(x: number, y: number) {
     super(x, y, 120);
-    this.r = 6; this.height = 26; this.speed = 40; this.poise = 20; this.mass = 1.6;
+    this.r = 6; this.height = 26; this.speed = 40; this.flinch = 20; this.mass = 1.6;
     this.kind = 'minuteknight'; this.codexId = 'minuteknight';
     this.debris = ['U2', 'U3', 'B3', 'K8', 'U1'];
     this.brass = [3, 5];
@@ -230,7 +230,7 @@ export class HourLancer extends Enemy {
   private trailT = 0;
   constructor(x: number, y: number) {
     super(x, y, 110);
-    this.r = 8; this.height = 30; this.speed = 22; this.mass = 3; this.poise = 30;
+    this.r = 8; this.height = 30; this.speed = 22; this.mass = 3; this.flinch = 30;
     this.kind = 'hourlancer'; this.codexId = 'hourlancer';
     this.debris = ['B3', 'B4', 'B2', 'U2', 'K9'];
     this.brass = [3, 6];
@@ -323,9 +323,9 @@ export class HourLancer extends Enemy {
         break;
       }
       case 'stunned':
-        this.poise = 0;
+        this.flinch = 0;
         this.lanceA = lerpA(this.lanceA, this.flip ? Math.PI - 1.4 : 1.4, dt * 6);
-        if (this.stateT > 1.6) { this.poise = 30; this.setState('recover'); }
+        if (this.stateT > 1.6) { this.flinch = 30; this.setState('recover'); }
         break;
       case 'shoveWind':
         this.lanceA = lerpA(this.lanceA, this.chargeA - (this.flip ? -0.9 : 0.9), dt * 10);
@@ -578,7 +578,7 @@ export class EchoPhantom extends Enemy {
   private victim: Player | null = null;
   constructor(x: number, y: number) {
     super(x, y, 90);
-    this.r = 4.5; this.height = 20; this.speed = 165; this.poise = 12; this.mass = 0.9;
+    this.r = 4.5; this.height = 20; this.speed = 165; this.flinch = 12; this.mass = 0.9;
     this.canFall = false;
     this.collides = false;
     this.solid = false;
@@ -811,7 +811,7 @@ export class PendulumExecutioner extends Enemy {
   private trail: { x: number; y: number; z: number; t: number }[] = [];
   constructor(x: number, y: number) {
     super(x, y, 480);
-    this.r = 11; this.height = 44; this.speed = 19; this.mass = 6; this.poise = 50;
+    this.r = 11; this.height = 44; this.speed = 19; this.mass = 6; this.flinch = 50;
     this.kind = 'pendulum'; this.codexId = 'pendulum';
     this.isElite = true;
     this.debris = ['K3', 'K2', 'B3', 'B4', 'K9', 'U2'];

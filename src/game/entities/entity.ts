@@ -59,8 +59,8 @@ export abstract class Actor extends Entity {
   /** knockback velocity (decays) */
   kx = 0; ky = 0;
   mass = 1;
-  /** hits >= poise interrupt the actor */
-  poise = 0;
+  /** hits dealing at least this much make the actor flinch (1.0's `poise`; the Break bar is Enemy.poise) */
+  flinch = 0;
   hitstun = 0;
   st: StatusState = newStatus();
   /** shown on death / codex */
@@ -81,6 +81,14 @@ export abstract class Actor extends Entity {
    * whoever dealt it; that hand's echoes deal +50% to it. World.update counts them down.
    */
   culpritOf = new Map<number, number>();
+  /**
+   * Status marks (PLAN2 §1.9): new statuses (Twin Hands' notch, ribbons …) live here instead of in
+   * StatusState. id → seconds left, stacks, source (DamageInfo.src of whoever applied it).
+   * World.update counts `t` down and drops a mark at 0.
+   */
+  marks = new Map<string, { t: number; stacks: number; src: number }>();
+  /** recent hits by source (combat.applyDamage keeps the last ~1 s; Sync reads it) */
+  lastHits: { src: number; t: number }[] = [];
   /** set by world while frozen by time-stop/stasis */
   get frozen() { return this.st.stasis > 0; }
 

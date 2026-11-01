@@ -20,6 +20,8 @@ export interface BulletOpts {
   pal?: string[];
   accel?: number; turn?: number; homing?: number; pierce?: number; bounce?: number; echo?: boolean;
   knock?: number; info?: Partial<DamageInfo>;
+  /** white-core bullet a hit can send back (GDD2 §4.1 Reverse; default: small enemy shots, never violet or big) */
+  reversible?: boolean;
 }
 
 export class Bullet extends Entity {
@@ -27,6 +29,11 @@ export class Bullet extends Entity {
   pal: string[]; accel: number; turn: number; homing: number; pierce: number; bounce: number; echo: boolean;
   knock: number; info: Partial<DamageInfo>;
   ang: number; speed: number;
+  /**
+   * white core: an attack that touches it can reverse it (PLAN2 §1.9; P1 does the flip). Small
+   * enemy shots are reversible; big magenta orbs and violet (fixed) shots never are.
+   */
+  reversible: boolean;
   hit = new Set<number>();
   /** height above ground (visual) */
   h = 8;
@@ -47,6 +54,7 @@ export class Bullet extends Entity {
     this.pierce = o.pierce ?? 0; this.bounce = o.bounce ?? 0; this.echo = !!o.echo;
     this.knock = o.knock ?? 40;
     this.info = o.info ?? {};
+    this.reversible = o.reversible ?? (this.team === 'enemy' && !this.fixed && this.style !== 'big');
     this.collides = false;
   }
 

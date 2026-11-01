@@ -236,7 +236,7 @@ export class InkHound extends Enemy {
   dashA = 0; dashDist = 0; puddleAcc = 0; hitDone = false; strafe = frand() < 0.5 ? 1 : -1; growled = false;
   constructor(x: number, y: number) {
     super(x, y, 60);
-    this.r = 7; this.height = 14; this.speed = 50; this.mass = 2; this.poise = 22;
+    this.r = 7; this.height = 14; this.speed = 50; this.mass = 2; this.flinch = 22;
     this.kind = 'inkhound'; this.codexId = 'inkhound';
     this.debris = ['K1', 'K2', 'U1', 'K3'];
     this.brass = [2, 4];
@@ -346,7 +346,7 @@ export class SandWraith extends Enemy {
   destX = 0; destY = 0;
   constructor(x: number, y: number) {
     super(x, y, 50);
-    this.r = 6; this.height = 26; this.speed = 30; this.poise = 14;
+    this.r = 6; this.height = 26; this.speed = 30; this.flinch = 14;
     this.kind = 'sandwraith'; this.codexId = 'sandwraith';
     this.canFall = false;
     this.debris = ['S1', 'S2', 'S3', 'S0'];
@@ -508,7 +508,7 @@ export class TomeMimic extends Enemy {
   hopA = 0; hops = 0; spitCd = 1.2; awake = false; atkA = 0; jz = 0;
   constructor(x: number, y: number) {
     super(x, y, 65);
-    this.r = 7; this.height = 14; this.speed = 0; this.mass = 2; this.poise = 20;
+    this.r = 7; this.height = 14; this.speed = 0; this.mass = 2; this.flinch = 20;
     this.kind = 'tomemimic'; this.codexId = 'tomemimic';
     this.debris = ['U1', 'U2', 'K9', 'B4', 'K10'];
     this.brass = [2, 4];
@@ -722,7 +722,7 @@ export class HourglassGolem extends Enemy {
   static CYCLE = 2.5;
   constructor(x: number, y: number) {
     super(x, y, 420);
-    this.r = 12; this.height = 42; this.speed = 21; this.mass = 6; this.poise = 60;
+    this.r = 12; this.height = 42; this.speed = 21; this.mass = 6; this.flinch = 60;
     this.kind = 'hourglassgolem'; this.codexId = 'hourglassgolem';
     this.auraColor = 'V2';
     this.isElite = true;

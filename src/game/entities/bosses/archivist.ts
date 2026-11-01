@@ -160,7 +160,10 @@ export class Archivist extends Boss {
   }
 
   onHurt(info: DamageInfo, dealt: number) {
-    const revisable = !info.echo && info.kind !== 'paradox' && info.src !== 'resonance';
+    // revisable = a hand's own blow; the past (any hand's echo: odd DamageInfo.src, a paradox,
+    // a resonance ring) cannot be revised (PLAN2 §1.9 src = slot × 2 + echo)
+    const fromPast = !!info.echo || (info.src !== undefined && info.src >= 0 && info.src % 2 === 1);
+    const revisable = !fromPast && info.kind !== 'paradox' && info.via !== 'resonance';
     if (revisable) this.ledger.push([this.world.time, dealt]);
     if (this.state === 'revise' && !revisable) {
       // interrupted by the past!

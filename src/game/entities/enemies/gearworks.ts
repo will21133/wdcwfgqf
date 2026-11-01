@@ -28,7 +28,8 @@ export class Cogling extends Enemy {
       case 'approach':
         this.spin += dt * 6;
         this.moveTo(this.target!.x, this.target!.y, this.speed, dt);
-        if (d < 100 && this.stateT > 0.6 && this.world.map.los(this.x, this.y, this.target!.x, this.target!.y)) this.setState('windup');
+        // F3 windup() demo (PLAN2 §1.9): the last 0.18 s flash white — a heavy hit then interrupts the charge
+        if (d < 100 && this.stateT > 0.6 && this.world.map.los(this.x, this.y, this.target!.x, this.target!.y)) this.windup('windup', 0.55);
         break;
       case 'windup':
         this.spin += dt * (10 + this.stateT * 50);
@@ -41,7 +42,8 @@ export class Cogling extends Enemy {
         this.spin += dt * 40;
         const hit = this.moveDir(this.chargeA, 215, dt);
         if (Math.floor(this.stateT * 30) % 2 === 0) this.world.fx.dust(this.x, this.y, 1, this.chargeA);
-        this.world.hurtPlayers({ t: 'circle', x: this.x, y: this.y, r: this.r + 2 }, { amount: 9, kind: 'contact', owner: this, x: this.x, y: this.y, knock: 160 });
+        // the charge is an attack (a dash through it is a Tick-Dodge; rewinding into it a Perfect Rewind)
+        this.world.hurtPlayers({ t: 'circle', x: this.x, y: this.y, r: this.r + 2 }, { amount: 9, kind: 'melee', owner: this, x: this.x, y: this.y, knock: 160 });
         if (hit) { this.setState('dizzy'); this.world.shake(0.1); sfx('clank', { pan: this.world.pan(this.x) }); this.squash = 0.6; this.world.fx.hitSparks(this.x, this.y - 6, this.chargeA + Math.PI, 'normal', 8); }
         else if (this.stateT > 0.55) this.setState('recover');
         break;
@@ -93,7 +95,7 @@ export class Sentry extends Enemy {
   thrustA = 0; spearExt = 0;
   constructor(x: number, y: number) {
     super(x, y, 42);
-    this.r = 5; this.height = 22; this.speed = 34; this.poise = 14; this.kind = 'sentry'; this.codexId = 'sentry';
+    this.r = 5; this.height = 22; this.speed = 34; this.flinch = 14; this.kind = 'sentry'; this.codexId = 'sentry';
     this.debris = ['R2', 'U2', 'K8', 'B4'];
     this.brass = [2, 3];
   }
@@ -266,7 +268,7 @@ export class Brute extends Enemy {
   atkA = 0; next = 'slam'; steamT = 0; ventT = 2;
   constructor(x: number, y: number) {
     super(x, y, 260);
-    this.r = 11; this.height = 30; this.speed = 24; this.mass = 4; this.poise = 45; this.kind = 'brute'; this.codexId = 'brute';
+    this.r = 11; this.height = 30; this.speed = 24; this.mass = 4; this.flinch = 45; this.kind = 'brute'; this.codexId = 'brute';
     this.isElite = true;
     this.debris = ['B2', 'B3', 'B1', 'K5', 'O2'];
     this.brass = [8, 12];

@@ -6,15 +6,22 @@ import { G } from '../G';
 import { col, rgba } from '../../art/palette';
 import { TAU } from '../../engine/math';
 import { Text } from '../ui/text';
+import { rect } from '../ui/draw';
+import type { L10n } from '../i18n';
+import { Terms } from '../meta/registry';
+import { term as termDef } from '../strings';
 
-interface Num { x: number; y: number; vy: number; vx: number; t: number; str: string; color: string; big: boolean }
+interface Num { x: number; y: number; vy: number; vx: number; t: number; str: string; color: string; big: boolean; outline?: string }
 interface Ring { x: number; y: number; r0: number; r1: number; t: number; dur: number; color: string; width: number; layer: 'glow' | 'unlit' }
 interface Banner { text: string; t: number; dur: number; color: string; x: number; y: number }
+/** a slammed-down word over the action (TICK!, COUNTER, INTERRUPT, SYNC …; GDD2 §4.1, §4.5) */
+interface Stamp { text: string | L10n; t: number; dur: number; color: string; rule: string; x: number; y: number; small: boolean; plain: L10n | null }
 
 export class FX {
   nums: Num[] = [];
   rings: Ring[] = [];
   banners: Banner[] = [];
+  stamps: Stamp[] = [];
   constructor(private w: World) {}
 
   update(dt: number) {
@@ -35,6 +42,10 @@ export class FX {
     for (let i = this.banners.length - 1; i >= 0; i--) {
       this.banners[i].t += dt;
       if (this.banners[i].t > this.banners[i].dur) this.banners.splice(i, 1);
+    }
+    for (let i = this.stamps.length - 1; i >= 0; i--) {
+      this.stamps[i].t += dt;
+      if (this.stamps[i].t > this.stamps[i].dur) this.stamps.splice(i, 1);
     }
   }
 
@@ -58,7 +69,7 @@ export class FX {
     // numbers and banners are world-anchored UI: crisp, steady during rewind, above the post effects
     // (queued as one persistent callback: it reads the lists when the UI layer is flushed later in
     // this same frame, so nothing is copied or allocated per frame)
-    if (!this.nums.length && !this.banners.length) return;
+    if (!this.nums.length && !this.banners.length && !this.stamps.length) return;
     r.worldUi(this.drawUi);
   }
 
@@ -69,7 +80,7 @@ export class FX {
       if (a <= 0) continue;
       const q = toUi(n.x, n.y);
       // centred on the anchor: 5×7 digits + outline are 9 font px tall
-      G.digits.draw(ctx, n.str, q.x, q.y - 4.5 * pop * Text.k, { fill: n.color, hi: n.big ? 'B6' : undefined, align: 'center', alpha: a, pop });
+      G.digits.draw(ctx, n.str, q.x, q.y - 4.5 * pop * Text.k, { fill: n.color, hi: n.big ? 'B6' : undefined, outline: n.outline, align: 'center', alpha: a, pop });
     }
     for (const b of this.banners) {
       const k = b.t / b.dur;
@@ -78,13 +89,68 @@ export class FX {
       const q = toUi(b.x, b.y - yo - k * 8);
       Text.draw(ctx, b.text, q.x, q.y, { color: b.color, align: 'center', outline: 'K0', alpha: a });
     }
+    for (const st of this.stamps) {
+      // slams in at double size for a few frames, settles, rises a little and fades
+      const k = st.t / st.dur;
+      const slam = st.t < 0.07;
+      const a = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
+      if (a <= 0) continue;
+      const size = slam ? (st.small ? 'body' : 'title') : st.small ? 'small' : 'body';
+      const q = toUi(st.x, st.y - k * 6);
+      const tw = Math.ceil(Text.measure(st.text, size).w), lh = Math.ceil(Text.lineH(size));
+      const x0 = Math.round(q.x - tw / 2) - 5, y0 = Math.round(q.y - lh / 2) - 1;
+      const a0 = ctx.globalAlpha;
+      ctx.globalAlpha = a0 * a * 0.85;
+      rect(ctx, x0, y0, tw + 10, lh + 3, 'K0');
+      ctx.globalAlpha = a0 * a;
+      rect(ctx, x0, y0, tw + 10, 1, st.rule);
+      rect(ctx, x0, y0 + lh + 2, tw + 10, 1, st.rule);
+      Text.draw(ctx, st.text, q.x, q.y + 1, { size, align: 'center', valign: 'middle', color: st.color, alpha: a });
+      // first sight of the word (GDD2 §9.8): its plain line under the stamp
+      if (st.plain && !slam) Text.draw(ctx, st.plain, q.x, y0 + lh + 4, { size: 'small', align: 'center', color: 'K9', alpha: a, plate: true });
+      ctx.globalAlpha = a0;
+    }
   };
 
-  number(x: number, y: number, amt: number, color: string, big: boolean) {
+  /**
+   * A stamp: a short word slammed down over the action (UI layer, crisp). One at a time per spot —
+   * a new stamp close to a live one replaces it, so a flurry of syncs never piles up.
+   */
+  stamp(x: number, y: number, text: string | L10n, color = 'K10', dur = 0.9, o: { rule?: string; small?: boolean; term?: string } = {}) {
+    // the same word lands on itself → replaced; a different word (TICK! then COUNTER!) stacks above
+    const key = typeof text === 'string' ? text : text.en;
+    for (let k = 0; k < 4; k++) {
+      let moved = false;
+      for (let i = this.stamps.length - 1; i >= 0; i--) {
+        const s0 = this.stamps[i];
+        if (Math.abs(s0.x - x) >= 40 || Math.abs(s0.y - s0.t / s0.dur * 6 - y) >= 18) continue;
+        if ((typeof s0.text === 'string' ? s0.text : s0.text.en) === key) this.stamps.splice(i, 1);
+        else { y = s0.y - s0.t / s0.dur * 6 - 20; moved = true; }
+      }
+      if (!moved) break;
+    }
+    // `term`: while the player is still learning the word, its plain line hangs under it
+    let plain: L10n | null = null;
+    if (o.term && Terms.showPlain(o.term)) {
+      const td = termDef(o.term);
+      plain = td?.plain ?? null;
+      // name the term when the stamp itself doesn't ("TICK!" → "卡秒 – 攻击命中前一刻冲刺 → 反击")
+      if (td && plain) {
+        const says = (lang: 'zh' | 'en') => (typeof text === 'string' ? text : text[lang]).toLowerCase().includes(td.name[lang].toLowerCase().replace(/ ◆$/, ''));
+        plain = { zh: says('zh') ? plain.zh : `${td.name.zh} – ${plain.zh}`, en: says('en') ? plain.en : `${td.name.en} – ${plain.en}` };
+      }
+      Terms.seen(o.term);
+      if (plain) dur = Math.max(dur, 1.8);
+    }
+    this.stamps.push({ text, x, y, t: 0, dur, color, rule: o.rule ?? color, small: !!o.small, plain });
+  }
+
+  /** a damage number; `outline` = the owner's colour round an echo's number (co-op) */
+  number(x: number, y: number, amt: number, color: string, big: boolean, outline?: string) {
     const v = Math.round(amt);
     if (v <= 0) return;
     // merge with a very recent number at the same spot (dot ticks)
-    this.nums.push({ x: x + frand(-4, 4), y, vy: big ? -95 : -70, vx: frand(-12, 12), t: 0, str: String(v), color, big });
+    this.nums.push({ x: x + frand(-4, 4), y, vy: big ? -95 : -70, vx: frand(-12, 12), t: 0, str: String(v), color, big, outline });
   }
 
   banner(x: number, y: number, text: string, color = 'K10', dur = 1.1) {

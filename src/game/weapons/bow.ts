@@ -58,7 +58,7 @@ export class Bow extends Weapon {
     world.add(new Bullet({
       team: 'player', x: w.x + Math.cos(angle) * 8, y: w.y - 8 + Math.sin(angle) * 8, ang: angle, speed: 330 + charge * 140, dmg: amount, style: 'arrow', r: full ? 3 : 2,
       owner: w as any, pierce: full ? 5 : charge > 0.4 ? 1 : 0, homing: w.isEcho ? 3.2 : 0, echo: w.isEcho, pal, knock: 40 + charge * 180, life: 1.6,
-      info: { crit, src: 'attack' },
+      info: { crit, via: 'attack' },
     }));
     if (full && !w.isEcho) { world.shake(0.12); world.fx.ring(w.x + Math.cos(angle) * 10, w.y - 8 + Math.sin(angle) * 10, 2, 16, 0.2, 'B6', 2); }
     sfx(w.isEcho ? 'swingEcho' : full ? 'lunge' : 'thrust', { pan: world.pan(w.x), vol: w.isEcho ? 0.4 : 0.8 });
@@ -71,7 +71,7 @@ export class Bow extends Weapon {
     const world = w.world;
     for (let i = -2; i <= 2; i++) {
       const { amount, crit } = this.roll(w, 14, true);
-      world.add(new Bullet({ team: 'player', x: w.x, y: w.y - 8, ang: angle + i * 0.17, speed: 340, dmg: amount, style: 'arrow', r: 2, owner: w as any, homing: w.isEcho ? 3 : 0, echo: w.isEcho, pal: w.isEcho ? ['W', 'C4', 'C2'] : ['W', 'B6', 'B4'], life: 1.2, knock: 90, info: { crit, src: 'special' } }));
+      world.add(new Bullet({ team: 'player', x: w.x, y: w.y - 8, ang: angle + i * 0.17, speed: 340, dmg: amount, style: 'arrow', r: 2, owner: w as any, homing: w.isEcho ? 3 : 0, echo: w.isEcho, pal: w.isEcho ? ['W', 'C4', 'C2'] : ['W', 'B6', 'B4'], life: 1.2, knock: 90, info: { crit, via: 'special' } }));
     }
     sfx(w.isEcho ? 'swingEcho' : 'lunge', { pan: world.pan(w.x) });
     world.bus.emit('special', { owner: w as any, angle, echo: w.isEcho, player: wielderPlayer(w) });

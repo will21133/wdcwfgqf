@@ -84,7 +84,7 @@ export class Turret extends Entity {
     if (tgt) this.aim = Math.atan2(tgt.y - 8 - (this.y - 7), tgt.x - this.x);
     if (tgt && this.fire <= 0) {
       this.fire = this.rate;
-      this.world.add(new Bullet({ team: 'player', x: this.x + Math.cos(this.aim) * 6, y: this.y - 7 + Math.sin(this.aim) * 6, ang: this.aim, speed: 260, dmg: this.dmg, style: 'bolt', r: 2, owner: this.owner, pal: ['W', 'B6', 'B4'], info: { src: 'construct', ...this.extra } }));
+      this.world.add(new Bullet({ team: 'player', x: this.x + Math.cos(this.aim) * 6, y: this.y - 7 + Math.sin(this.aim) * 6, ang: this.aim, speed: 260, dmg: this.dmg, style: 'bolt', r: 2, owner: this.owner, pal: ['W', 'B6', 'B4'], info: { via: 'construct', ...this.extra } }));
       sfx('spit', { vol: 0.3, pan: this.world.pan(this.x) });
     }
     if (this.t >= this.dur) {
@@ -114,7 +114,7 @@ export class GearMine extends Entity {
     if (this.t >= this.fuse) {
       this.kill();
       const w = this.world;
-      for (const e of w.enemiesNear(this.x, this.y, 30)) e.hurt({ amount: this.dmg, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 120, src: 'construct', ...this.extra });
+      for (const e of w.enemiesNear(this.x, this.y, 30)) e.hurt({ amount: this.dmg, kind: 'aoe', owner: this.owner, x: this.x, y: this.y, knock: 120, via: 'construct', ...this.extra });
       w.fx.burst(this.x, this.y - 2, 16, ['W', 'B6', 'B4', 'O2'], 140, 0.35);
       w.fx.ring(this.x, this.y, 3, 30, 0.3, 'B5', 2);
       w.shake(0.1);
