@@ -68,6 +68,13 @@ export const MIN_TAPE = 15;
 export const MIN_BACK = 6;
 /** scrub cursor: 3 s of tape per 0.9 s held */
 export const SCRUB_RATE = 3 / 0.9;
+/**
+ * A short press is a tap (back to the Shadow) until the scrub cursor would pass this far back
+ * (s of tape; ≈ 0.25 s held): a slow "tap" of 0.18–0.25 s used to become a 0.1–0.35 s scrub that
+ * paid 25 Sand and gave nothing back (first-play clarity report S1.4). Set to MIN_BACK / 60 for
+ * GDD2's strict 0.18 s threshold.
+ */
+export const TAP_GRACE_BACK = 0.35;
 /** travel back along the path (real s) */
 export const TRAVEL_TIME = 0.25;
 /** a rewind out of a stop burns the tape (GDD2 §3.10) */
@@ -115,12 +122,16 @@ export interface RewindState {
   rescue: boolean;
   /** costs nothing (Old Watch auto-rewind) */
   free: boolean;
+  /** Old Watch's automatic rewind: no stop happened, so no tape burn and no 'revived' */
+  auto: boolean;
   style: RewindStyle;
   cut: Recording | null;
   frameIdx: number;
   tt: number; dur: number;
   fromX: number; fromY: number;
   cost: number; seconds: number;
+  /** real s until the muffle is asserted again (a pause menu closing lifts it) */
+  mufT: number;
 }
 
 /** an incoming blow a dash can Tick-Dodge: an attack's hitbox or bullet, or the body of an enemy mid-attack */
@@ -131,6 +142,33 @@ function isAttack(info: DamageInfo): boolean {
   if (TICK_KINDS.has(info.kind)) return true;
   return info.kind === 'contact' && !!by?.attacking;
 }
+
+/**
+ * The rewind muffle (GDD2 §3.2) is shared by every hand: it lifts only when the last hand holding
+ * or travelling lands. A hand whose room closed mid-rewind is cleaned up when the next room's
+ * hands are added (review F3 #7).
+ */
+const muffled = new Set<Player>();
+function muffle(p: Player) { muffled.add(p); G.audio.muffle(true, 900); }
+function unmuffle(p: Player) { if (muffled.delete(p) && muffled.size === 0) G.audio.muffle(false); }
+function releaseStale(now: Player) {
+  if (!muffled.size) return;
+  for (const q of [...muffled]) {
+    if (q.world === now.world && !q.dead) continue;
+    const R = q.rw;
+    // paid, cut and travelling, but never landed: the Sand comes back (the cut tape stays cut)
+    if (R && R.phase === 'travel' && R.cost > 0 && q.world?.run) { const lo = q.lo; lo.sand = Math.min(lo.sandMax, lo.sand + R.cost); }
+    q.rw = null;
+    muffled.delete(q);
+  }
+  if (!muffled.size) G.audio.muffle(false);
+}
+
+// a run that ends, or a scene that leaves the rooms, never keeps a rewind's muffle
+const clearMuffles = () => { if (muffled.size) { muffled.clear(); G.audio.muffle(false); } };
+GameHooks.onRunEnd(clearMuffles);
+GameHooks.onHub(clearMuffles);
+GameHooks.onTitle(clearMuffles);
 
 // the pool refills at room clears (GDD2 §3.3); kills give +2 in combat.ts
 GameHooks.onRoomClear(({ w }) => { for (const p of w.players) if (p.state !== 'ghost') p.lo.addSand(SAND_CLEAR); });
@@ -200,12 +238,15 @@ export class Player extends Actor implements Wielder {
   landT = 0;
   landDur = 0.5;
   landGain = 0;
-  /** the cyan-and-gold PERFECT stamp over the hand (s left) */
+  /** the cyan-and-gold PERFECT stamp over the hand (s left), and the Sand it refunded (flies to the HUD) */
   perfectStampT = 0;
+  perfectRefund = 0;
   /** Pull Back hold on a stopped teammate (GDD2 §5.5) */
   pull: { target: Player; t: number } | null = null;
   /** this room's free scrub (mods.scrubFreeFirst) has been used */
   private scrubFreeUsed = false;
+  /** scrubs this hand started (the "release = land here · dash cancels" line shows for the first few) */
+  scrubsSeen = 0;
   // ── F3b: Fork, Recall, Tick-Dodge, Counter (GDD2 §3.4, §4.1) ──
   /** Fork cooldown left (s) */
   forkCdT = 0;
@@ -221,7 +262,10 @@ export class Player extends Actor implements Wielder {
   /** > 0: the next hit of this hand is a Counter (crit ×2; combat.ts) */
   counterT = 0;
   private refuseT = 0;
-  private previewCache: { tick: number; key: string; v: RewindPreview } | null = null;
+  /** rewindPreview() cache: the tick and every input it depends on (no per-frame key string) */
+  private previewCache: { tick: number; recTick: number; len: number; cursor: number; sand: number; hp: number; fixed: number; hold: boolean; v: RewindPreview } | null = null;
+  /** the echo this hand's last rewind left (a Perfect Rewind gilds this one, never a later Fork echo) */
+  private perfectEcho: Echo | null = null;
   lastSafeX = 0; lastSafeY = 0;
   /** control lock (cutscenes, room transitions) */
   locked = false;
@@ -262,12 +306,15 @@ export class Player extends Actor implements Wielder {
 
   get run() { return this.world.run!; }
   /** leaving the world mid-rewind (room change, a hand that left) must not leave the mix muffled */
-  removed() { if (this.rw) { this.rw = null; G.audio.muffle(false); } }
+  removed() { if (this.rw) { this.rw = null; unmuffle(this); } }
   /** this hand's loadout (PLAN2 §1.5) */
   get lo(): Loadout { return this.world.run!.lo(this.slot); }
   get mods() { return this.lo.mods; }
 
   added() {
+    // a hand left behind in the last room mid-rewind (the scene closed before it landed): give its
+    // mix back and refund a rewind it had paid for but never got (review F3 #7)
+    releaseStale(this);
     const L = this.world.players;
     if (!L.includes(this)) { L.push(this); L.sort((a, b) => a.slot - b.slot); }
     const lo = this.lo;
@@ -631,15 +678,19 @@ export class Player extends Actor implements Wielder {
     return lo;
   }
 
-  /** frame i, or the nearest frame not over a pit (a dash over a pit is taped but never landed on) */
-  private standable(i: number): number {
+  /**
+   * frame i, or the nearest frame not over a pit (a dash over a pit is taped but never landed on).
+   * Never older than `oldest`: frames before it cost more than the pool holds (review F3 #9).
+   */
+  private standable(i: number, oldest = 0): number {
     const rec = this.rec, m = this.world.map;
     const n = rec.length;
-    i = Math.max(0, Math.min(n - 1, i));
+    oldest = Math.max(0, Math.min(n - 1, oldest));
+    i = Math.max(oldest, Math.min(n - 1, i));
     const ok = (k: number) => { const f = rec.at(k); return !m.pitAt(f.x, f.y); };
     if (ok(i)) return i;
     for (let d = 1; d < 60; d++) {
-      if (i - d >= 0 && ok(i - d)) return i - d;
+      if (i - d >= oldest && ok(i - d)) return i - d;
       if (i + d < n - MIN_BACK && ok(i + d)) return i + d;
     }
     return i;
@@ -650,7 +701,7 @@ export class Player extends Actor implements Wielder {
     const n = this.rec.length;
     const back = this.maxBack(false);
     if (back <= 0) return 0;
-    return this.standable(n - back);
+    return this.standable(n - back, n - back);
   }
 
   /**
@@ -661,10 +712,11 @@ export class Player extends Actor implements Wielder {
     const rec = this.rec;
     const R = this.rw;
     const scrub = !!R && R.phase === 'hold' && R.scrub;
-    const key = `${rec.tick}:${rec.length}:${scrub ? R!.cursor : -1}:${Math.round(this.lo.sand)}:${this.hp}:${this.fixedTaken}`;
+    const hold = !!R && R.phase === 'hold';
     const tick = this.world?.tickNo ?? 0;
+    const cursor = scrub ? R!.cursor : -1, sand = Math.round(this.lo.sand);
     const c = this.previewCache;
-    if (c && c.tick === tick && c.key === key) return c.v;
+    if (c && c.tick === tick && c.recTick === rec.tick && c.len === rec.length && c.cursor === cursor && c.sand === sand && c.hp === this.hp && c.fixed === this.fixedTaken && c.hold === hold) return c.v;
     const n = rec.length;
     let v: RewindPreview;
     if (n < 2) v = { frame: 0, x: this.x, y: this.y, hpGain: 0, locked: 0, cost: 0, seconds: 0, ok: false };
@@ -674,11 +726,29 @@ export class Player extends Actor implements Wielder {
       const seconds = (n - idx) / 60;
       const cost = R?.free ? 0 : this.costFor(seconds, scrub);
       const { gain, locked } = this.hpFromFrame(f, false);
-      const ok = scrub || this.canRewind(this.state === 'stopped').ok;
+      // a rewind under way passed its checks at the press (the Shadow stays bright until the scrub
+      // starts; the HP promise stays cyan through the travel back)
+      const ok = !!R || this.canRewind(this.state === 'stopped').ok;
       v = { frame: idx, x: f.x, y: f.y, hpGain: gain, locked, cost, seconds, ok };
     }
-    this.previewCache = { tick, key, v };
+    if (c) { c.tick = tick; c.recTick = rec.tick; c.len = rec.length; c.cursor = cursor; c.sand = sand; c.hp = this.hp; c.fixed = this.fixedTaken; c.hold = hold; c.v = v; }
+    else this.previewCache = { tick, recTick: rec.tick, len: rec.length, cursor, sand, hp: this.hp, fixed: this.fixedTaken, hold, v };
     return v;
+  }
+
+  /** what a tap would give back now (the Shadow's +N), even while a scrub points elsewhere */
+  tapGain(): number {
+    const rec = this.rec;
+    if (rec.length < 2) return 0;
+    const R = this.rw;
+    if (!(R && R.phase === 'hold' && R.scrub)) return this.rewindPreview().hpGain;
+    return this.hpFromFrame(rec.at(this.tapTarget()), false).gain;
+  }
+  /** why no rewind is possible right now (null = it is); for the grey Shadow and the HUD */
+  rewindBlock(): RewindRefusal | null {
+    if (this.rw) return null;
+    const c = this.canRewind(this.state === 'stopped');
+    return c.ok ? null : c.reason ?? 'state';
   }
 
   /** HP math (GDD2 §3.2): max(current, min(maxHp, frame HP − fixed damage taken since)) */
@@ -720,8 +790,8 @@ export class Player extends Actor implements Wielder {
     const rec = this.rec;
     this.rw = {
       phase: 'hold', t: 0, scrub: false, cursor: Math.max(0, rec.length - MIN_BACK), clickT: 0,
-      rescue: !!o.rescue, free: !!o.free, style: this.rewindStyle, cut: null, frameIdx: 0,
-      tt: 0, dur: TRAVEL_TIME, fromX: this.x, fromY: this.y, cost: 0, seconds: 0,
+      rescue: !!o.rescue, free: !!o.free, auto: !!o.auto, style: this.rewindStyle, cut: null, frameIdx: 0,
+      tt: 0, dur: TRAVEL_TIME, fromX: this.x, fromY: this.y, cost: 0, seconds: 0, mufT: 0.25,
     };
     this.pull = null;
     this.weapon.cancel();
@@ -731,9 +801,10 @@ export class Player extends Actor implements Wielder {
     this.solid = false;
     this.hurtT = 0;
     this.perfect = { t: this.mods.perfectWindow, hit: false, refunded: false, cost: 0 };
+    this.perfectEcho = null;
     sfx('rewindHold', { vol: 0.8 });
     this.input.rumble(0.05, 0.3, 90);
-    G.audio.muffle(true, 900);
+    muffle(this);
     if (o.auto || settings.rewindMode === 'tap') this.confirmRewind();
   }
 
@@ -742,8 +813,9 @@ export class Player extends Actor implements Wielder {
     this.rw = null;
     this.solid = true;
     this.airborne = false;
+    // a blow dodged while holding pays out only for a rewind that happens (review F3 #5)
     this.perfect = null;
-    G.audio.muffle(false);
+    unmuffle(this);
     sfx('tapeClick', { vol: 0.5 });
   }
 
@@ -761,36 +833,45 @@ export class Player extends Actor implements Wielder {
         return;
       }
       const thr = m.rewindTapThreshold;
-      if (!R.scrub && held && R.t >= thr && settings.rewindMode !== 'tap') {
+      // the cursor runs from the tap threshold, but a release before it passes TAP_GRACE_BACK is still a tap
+      const scrubAt = thr + Math.max(0, TAP_GRACE_BACK - MIN_BACK / 60) / SCRUB_RATE;
+      if (!R.scrub && held && R.t >= scrubAt && settings.rewindMode !== 'tap') {
         R.scrub = true;
         R.clickT = 0.5;
+        this.scrubsSeen++;
         sfx('tapeClick', { vol: 0.7 });
       }
       if (R.scrub) {
         const st = R.t - thr;
         const n = this.rec.length;
-        const back = Math.min(this.maxBack(true), MIN_BACK + Math.round(st * SCRUB_RATE * 60));
-        R.cursor = back > 0 ? this.standable(n - back) : n - 1;
+        const most = this.maxBack(true);
+        const back = Math.min(most, MIN_BACK + Math.round(st * SCRUB_RATE * 60));
+        R.cursor = back > 0 ? this.standable(n - back, n - most) : n - 1;
         R.clickT -= dt;
         if (R.clickT <= 0) { R.clickT += 0.5; sfx('tapeClick', { vol: 0.55 }); }
-        if (!held || st >= m.scrubMax) this.confirmRewind();
+        // GDD2 §3.2: 1.2 s from the press, then it confirms on its own
+        if (!held || R.t >= m.scrubMax) this.confirmRewind();
       } else if (!held) this.confirmRewind();
+      // a pause menu (or the boss's time stop) may have lifted the muffle: keep it on while held
+      if ((R.mufT -= dt) <= 0) { R.mufT = 0.25; G.audio.muffle(true, 900); }
       this.anim = Anim.Idle;
       this.updateScarf(dt);
       return;
     }
-    // travel: back along the path, newest → target
+    // travel: back along the path, newest → target (a style that doesn't teleport stays put; review F3 #2)
     R.tt += dt;
     const k = Math.min(1, R.tt / R.dur);
-    const frames = R.cut!.frames;
-    const idx = Math.round((1 - ease.inOutQuad(k)) * (frames.length - 1));
-    const f = frames[idx];
-    this.x = f.x; this.y = f.y;
-    this.dir = f.dir === 0 ? 'down' : f.dir === 1 ? 'up' : 'side';
-    this.flip = f.flip;
-    this.anim = f.anim as Anim;
-    this.animT = f.animT;
-    if (this.world.tickNo % 2 === 0) this.afterimage('C3', 0.35, 0.55);
+    if (R.style.teleports) {
+      const frames = R.cut!.frames;
+      const idx = Math.round((1 - ease.inOutQuad(k)) * (frames.length - 1));
+      const f = frames[idx];
+      this.x = f.x; this.y = f.y;
+      this.dir = f.dir === 0 ? 'down' : f.dir === 1 ? 'up' : 'side';
+      this.flip = f.flip;
+      this.anim = f.anim as Anim;
+      this.animT = f.animT;
+      if (this.world.tickNo % 2 === 0) this.afterimage('C3', 0.35, 0.55);
+    }
     this.updateScarf(dt);
     if (k >= 1) this.finishRewind();
   }
@@ -865,11 +946,13 @@ export class Player extends Actor implements Wielder {
     sfx('rewindLand');
     sfx('rewindEnd', { vol: 0.7 });
     this.input.rumble(0.45, 0.3, 120);
-    G.audio.muffle(false);
-    // a blow dodged inside the Perfect window refunds the rewind and gilds its echo
-    if (this.perfect?.hit) this.payPerfect();
-    if (rescue) {
-      // rewinding out of a stop burns the tape for 6 s (GDD2 §3.10)
+    unmuffle(this);
+    // a blow dodged inside the Perfect window refunds the rewind and gilds its echo (the feedback
+    // waits for the landing: a cancelled rewind pays nothing; review F3 #5)
+    this.perfectEcho = this.lastEcho;
+    if (this.perfect?.hit) { this.perfectFx(); this.payPerfect(); }
+    if (rescue && !R.auto) {
+      // rewinding out of a stop burns the tape for 6 s (GDD2 §3.10); Old Watch's own rewind is no rescue
       this.rec.burnT = Math.max(this.rec.burnT, TAPE_BURN);
       this.down = Down.newDownState();
       w.bus.emit('revived', { player: this, by: null, source: 'self' });
@@ -1021,28 +1104,43 @@ export class Player extends Actor implements Wielder {
     this.forkHold = -1;
   }
 
-  /** an attack that would have landed inside the Perfect window (GDD2 §3.9) */
+  /**
+   * An attack that would have landed inside the Perfect window (GDD2 §3.9). While the rewind is
+   * still held only a soft glint answers it: the stamp, the refund and the event come at the
+   * landing, so a rewind cancelled with a dash pays nothing (review F3 #5).
+   */
   private perfectHit() {
     const pf = this.perfect!;
     pf.hit = true;
+    if (this.rw) {
+      this.world.fx.ring(this.x, this.y - 8, 2, 14, 0.25, 'B5', 1);
+      sfx('tapeClick', { vol: 0.5, pitch: 2 });
+      return;
+    }
+    this.perfectFx();
+    this.payPerfect();
+  }
+  /** PERFECT: the stamp over the hand, a brass ring, the bell, a short freeze, the event */
+  private perfectFx() {
     const w = this.world;
     this.perfectStampT = PERFECT_STAMP;
+    w.fx.stamp(this.x, this.y - 46, S('f3', 'perfect'), 'B5', PERFECT_STAMP, { rule: 'C3', term: 'perfect' });
     w.fx.ring(this.x, this.y - 8, 4, 30, 0.4, 'B5', 2);
     w.fx.ring(this.x, this.y - 8, 2, 22, 0.3, 'C4', 2);
     w.hitstop(0.06);
     sfx('perfectRewind');
     this.input.rumble(0.3, 0.6, 140);
     w.bus.emit('perfectRewind', { player: this });
-    // already landed: pay out now (else at the landing)
-    if (!this.rw) this.payPerfect();
   }
   private payPerfect() {
     const pf = this.perfect;
     if (!pf || pf.refunded) return;
     pf.refunded = true;
     const lo = this.lo;
+    const before = lo.sand;
     lo.sand = Math.min(lo.sandMax, lo.sand + pf.cost);
-    this.lastEcho?.gild();
+    this.perfectRefund = Math.round(lo.sand - before);
+    this.perfectEcho?.gild();
   }
 
   /** per-tick rewind bookkeeping that runs in every state (ripple, timers, the Perfect window) */
@@ -1088,7 +1186,11 @@ export class Player extends Actor implements Wielder {
 
   // ───────────────────────── stops, Pull Back, catch-up (GDD2 §3.10, §5.5, §5.3) ─────────────────────────
   /** Last Second / self-rescue: can this stopped hand rewind out now? (DownedHooks.canRewindOut) */
-  canRewindFromStop() { return this.canRewind(true).ok; }
+  canRewindFromStop() {
+    // co-op: only within the first 3 s of the stop (GDD2 §5.5); solo: the Last Second window
+    if (this.world && this.world.playerCount > 1 && this.down.t > Down.SELF_RESCUE) return false;
+    return this.canRewind(true).ok;
+  }
   /** rewind out of a stop (DownedHooks.rewindOut): a normal, paid rewind that stands the hand up */
   rewindFromStop(): boolean {
     const c = this.canRewind(true);
@@ -1199,7 +1301,7 @@ export class Player extends Actor implements Wielder {
    */
   catchUpTo(x: number, y: number): void {
     const w = this.world;
-    if (this.rw) { this.rw = null; this.solid = true; this.airborne = false; G.audio.muffle(false); }
+    if (this.rw) { this.rw = null; this.solid = true; this.airborne = false; unmuffle(this); }
     w.fx.ring(this.x, this.y - 6, 2, 22, 0.3, 'C3', 2);
     this.x = x; this.y = y;
     this.vx = this.vy = 0; this.kx = this.ky = 0;
@@ -1232,7 +1334,7 @@ export class Player extends Actor implements Wielder {
     if (lo.shieldReady) {
       lo.shieldReady = false;
       this.invuln = 0.6;
-      this.world.fx.banner(this.x, this.y - 30, '封蜡', 'B5', 0.8);
+      this.world.fx.banner(this.x, this.y - 30, tr(S('f3', 'sealWax')), 'B5', 0.8);
       this.world.fx.ring(this.x, this.y - 8, 4, 22, 0.3, 'B5', 2);
       sfx('clank');
       return 0;
@@ -1254,7 +1356,11 @@ export class Player extends Actor implements Wielder {
     }
     const w = this.world;
     w.fx.number(this.x, this.y - 24, amt, info.fixed ? 'V3' : 'R4', true);
-    w.fx.hitSparks(this.x, this.y - 10, info.x !== undefined ? Math.atan2(this.y - (info.y ?? 0), this.x - info.x) : 0, 'blood', amt);
+    // a blow that starts the solo Last Second gets a small red burst without the white impact flash:
+    // at 0.2× the flash hung over the hand as a white blob for half a second, right when the player
+    // must see where it stands (D18)
+    if (this.hp <= 0 && w.playerCount <= 1) w.fx.burst(this.x, this.y - 10, 8, ['R4', 'R3', 'R2'], 120, 0.25);
+    else w.fx.hitSparks(this.x, this.y - 10, info.x !== undefined ? Math.atan2(this.y - (info.y ?? 0), this.x - info.x) : 0, 'blood', amt);
     w.hitstop(0.09);
     w.shake(0.38);
     w.stats.hitsTaken++;
@@ -1275,7 +1381,7 @@ export class Player extends Actor implements Wielder {
         lo.revivesUsed++;
         this.hp = Math.round(this.maxHp * 0.4);
         this.invuln = 2;
-        w.fx.banner(this.x, this.y - 36, '第二根发条', 'B5', 1.4);
+        w.fx.banner(this.x, this.y - 36, tr(S('f3', 'secondSpring')), 'B5', 1.4);
         w.fx.ring(this.x, this.y - 8, 4, 60, 0.6, 'B5', 3);
         w.fx.burst(this.x, this.y - 8, 30, ['W', 'B6', 'B4'], 180, 0.6);
         for (const e of w.enemiesNear(this.x, this.y, 70)) e.hurt({ amount: 20, kind: 'aoe', owner: this, x: this.x, y: this.y, knock: 300 });

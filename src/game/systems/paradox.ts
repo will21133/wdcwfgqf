@@ -22,7 +22,8 @@ import { circleHits, type Shape, type DamageInfo } from './combat';
 import { G, sfx } from '../G';
 import { settings } from '../settings';
 import { slotColor } from '../players';
-import { HudChain, termCallout } from '../ui/rewindHud';
+import { HudChain } from '../ui/rewindHud';
+import { Callouts, termCallout } from '../ui/callouts';
 import { S } from '../strings';
 import '../strings/f3';
 import type { ParadoxKind } from './bus';
@@ -73,6 +74,8 @@ export const DUET_R = 1.25, DUET_SAND = 25;
 export const STABLE_CD = 1.1;
 /** Grandfather Paradox: a paradox kills a Culprit (GDD2 §3.8) */
 export const GRANDFATHER_SAND = 100;
+/** GDD2 §3.12's overlap damage: the pierce's 70 scales with whatever raised it (hg_paradox, Star Chart; review F3 #10) */
+const PARADOX_BASE = 50;
 /** how close the dash direction must point at an echo for the line preview (rad) */
 const AIM_CONE = 0.45;
 /** one hand sets off at most one paradox a tick by touch */
@@ -93,6 +96,29 @@ function shapeOf(o: { x: number; y: number; r?: number; line?: ParadoxLine }): S
   if (o.line) return { t: 'line', x0: o.line.ax, y0: o.line.ay, x1: o.line.bx, y1: o.line.by, r: o.line.w / 2 };
   return { t: 'circle', x: o.x, y: o.y, r: o.r ?? 48 };
 }
+/**
+ * Where an overlap blast is centred when a hand at (px, py) touches `e`: halfway between them at
+ * the moment of contact. touch() and preview() both use this, so the dashed circle is exactly
+ * where the blast lands (review F3 #3, acceptance D9).
+ */
+function overlapCentre(e: Echo, px: number, py: number): { x: number; y: number } {
+  const dx = px - e.x, dy = py - e.y, d = Math.hypot(dx, dy);
+  if (d < 1e-3) return { x: e.x, y: e.y };
+  const k = Math.min(d, e.contactR) / 2 / d;
+  return { x: e.x + dx * k, y: e.y + dy * k };
+}
+/** the burst radius a hand's paradox has (a duet: ×1.25) */
+const blastR = (p: Player, duet: boolean) => p.mods.paradoxRadius * (duet ? DUET_R : 1);
+/** the armed echoes a blast reaches (the next ring of a chain); one rule for trigger and preview */
+function chainedBy(w: World, shape: Shape, line: ParadoxLine | undefined, cx: number, cy: number, R: number, reach: number, except: Echo | undefined): Echo[] {
+  const out: Echo[] = [];
+  for (const ec of armedEchoes(w)) {
+    if (ec === except) continue;
+    const hit = line ? circleHits(shape, ec.x, ec.y, Math.max(0, reach - R) + 4) : Math.hypot(ec.x - cx, ec.y - cy) <= reach;
+    if (hit) out.push(ec);
+  }
+  return out;
+}
 
 export const Paradox = {
   /**
@@ -106,8 +132,8 @@ export const Paradox = {
     const m = p.mods;
     const chain = Math.max(1, o.chain ?? 1);
     const duet = !!o.duet;
-    const R = o.radius ?? m.paradoxRadius * (duet ? DUET_R : 1);
-    const base = o.kind === 'pierce' ? m.paradoxPierceDmg : m.paradoxDmg;
+    const R = o.radius ?? blastR(p, duet);
+    const base = o.kind === 'pierce' ? m.paradoxPierceDmg * (m.paradoxDmg / PARADOX_BASE) : m.paradoxDmg;
     const mul = (o.dmgMul ?? 1) * (1 + m.paradoxChainMul * (chain - 1));
     const dmg = base * m.dmg * mul;
     const shape = shapeOf({ x: o.x, y: o.y, r: R, line: o.line });
@@ -152,12 +178,7 @@ export const Paradox = {
     }
     // chain: every other armed echo the blast reaches goes off on the next tick
     const reach = Math.max(R, m.paradoxChainRange);
-    const chained: Echo[] = [];
-    for (const ec of armedEchoes(w)) {
-      if (ec === e) continue;
-      const hit = o.line ? circleHits(shape, ec.x, ec.y, reach - R + 4) : Math.hypot(ec.x - cx, ec.y - cy) <= reach;
-      if (hit) chained.push(ec);
-    }
+    const chained = chainedBy(w, shape, o.line, cx, cy, R, reach, e);
     if (chained.length) {
       for (const ec of chained) ec.paradoxCd = Math.max(ec.paradoxCd, 0.05);
       w.after(1 / 60, () => {
@@ -191,10 +212,12 @@ export const Paradox = {
       if (o.duet) w.fx.ring(o.x, o.y - 4, 6, R + 12, 0.55, slotColor(p.slot), 2);
       w.fx.burst(o.x, o.y - 6, 30, ['W', 'C4', 'C3', 'C2'], 240, 0.55);
     }
-    // one word per blast that starts a chain; the rings that follow are counted by "CHAIN ×N" up top
+    // one word per blast that starts a chain, above the blast (not on it or on the hand); paradoxes
+    // going off together merge into one "PARADOX! ×3"; the rings of a chain are counted up top
     const word = o.kind === 'pierce' ? 'pierce' : o.kind === 'recall' ? 'recallParadox' : o.duet ? 'duet' : 'paradox';
-    if (o.kind !== 'chain') w.fx.stamp(cx, cy - 34, S('f3', word), 'C3', 0.9, { rule: o.duet ? slotColor(o.duet.slot) : 'C4', term: o.duet ? 'duet' : 'paradox' });
-    if (chain >= 2) HudChain.show(chain, chain >= 4 ? 'B5' : 'C3');
+    const top = o.line ? Math.min(o.line.ay, o.line.by) - 22 : cy - 4 - R * 0.72 - 12;
+    if (o.kind !== 'chain') w.fx.stamp(cx, top, S('f3', word), 'C3', 0.9, { rule: o.duet ? slotColor(o.duet.slot) : 'C4', term: o.duet ? 'duet' : 'paradox', group: 'paradox' });
+    if (chain >= 2) { HudChain.show(chain, chain >= 4 ? 'B5' : 'C3'); w.fx.quietGroup('paradox'); }
     w.hitstop(chain >= 2 ? 0.06 : 0.1);
     w.shake(chain >= 2 ? 0.3 : 0.45);
     if (settings.flashes) G.r.params.flash = Math.max(G.r.params.flash ?? 0, chain >= 2 ? 0.2 : 0.35);
@@ -209,7 +232,7 @@ export const Paradox = {
   grandfather(p: Player, x: number, y: number) {
     const w = p.world;
     p.lo.addSand(GRANDFATHER_SAND);
-    w.fx.stamp(x, y - 52, S('f3', 'grandfather'), 'B5', 1.4, { rule: 'R3' });
+    w.fx.stamp(x, y - 52, S('f3', 'grandfather'), 'B5', 1.4, { rule: 'R3', term: 'grandfather' });
     sfx('perfectRewind', { vol: 0.8 });
     w.bus.emit('custom', { id: 'grandfatherParadox', player: p });
   },
@@ -229,7 +252,8 @@ export const Paradox = {
       if (p.dashT > 0) {
         Paradox.trigger({ x: e.x, y: e.y, owner: p, echo: e, kind: 'pierce', line: pierceLine(e, p.dashVX, p.dashVY), duet });
       } else {
-        Paradox.trigger({ x: (e.x + p.x) / 2, y: (e.y + p.y) / 2, owner: p, echo: e, kind: 'overlap', duet });
+        const c = overlapCentre(e, p.x, p.y);
+        Paradox.trigger({ x: c.x, y: c.y, owner: p, echo: e, kind: 'overlap', duet });
       }
       return true;
     }
@@ -259,23 +283,21 @@ export const Paradox = {
     const moving = Math.hypot(mx, my) > 0.1;
     const aimed = moving && Math.abs(angleBetween(Math.atan2(my, mx), toward)) < AIM_CONE && (p.dashT > 0 || p.dashCharges > 0) && bd > 8;
     let out: ParadoxPreview;
+    // the same radius, centre and chain reach the blast itself will use (trigger)
+    const R = blastR(p, duet);
     if (aimed) {
       if (!moving) { mx = Math.cos(toward); my = Math.sin(toward); }
       const line = pierceLine(e, mx, my);
       out = { kind: 'line', x: e.x, y: e.y, line, echo: e, duet, chains: [], targets: [] };
     } else {
-      const r = m.paradoxRadius * (duet ? DUET_R : 1);
-      out = { kind: 'circle', x: e.x, y: e.y, r, echo: e, duet, chains: [], targets: [] };
+      const c = overlapCentre(e, p.x, p.y);
+      out = { kind: 'circle', x: c.x, y: c.y, r: R, echo: e, duet, chains: [], targets: [] };
     }
-    const shape = shapeOf(out);
-    const R = out.r ?? PIERCE_W / 2;
-    const reach = Math.max(out.r ?? 48, m.paradoxChainRange);
+    const shape = shapeOf({ x: out.x, y: out.y, r: R, line: out.line });
+    const cx = out.line ? (out.line.ax + out.line.bx) / 2 : out.x, cy = out.line ? (out.line.ay + out.line.by) / 2 : out.y;
+    const reach = Math.max(R, m.paradoxChainRange);
     for (const t of w.enemies) if (!t.dead && circleHits(shape, t.x, t.y - 4, t.r + 2)) out.targets.push(t);
-    for (const ec of armedEchoes(w)) {
-      if (ec === e) continue;
-      const hit = out.line ? circleHits(shape, ec.x, ec.y, reach - R + 4) : Math.hypot(ec.x - out.x, ec.y - out.y) <= reach;
-      if (hit) out.chains.push(ec);
-    }
+    out.chains = chainedBy(w, shape, out.line, cx, cy, R, reach, e);
     return out;
   },
 };
@@ -293,6 +315,9 @@ function renderPreview(r: Renderer, p: Player) {
   const t = w.time;
   const c1 = pv.duet ? slotColor(pv.echo.owner.slot) : 'C2';
   const march = Math.floor(t * 12);
+  // no term plate may cover the preview (first-play clarity S1.1)
+  if (pv.kind === 'circle') Callouts.avoid(pv.x - pv.r!, pv.y - 2 - pv.r! * 0.72, pv.r! * 2, pv.r! * 1.44);
+  else { const L = pv.line!; Callouts.avoid(Math.min(L.ax, L.bx) - L.w, Math.min(L.ay, L.by) - L.w, Math.abs(L.bx - L.ax) + L.w * 2, Math.abs(L.by - L.ay) + L.w * 2); }
   if (pv.kind === 'circle') {
     const R = pv.r!, cx = Math.round(pv.x), cy = Math.round(pv.y - 2);
     u.globalAlpha = 0.16;
@@ -345,16 +370,16 @@ function renderPreview(r: Renderer, p: Player) {
   }
   // which echoes it would chain into
   for (const ec of pv.chains) {
-    const dx = ec.x - pv.x, dy = ec.y - pv.y, d = Math.hypot(dx, dy) || 1;
+    const dx = ec.drawX - pv.echo.drawX, dy = ec.y - pv.echo.y, d = Math.hypot(dx, dy) || 1;
     for (let k = 6; k < d - 4; k += 3) {
       if (((k / 3 + march) | 0) % 2) continue;
       u.globalAlpha = 0.7;
       u.fillStyle = col('C3');
-      u.fillRect(Math.round(pv.x + (dx * k) / d), Math.round(pv.y - 8 + (dy * k) / d), 1, 1);
+      u.fillRect(Math.round(pv.echo.drawX + (dx * k) / d), Math.round(pv.echo.y - 8 + (dy * k) / d), 1, 1);
     }
     u.globalAlpha = 1;
     // a chain link at the far end
-    const lx = Math.round(ec.x), ly = Math.round(ec.y - 14);
+    const lx = Math.round(ec.drawX), ly = Math.round(ec.y - 14);
     rect(u, lx - 3, ly - 2, 7, 5, 'K0');
     rect(u, lx - 2, ly - 1, 2, 1, 'C4'); rect(u, lx - 2, ly + 1, 2, 1, 'C4'); rect(u, lx - 3, ly, 1, 1, 'C4');
     rect(u, lx + 1, ly - 1, 2, 1, 'C3'); rect(u, lx + 1, ly + 1, 2, 1, 'C3'); rect(u, lx + 3, ly, 1, 1, 'C3');

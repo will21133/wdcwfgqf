@@ -183,7 +183,9 @@ export class Combat {
         if (dealt > 0) hb.onHit?.(t, dealt);
         if (hb.pierce !== undefined && --hb.pierce <= 0) { hb.life = 0; break; }
       }
-      hb.life--;
+      // a hitbox inside a co-op time bubble lasts as long in that bubble's time as anywhere else
+      // (an enemy's swing inside a rewinding hand's r72 is slowed with it; GDD2 §3.2, review F3 #12)
+      if (w.bubbles.list.length) { const c = shapeCenter(hb.shape); hb.life -= w.bubbles.localAt(c.x, c.y); } else hb.life--;
       if (hb.life <= 0) this.hitboxes.splice(i, 1);
     }
   }
@@ -332,20 +334,22 @@ export class Combat {
     const L = t.lastHits;
     while (L.length && now - L[0].t > HIT_MEMORY) L.shift();
     const src = info.src!;
-    let others = 0, seen = 0;
+    // the other sources inside the window, and those whose hit has not been paired yet: a Sync uses
+    // its pair up, so two sources trading blows sync once per new pair, not on every hit (review F3 #6)
+    let others = 0, fresh = 0, seen = 0, seenFresh = 0;
     for (const h of L) {
       if (h.src === src || now - h.t > m.syncWindow) continue;
       const bit = 1 << Math.min(30, h.src);
-      if (seen & bit) continue;
-      seen |= bit;
-      others++;
+      if (!(seen & bit)) { seen |= bit; others++; }
+      if (!h.used && !(seenFresh & bit)) { seenFresh |= bit; fresh++; }
     }
-    L.push({ src, t: now });
-    if (L.length > 24) L.shift();
-    if (!others) return 1;
-    let n = others + 1;
     const cd = t.marks.get('chordCd');
-    if (n >= 3 && cd && cd.t > 0) n = 2;
+    const chord = others >= 2 && !(cd && cd.t > 0);
+    const n = chord ? others + 1 : fresh ? 2 : 1;
+    if (n >= 2) for (const h of L) if (now - h.t <= m.syncWindow) h.used = true;
+    L.push({ src, t: now, used: n >= 2 });
+    if (L.length > 24) L.shift();
+    if (n < 2) return 1;
     if (n >= 3) t.marks.set('chordCd', { t: CHORD_CD, stacks: 1, src });
     info.sync = n;
     this.syncFx(t, n, player);
@@ -379,7 +383,7 @@ export class Combat {
     e.stagger(INTERRUPT_STAGGER, 'interrupt');
     if (by) this.sandTo(by)?.addSand(INTERRUPT_SAND);
     w.fx.ring(e.x, e.y - e.height * 0.5, 2, 28, 0.35, 'W', 3);
-    w.fx.stamp(e.x, e.y - e.height - 14, S('f3', 'interrupt'), 'K10', 1, { rule: 'W' });
+    w.fx.stamp(e.x, e.y - e.height - 14, S('f3', 'interrupt'), 'K10', 1, { rule: 'W', term: 'interrupt' });
     w.hitstop(0.07);
     sfx('interrupt', { pan: w.pan(e.x) });
     w.bus.emit('interrupt', { player: by, target: e });

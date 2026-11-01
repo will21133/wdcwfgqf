@@ -106,7 +106,7 @@ T('brass', l('黄铜', 'Brass'), l('局内金币 · 商店用', 'Run money · sp
 T('shard', l('时之碎片', 'Time Shard'), l('局外货币 · 带回工坊升级', 'Kept after runs · upgrades'),
   l('清理房间、击败精英与首领获得，死亡也不会丢失。带回工坊，在主发条大钟上购买永久升级，或在武器架解锁武器。',
     'Earned from rooms, elites and bosses, and kept even when you die. Spend them in the workshop on the Mainspring (permanent upgrades) or the Armory.'), 'shard');
-T('sand', l('时砂', 'Sand'), l('回溯/分岔要消耗的能量', 'Energy for rewinding'),
+T('sand', l('时砂', 'Sand'), l('回溯/分岔要消耗的能量', 'Energy for rewind & Fork'),
   l('造成伤害、击杀、清场都会积攒时砂。回溯花 {g:25}–{g:100}（退得越远越贵），分岔花 {g:50}。上限 = 100 × 沙漏数，开局满，每层开始补满。',
     'Dealing damage, kills and clears fill it. A rewind costs {g:25}–{g:100} (further back costs more); a Fork costs {g:50}. Cap = 100 per hourglass; full at the start of each floor.'), 'sand');
 T('tape', l('磁带', 'Tape'), l('能倒回的最近几秒', 'The seconds you can rewind'),
@@ -127,7 +127,7 @@ T('fork', l('分岔', 'Fork'), l('原地留下一个残响', 'Leave an echo here
 T('sync', l('同步', 'Sync'), l('两次攻击同时命中 → +50%', 'Two hits at once → +50%'),
   l('两个不同来源（你、你的残响、队友）在 {g:0.25} 秒内命中同一个敌人，第二击 +{g:50%}；三个及以上来源叫"和弦"，+{g:100%}。',
     'Two different sources (you, your echo, a friend) hitting one enemy within {g:0.25}s: the second hit deals +{g:50%}. Three or more sources make a Chord: +{g:100%}.'), 'sync');
-T('culprit', l('元凶', 'Culprit'), l('刚才打伤你的敌人', 'The enemy that just hit you'),
+T('culprit', l('元凶', 'Culprit'), l('打伤你的敌人 · 残响打它 +50%', 'Hit you · your echoes deal +50%'),
   l('回溯后，在你退过的那段时间里打伤你的敌人会被红色钟针标记 {g:4} 秒。你的残响打它 +{g:50%}；用悖论击杀它返还 {c:100} 时砂。',
     'After a rewind, enemies that hurt you during the undone seconds are marked for {g:4}s. Your echoes deal +{g:50%} to them; a Paradox kill refunds {c:100} Sand.'), 'culprit');
 T('fixed', l('定格伤害', 'Fixed Damage'), l('回溯也拿不回的伤害', 'Damage rewind cannot undo'),

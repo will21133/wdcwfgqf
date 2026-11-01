@@ -1,4 +1,5 @@
 // Enemy base: spawn-in, state machine helpers, steering (flow field + LOS), telegraphs, death & drops.
+import { Callouts } from '../ui/callouts';
 import { Actor, Entity } from './entity';
 import type { Renderer } from '../../engine/gfx/renderer';
 import { drawSprite, Sprite, DrawOpts } from '../../engine/gfx/sprite';
@@ -314,6 +315,8 @@ export abstract class Enemy extends Actor {
   /** red danger line on the ground: fills from thin to full width as k → 1 */
   teleLine(r: Renderer, x: number, y: number, ang: number, len: number, width: number, k: number, color = 'R3') {
     const ctx = r.u;
+    // no term plate ever covers an enemy warning (first-play clarity S1.1)
+    { const ex = x + Math.cos(ang) * len, ey = y + Math.sin(ang) * len, hw = width / 2 + 4; Callouts.avoid(Math.min(x, ex) - hw, Math.min(y, ey) - hw, Math.abs(ex - x) + hw * 2, Math.abs(ey - y) + hw * 2); }
     ctx.save();
     ctx.translate(Math.round(x), Math.round(y));
     ctx.rotate(ang);
@@ -345,6 +348,7 @@ export abstract class Enemy extends Actor {
 
   teleCircle(r: Renderer, x: number, y: number, rad: number, k: number, color = 'R3') {
     const ctx = r.u;
+    Callouts.avoid(x - rad - 4, y - rad - 4, rad * 2 + 8, rad * 2 + 8);
     ctx.globalAlpha = 0.22 + k * 0.2;
     ctx.fillStyle = col(color);
     ctx.beginPath();
@@ -365,6 +369,7 @@ export abstract class Enemy extends Actor {
 
   teleCone(r: Renderer, x: number, y: number, ang: number, len: number, half: number, k: number, color = 'R3') {
     const ctx = r.u;
+    Callouts.avoid(x - len - 4, y - len - 4, len * 2 + 8, len * 2 + 8);
     ctx.globalAlpha = 0.2 + k * 0.2;
     ctx.fillStyle = col(color);
     ctx.beginPath();

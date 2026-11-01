@@ -30,9 +30,10 @@ import type { Player } from './player';
 import { SLOT_RAMP, SLOT_COLOR, drawSlotBadge } from '../players';
 import { Text } from '../ui/text';
 import { rect } from '../ui/draw';
-import { termCallout } from '../ui/rewindHud';
+import { termCallout } from '../ui/callouts';
 import { Paradox } from '../systems/paradox';
 import '../strings/f3';
+import { Terms } from '../meta/registry';
 
 const ECHO_RAMP = ['C0', 'C1', 'C2', 'C3', 'C4'];
 
@@ -133,6 +134,11 @@ export class Echo extends Entity implements Wielder {
   private hitFlash = 0;
   private rung: Set<number> | null = null;
   private recallHit: Set<number> | null = null;
+  /** echoes standing on (nearly) the same spot are drawn a few px apart, the first with "×N" (D10) */
+  stackDx = 0;
+  stackN = 1;
+  /** where it is drawn (x + its stack offset) */
+  get drawX(): number { return this.x + this.stackDx; }
 
   constructor(owner: Player, public rec: Recording, o: EchoOpts = {}) {
     super();
@@ -236,6 +242,7 @@ export class Echo extends Entity implements Wielder {
       this.flip = this.frame.flip;
     }
     this.updateArm();
+    this.updateStack();
     if (this.rung) this.ringBells();
     // trail
     this.trailT -= dt;
@@ -315,6 +322,25 @@ export class Echo extends Entity implements Wielder {
     w.fx.ring(this.x, this.y - 9, 3, 18, 0.35, 'W', 2);
     sfx('echoArm', { vol: 0.5, pan: w.pan(this.x) });
     w.bus.emit('echoArmed', { echo: this, player: this.owner });
+  }
+
+  /**
+   * Two echoes on one spot (two Forks from where the hand stood) looked like one, and the chain
+   * link between them vanished: each one after the first in a stack is drawn 4 px further out,
+   * alternating sides, and the first carries "×N".
+   */
+  private updateStack() {
+    let idx = 0, n = 1;
+    for (const p of this.world.players) for (const e of p.echoes) {
+      if (e === this || e.dead) continue;
+      if (Math.abs(e.x - this.x) > 5 || Math.abs(e.y - this.y) > 5) continue;
+      n++;
+      if (e.id < this.id) idx++;
+    }
+    this.stackN = idx === 0 ? n : 1;
+    const want = idx === 0 ? 0 : (idx % 2 ? 1 : -1) * 4 * Math.ceil(idx / 2);
+    this.stackDx += (want - this.stackDx) * 0.3;
+    if (Math.abs(want - this.stackDx) < 0.3) this.stackDx = want;
   }
 
   /** a bell echo gives +1 resonance to every enemy it walks past (Ling, GDD2 §5.2) */
@@ -447,6 +473,8 @@ export class Echo extends Entity implements Wielder {
   render(r: Renderer) {
     const spr = this.sprite();
     const body = spr.recolor(ECHO_RAMP);
+    const x0 = this.x;
+    this.x = this.drawX;
     const fade = this.phase === 'stand' ? 1 - Math.max(0, this.stood / Math.max(0.05, this.standT) - 0.8) / 0.2 : 1;
     const standK = this.phase === 'stand' ? this.stood / Math.max(0.05, this.standT) : 0;
     const a = (0.72 + Math.sin(this.age * (20 + standK * 30)) * 0.08) * fade;
@@ -459,33 +487,38 @@ export class Echo extends Entity implements Wielder {
     // the owner's scarf colour (GDD2 §3.5)
     this.scarf.draw(r.w, undefined, a * 0.85);
     if (behind) this.weapon.drawHeld(r, this.x + hand.x * fx, this.y + hand.y, pose, 'C3', a);
-    if (this.gilded) {
-      // brass rim (B5): the silhouette offset a pixel each way under the body
-      for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) drawSprite(r.w, body, this.x + ox, this.y + oy, { flip: this.flip, tint: 'B5', alpha: a });
-    }
     drawSprite(r.w, body, this.x, this.y, { flip: this.flip, alpha: a, tint: this.hitFlash > 0 ? '#ffffff' : undefined });
     if (!behind) this.weapon.drawHeld(r, this.x + hand.x * fx, this.y + hand.y, pose, 'C3', a);
-    // rim: dashed until armed, then solid and pulsing (GDD2 §3.5)
+    // rim: dashed until armed, then solid and pulsing (GDD2 §3.5); a Perfect Rewind's echo has a
+    // brass rim on the unlit layer, bright enough to read in any light (D12)
     const pulse = this.armed ? 0.7 + 0.3 * Math.sin(this.armedT * (8 + standK * 24)) : 0.55;
-    drawSprite(r.u, outlineOf(spr, this.armed ? 'C4' : 'C2', this.armed ? 'solid' : 'dash'), this.x, this.y, { flip: this.flip, alpha: pulse * fade });
+    const rimC = this.gilded ? 'B5' : this.armed ? 'C4' : 'C2';
+    drawSprite(r.u, outlineOf(spr, rimC, this.armed || this.gilded ? 'solid' : 'dash'), this.x, this.y, { flip: this.flip, alpha: (this.gilded ? Math.max(0.85, pulse) : pulse) * fade });
+    if (this.gilded && Math.floor(this.age * 6) % 3 === 0) { r.u.fillStyle = col('B6'); r.u.fillRect(Math.round(this.x) + (Math.floor(this.age * 6) % 2 ? 3 : -4), Math.round(this.y) - 18, 1, 1); }
     // additive ghost glow
     r.g.globalCompositeOperation = 'lighter';
     drawSprite(r.g, body, this.x, this.y, { flip: this.flip, alpha: (0.28 + standK * 0.2) * fade });
     r.g.globalCompositeOperation = 'source-over';
     r.lightAt(this.x, this.y - 8, 46, 'C2', (0.45 + standK * 0.25) * fade);
+    this.x = x0;
   }
 
   renderUnlit(r: Renderer) {
     const w = this.world;
     const u = r.u;
     const coop = w.playerCount > 1;
-    const x = Math.round(this.x), top = Math.round(this.y) - 25;
+    const x = Math.round(this.drawX), top = Math.round(this.y) - 25;
     // co-op: the owner's shape badge over it, where a hand's own sits
     if (coop) drawSlotBadge(u, this.owner.slot, x, top);
     // ◆ (armed): a spinning diamond over its head
     if (this.armed) {
       diamond(u, x, coop ? top - 8 : top - 2, this.armedT, this.paradoxCd > 0);
       r.glowAt(x, (coop ? top - 8 : top - 2), 8, 'C3', 0.35);
+    }
+    // a stack of echoes on one spot says how many
+    if (this.stackN > 1) {
+      const n = `×${this.stackN}`, bx = x + 6, by = coop ? top - 8 : top - 2;
+      r.worldUi((ctx, toUi) => { const q = toUi(bx, by); G.digits.draw(ctx, n.slice(1), q.x + 4, q.y - 4.5 * Text.k, { fill: 'C4', outline: 'K0' }); ctx.fillStyle = col('C4'); ctx.fillRect(Math.round(q.x), Math.round(q.y) - 1, 1, 1); ctx.fillRect(Math.round(q.x) + 2, Math.round(q.y) - 1, 1, 1); ctx.fillRect(Math.round(q.x) + 1, Math.round(q.y), 1, 1); ctx.fillRect(Math.round(q.x), Math.round(q.y) + 1, 1, 1); ctx.fillRect(Math.round(q.x) + 2, Math.round(q.y) + 1, 1, 1); });
     }
     // integrity pips once it has been chipped
     if (this.integrity < this.integrityMax) {
@@ -503,10 +536,14 @@ export class Echo extends Entity implements Wielder {
     this.renderTerms(r);
   }
 
-  /** first sight (GDD2 §9.8): "残响 – 过去的你 · 会重复你做过的动作", then "就绪 ◆ – …" once armed */
+  /**
+   * first sight (GDD2 §9.8): "残响 – 过去的你 · 会重复你做过的动作" (a Fork's: "分岔 – 原地留下一个
+   * 残响"), then "就绪 ◆ – …" once armed. Placed beside it by ui/callouts.ts, one at a time.
+   */
   private renderTerms(r: Renderer) {
-    const id = this.armed && this.armedT < TERM_T ? 'armed' : !this.armed && this.age < TERM_T ? 'echo' : null;
-    if (id) termCallout(r, this.world, id, this.x, this.y + 6, { prio: id === 'armed' ? 5 : 4 });
+    const id = this.armed && this.armedT < TERM_T ? 'armed' : !this.armed && this.age < TERM_T ? (this.kind === 'fork' && Terms.showPlain('fork') ? 'fork' : 'echo') : null;
+    // a Fork is something the player just did: it may cut in on an older line (prio 5)
+    if (id) termCallout(r, this.world, id, this.drawX, this.y - 11, { prio: id === 'echo' ? 4 : 5, hw: 8, hh: 14 });
   }
 
   /**
@@ -544,18 +581,17 @@ export class Echo extends Entity implements Wielder {
       // the end: a little clock face where it will stand (a fork's: where Fork was pressed)
       clockFace(u, this.endX, this.endY, this.kind === 'fork' ? 1 : pathA, this.world.time);
     }
-    // action beads with their countdown
+    // action beads; in their last second a cyan ring closes in on them (a countdown without digits,
+    // which read as damage numbers next to the real ones; clarity S2.11)
     const cues = this.cues();
-    const nums: { x: number; y: number; d: string }[] = [];
     for (const c of cues) {
       const soon = c.t <= 1;
       if (dim && !soon) continue;
       u.globalAlpha = soon ? 1 : 0.75 * pathA;
       cueBead(u, c.x, c.y - 6, c.kind);
-      if (soon) nums.push({ x: c.x + 6, y: c.y - 11, d: String(Math.min(3, Math.max(1, Math.ceil(c.t * 3)))) });
+      if (soon) closingRing(u, c.x, c.y - 6, 5 + 5 * c.t, c.kind === 'last' || c.kind === 'special' ? 'B5' : 'C3');
     }
     u.globalAlpha = 1;
-    if (nums.length) r.worldUi((ctx, toUi) => { for (const q0 of nums) { const q = toUi(q0.x, q0.y); G.digits.draw(ctx, q0.d, q.x, q.y - 4.5 * Text.k, { fill: 'K10', align: 'center' }); } });
   }
 }
 
@@ -576,6 +612,18 @@ function diamond(u: CanvasRenderingContext2D, x: number, y: number, t: number, c
     // lit facet (top-left) white, the rest cyan
     rect(u, x - half, y + k, half * 2 + 1, 1, k < 0 ? 'K10' : k === 0 ? 'C4' : 'C3');
     if (k < 0 && half > 0) rect(u, x + half, y + k, 1, 1, 'C4');
+  }
+}
+
+/** a 1 px ring of radius `rad` round a bead (with a dark under-pixel) */
+function closingRing(u: CanvasRenderingContext2D, x: number, y: number, rad: number, c: string) {
+  x = Math.round(x); y = Math.round(y);
+  const n = Math.max(12, Math.round(rad * 4));
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU;
+    const px = Math.round(x + Math.cos(a) * rad), py = Math.round(y + Math.sin(a) * rad);
+    u.fillStyle = col('K0'); u.fillRect(px, py + 1, 1, 1);
+    u.fillStyle = col(c); u.fillRect(px, py, 1, 1);
   }
 }
 

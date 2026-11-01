@@ -49,11 +49,26 @@ registerStrings('f3', {
   recallParadox: L('召回悖论！', 'RECALL!'),
   grandfather: L('祖父悖论', 'GRANDFATHER PARADOX'),
   // tutorial room: Fork (rooms/tutorial.ts)
-  tutFork: L('按分岔：留下一个残响，它会走到你脚下', 'Fork: leave an echo that walks to your feet'),
+  tutFork: L('分岔（50 时砂）：留下一个会走到你脚下的残响', 'Fork (50 Sand): leave an echo that walks to your feet'),
+  // ── F3 fix pass (first-play clarity, acceptance, review) ──
+  // 1.0 saves that still spoke only Chinese (player.ts hurt(); D14)
+  sealWax: L('封蜡', 'Sealing Wax'),
+  secondSpring: L('第二根发条', 'Second Mainspring'),
+  // the Shadow's plain line, with how far back it really is ({s} seconds; P5's hands have other tapes)
+  shadowLive: L('{s} 秒前的你 · 回溯会回到这里', 'You {s}s ago · rewind lands here'),
+  // under the scrub preview: what a release does (first scrubs), and a hit the cursor has not reached
+  scrubHow: L('松开 = 落在这里 · 冲刺取消', 'Release = land here · Dash cancels'),
+  further: L('再往回 → +{n}', 'Further back → +{n}'),
+  // a grey Shadow says why there is no rewind (GDD2 §3.1)
+  shadowNoSand: L('时砂不足', 'Not enough Sand'),
+  shadowAnchor: L('被时间锚锁住', 'Anchored'),
+  shadowBurnt: L('磁带烧毁', 'Tape burnt'),
+  // the Stillness's warning (stillness.ts): the past acts in stopped time — rewind or Fork first
+  stillHint: L('只有{c:残响}能在时停中行动——先回溯或分岔！', 'Only {c:echoes} move in stopped time — rewind or Fork now!'),
 });
 
 // Terms the player meets in F3b's verbs (GDD2 §9.8: a plain line on first sight, ≤ 14 Han characters)
-defineTerm({ id: 'armed', name: L('就绪 ◆', 'Armed ◆'), plain: L('◆ 出现后碰它 → 悖论', '◆ = touch it for a Paradox'),
+defineTerm({ id: 'armed', name: L('就绪 ◆', 'Armed ◆'), plain: L('◆ 出现后碰它 → 爆炸', '◆ = touch it to explode'),
   detail: L('残响出现 {g:0.4} 秒后头顶亮起 ◆，描边变成实线：这时走进它会引发悖论，冲刺穿过它会打出一道直线冲击。',
     'An echo arms {g:0.4}s after it appears: a ◆ lights over it and its outline turns solid. Walk into it for a Paradox, or dash through it for a line blast.'), icon: 'echo' });
 defineTerm({ id: 'tickDodge', name: L('卡秒', 'Tick-Dodge'), plain: L('攻击命中前一刻冲刺 → 反击', 'Dash just before a hit → counter'),
@@ -69,3 +84,16 @@ defineTerm({ id: 'recall', name: L('召回', 'Recall'), plain: L('按住分岔�
     'Hold Fork {g:0.4}s: every armed echo flies straight back to you, cutting through enemies, and sets off a Recall Paradox ({g:75%} damage) when it arrives.'), icon: 'fork' });
 defineTerm({ id: 'counter', name: L('反击', 'Counter'), plain: L('卡秒后的下一击必定暴击', 'Next hit after a Tick-Dodge crits'),
   detail: L('卡秒后 {g:1.2} 秒内你的下一次命中：必定暴击 ×2，并伴随白闪。', 'Your next hit within {g:1.2}s of a Tick-Dodge: a guaranteed ×2 crit with a white flash.'), icon: 'sync' });
+
+// F3 fix pass: every stamp names a term the first time (GDD2 §9.8; review F3 #4, clarity S2.10)
+defineTerm({ id: 'perfect', name: L('完美回溯', 'Perfect Rewind'), plain: L('躲过一击 · 时砂全额返还', 'Dodged a hit · Sand refunded'),
+  detail: L('按下回溯后 {g:0.2} 秒内本应打中你的攻击：这次回溯的时砂全部返还，留下的残响镀金（伤害 +{g:50%}）。',
+    'An attack that would have hit you within {g:0.2}s of pressing rewind: the rewind\'s Sand comes back in full and its echo is gilded (+{g:50%} damage).'), icon: 'sand' });
+defineTerm({ id: 'interrupt', name: L('打断', 'Interrupt'), plain: L('敌人闪白时重击 → 打断', 'Heavy hit on the white flash'),
+  detail: L('敌人出招前的最后一刻会闪白：这时用重击（悖论、特技、反击）打中它，它的攻击被打断并僵直，+{c:20} 时砂。',
+    'An enemy flashes white just before it strikes. Land a heavy hit then (a Paradox, a special, a Counter) to cancel the attack and stagger it: +{c:20} Sand.'), icon: 'sync' });
+defineTerm({ id: 'grandfather', name: L('祖父悖论', 'Grandfather Paradox'), plain: L('悖论炸死元凶 → +100 时砂', 'Paradox kills a Culprit: +100 Sand'),
+  detail: L('用悖论击杀被你标记的元凶：返还 {c:100} 时砂。', 'Kill a Culprit you marked with a Paradox: {c:100} Sand back.'), icon: 'paradox' });
+defineTerm({ id: 'hpPromise', name: L('青色斜纹', 'Cyan stripes'), plain: L('回溯能拿回的生命', 'Health a rewind gives back'),
+  detail: L('血条上的青色斜纹 = 现在回溯能拿回的生命，和旧影头顶的 {c:+数字} 一样多。变成灰色空框时表示现在回溯不了（时砂不足、被锚住或磁带烧毁）。',
+    'The cyan stripes on your health bar are the health a rewind would give back right now, the same as the {c:+number} over your Shadow. A grey outline means you cannot rewind right now (no Sand, anchored or tape burnt).'), icon: 'shadow' });

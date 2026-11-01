@@ -47,13 +47,17 @@ export interface PostParams {
   rewindR: number;
   /** 0..1: desaturate the world outside the ripple (0.3 while a hand scrubs the tape) */
   rewindDesat: number;
+  /** a second rewinding hand's circle (co-op; rewindR2 = 0: none). Same look, same strength */
+  rewindX2: number;
+  rewindY2: number;
+  rewindR2: number;
 }
 
 export const defaultPost = (): PostParams => ({
   camFracX: 0, camFracY: 0, time: 0, rewind: 0, ca: 0, hurt: 0, flash: 0, fade: 0,
   saturation: 1, contrast: 1, tint: [1, 1, 1], lift: [0, 0, 0], vignette: 0.35, bloom: 0.55,
   bloomThreshold: 0.62, grain: 0.025, pixelPerfect: false, lighting: true, timestop: 0,
-  rewindX: VIEW_W / 2, rewindY: VIEW_H / 2, rewindR: 0, rewindDesat: 0,
+  rewindX: VIEW_W / 2, rewindY: VIEW_H / 2, rewindR: 0, rewindDesat: 0, rewindX2: 0, rewindY2: 0, rewindR2: 0,
 });
 
 /** the rewind's share of params.ca that game/hub scenes add (pp.ca = pp.rewind × 2.2 + …) */
@@ -128,6 +132,8 @@ uniform vec2 uCamFrac;
 uniform float uScale, uTime, uRewind, uCA, uHurt, uFlash, uFade, uVignette, uBloom, uGrain;
 uniform vec2 uRewindCenter;        // rewind ripple centre (view px)
 uniform float uRewindRadius, uRewindDesat, uRewindCA;   // radius (0 = full screen), outside desaturation, rewind CA share
+uniform vec2 uRewindCenter2;       // a second rewinding hand (co-op)
+uniform float uRewindRadius2;      // its radius (0 = none)
 float lumaF(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
 
 vec2 sharp(vec2 px, vec2 size){
@@ -146,6 +152,14 @@ void main(){
   bool local = uRewindRadius > 0.5;
   float dC = local ? length(v - uRewindCenter) : 0.0;
   float mask = local ? 1.0 - smoothstep(uRewindRadius * 0.8, uRewindRadius, dC) : 1.0;
+  float rimR = uRewindRadius;
+  if (local && uRewindRadius2 > 0.5) {
+    // two circles: inside either one is rewind-coloured; rings and rim follow the nearer edge
+    float d2 = length(v - uRewindCenter2);
+    float m2 = 1.0 - smoothstep(uRewindRadius2 * 0.8, uRewindRadius2, d2);
+    if (m2 > mask || (d2 - uRewindRadius2) < (dC - uRewindRadius)) { dC = d2; rimR = uRewindRadius2; }
+    mask = max(mask, m2);
+  }
   float rw = uRewind * mask;
   // rewind wobble: horizontal displacement per scanline band
   float band = floor(v.y / 2.0);
@@ -173,7 +187,7 @@ void main(){
     c = mix(c, vec3(g * 0.72, g * 1.0, g * 1.18), rw * 0.6);
     float rings = smoothstep(0.55, 1.0, sin(dC * 0.42 - uTime * 16.0));
     c += vec3(0.12, 0.55, 0.7) * rw * rings * 0.11;
-    float rim = exp(-pow((dC - uRewindRadius) / 2.5, 2.0));
+    float rim = exp(-pow((dC - rimR) / 2.5, 2.0));
     c += vec3(0.32, 0.86, 0.96) * uRewind * rim * 0.45;
     float g2 = lumaF(c);
     c = mix(c, vec3(g2), uRewindDesat * min(1.0, uRewind * 4.0) * (1.0 - mask));
@@ -369,6 +383,8 @@ export class PostFX {
     gl.uniform1f(pr.u('uRewindRadius'), p.rewindR);
     gl.uniform1f(pr.u('uRewindDesat'), p.rewindDesat);
     gl.uniform1f(pr.u('uRewindCA'), Math.min(p.ca, p.rewind * REWIND_CA));
+    gl.uniform2f(pr.u('uRewindCenter2'), p.rewindX2 ?? 0, p.rewindY2 ?? 0);
+    gl.uniform1f(pr.u('uRewindRadius2'), p.rewindR2 ?? 0);
     gl.viewport(L.x, this.canvas.height - L.y - L.h, L.w, L.h);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }

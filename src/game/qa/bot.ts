@@ -44,7 +44,8 @@ function planRewind(p: Player, br: Brain): number {
   const m = p.mods;
   const back = (n - hit) / 60 + 0.15;
   const hold = m.rewindTapThreshold + Math.max(0, back - 0.1) / (3 / 0.9);
-  if (Math.random() < 0.5 || hold > m.rewindTapThreshold + m.scrubMax - 0.05) { br.taps++; return 1 / 60; }
+  // scrubMax counts from the press (GDD2 §3.2: auto-confirm 1.2 s after it)
+  if (Math.random() < 0.5 || hold > m.scrubMax - 0.05) { br.taps++; return 1 / 60; }
   br.scrubs++;
   return hold;
 }

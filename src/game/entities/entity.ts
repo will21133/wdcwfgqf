@@ -87,8 +87,8 @@ export abstract class Actor extends Entity {
    * World.update counts `t` down and drops a mark at 0.
    */
   marks = new Map<string, { t: number; stacks: number; src: number }>();
-  /** recent hits by source (combat.applyDamage keeps the last ~1 s; Sync reads it) */
-  lastHits: { src: number; t: number }[] = [];
+  /** recent hits by source (combat.applyDamage keeps the last ~1 s; Sync reads it); `used` = already paired into a Sync / Chord */
+  lastHits: { src: number; t: number; used?: boolean }[] = [];
   /** set by world while frozen by time-stop/stasis */
   get frozen() { return this.st.stasis > 0; }
 

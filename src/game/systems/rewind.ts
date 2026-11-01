@@ -147,6 +147,8 @@ export class Recorder {
 
   /** Fork: a copy of the last `fromSec` seconds (the tape is untouched) */
   slice(fromSec: number): Recording {
+    // an empty tape gives an empty recording (spawnEcho refuses it), never a frame of undefined fields
+    if (!this.count) return { frames: [], events: [] };
     const n = Math.max(1, Math.min(this.count, Math.round(fromSec * 60)));
     const i = this.count - n;
     const frames: Frame[] = [];

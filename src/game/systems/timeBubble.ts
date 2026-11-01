@@ -54,8 +54,18 @@ export class TimeBubbles {
       if (b.owner && !b.owner.dead) { b.x = b.owner.x; b.y = b.owner.y; }
       this.list.push(b);
     }
-    for (const b of this.list) if (b.r === Infinity) this.global = Math.min(this.global, b.scale);
+    this.globalOwner = null;
+    let mixed = false;
+    for (const b of this.list) {
+      if (b.r !== Infinity) continue;
+      this.global = Math.min(this.global, b.scale);
+      // a hand's own timed world slow (a solo Tick-Dodge) leaves that hand at full speed
+      if (b.t >= 0 && b.owner && !mixed && (this.globalOwner === null || this.globalOwner === b.owner)) this.globalOwner = b.owner;
+      else { mixed = true; this.globalOwner = null; }
+    }
   }
+  /** the hand whose own timed bubble is the only whole-room slow this tick (it keeps its speed) */
+  globalOwner: Player | null = null;
 
   /** a timed bubble (follows `owner` if given); solo callers pass r = Infinity for a world slow */
   push(b: { x: number; y: number; r: number; scale: number; dur: number; owner?: Player | null }) {
@@ -82,5 +92,5 @@ export class TimeBubbles {
     return null;
   }
 
-  clear() { this.list.length = 0; this.timed.length = 0; this.global = 1; }
+  clear() { this.list.length = 0; this.timed.length = 0; this.global = 1; this.globalOwner = null; }
 }

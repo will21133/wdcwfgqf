@@ -3,21 +3,27 @@
 // World (drawn by each hand in Player.renderUnlit):
 //   · the Shadow 旧影 — a hollow outline of the hand where a rewind would land (the tap target: the
 //     oldest frame the Sand pays for; while scrubbing, the cursor), joined to the hand by a 2 px
-//     hairspring along the taped path. Above it: +HP (what a rewind gives back, cyan) and −N🔒
-//     (fixed damage it cannot, violet). Grey and dotted when no rewind is possible.
-//   · while scrubbing: a bright preview of the hand at the cursor with +HP and −Sand, and the part
-//     of the path that will become the echo highlighted with its action beads.
+//     hairspring along the taped path. Above it: +HP (what a rewind gives back, cyan) with the
+//     locked part beside it (padlock + violet number), and under that the Sand it costs (always
+//     while scrubbing; in the first rooms for a tap too). Grey, dotted and with the reason written
+//     on it when no rewind is possible.
+//   · while scrubbing: a bright preview of the hand at the cursor with +HP (+0 in grey when it gives
+//     nothing back) and −Sand, the part of the path that will become the echo highlighted with its
+//     action beads; under its feet "Further back → +9" when the cursor has not reached a hit yet,
+//     and (first scrubs) "Release = land here · Dash cancels".
 //   · Culprit marks over enemies, the landing ring of clock ticks and '+N', the Pull Back prompt.
 // HUD (Hud.register, replacing F2's wrappers):
-//   hp    the three-colour bar: red = HP now · cyan stripes = what a rewind gives back · violet
-//         cracked glass = locked by fixed damage
+//   hp    the three-colour bar: red = HP now · cyan stripes = what a rewind gives back (a grey
+//         outline when no rewind is possible; a dotted outline for what a longer scrub would
+//         reach) · violet cracked glass = locked by fixed damage
 //   tape  the strip under it: the last seconds, red / violet notches for hits, a white diamond
 //         where a hit will mark (or has marked) a Culprit, grey with an anchor in a time anchor
-//   sand  ⌛⌛ 142/200 — one small hourglass per 100, the number, the cost while scrubbing
-//   chain the top-centre "CHAIN ×N" slot (F3b's paradox chains call HudChain.show)
-// First sight of 旧影 / 磁带 / 时砂 puts the plain-language line next to it (Terms, GDD2 §9.8).
+//   sand  ⌛⌛ 142/200 — one small hourglass per 100, the number; what a tap / the scrub costs
+//   chain the top-centre "CHAIN ×N" slot (paradox chains call HudChain.show)
+// First sight of a term puts its plain-language line next to it (Terms, GDD2 §9.8): solo HUD
+// plates under the pod, co-op on the caption rail, world callouts through ui/callouts.ts.
 import type { Renderer } from '../../engine/gfx/renderer';
-import type { Player } from '../entities/player';
+import type { Player, RewindRefusal } from '../entities/player';
 import type { Frame } from '../systems/rewind';
 import { drawSprite } from '../../engine/gfx/sprite';
 import { outlineOf } from '../../engine/gfx/outline';
@@ -29,15 +35,16 @@ import { Text } from './text';
 import { drawTermLabel, drawPromptLabel, promptH } from './widgets';
 import { Terms } from '../meta/registry';
 import { damp, TAU } from '../../engine/math';
-import { tr } from '../i18n';
+import { tr, type L10n } from '../i18n';
 import { S, term } from '../strings';
 import { ROMAN, SLOT_COLOR } from '../players';
-import { VIEW_W, VIEW_H } from '../../engine/gfx/post';
+import { termCallout, Callouts, Caption } from './callouts';
 /** Sand per hourglass icon (run.ts SAND_PER_GLASS; not imported to keep this module off run.ts's import graph) */
 const SAND_PER_GLASS = 100;
 import '../strings/f3';
 
-// outline sprites: engine/gfx/outline.ts (shared with the echoes' rims)
+// world term callouts live in ui/callouts.ts (one at a time, never over the action); re-exported for callers
+export { termCallout };
 
 // ───────────────────────── small pixel icons ─────────────────────────
 /** 5×6 padlock (violet = locked HP) */
@@ -67,79 +74,43 @@ function miniGlass(ctx: CanvasRenderingContext2D, x: number, y: number, f: numbe
     rect(ctx, x + cx, y + row, w, 1, i < lit ? (glow && i === lit - 1 ? 'C4' : i === lit - 1 ? 'C3' : 'C2') : 'K1');
   }
 }
-/** 5×5 anchor (time anchor: no rewinds) */
+/** 5×5 anchor (time anchor: no rewinds) on a 7×7 dark tile */
 function anchorIcon(ctx: CanvasRenderingContext2D, x: number, y: number) {
   x = Math.round(x); y = Math.round(y);
   rect(ctx, x - 1, y - 1, 7, 7, 'K0');
-  rect(ctx, x + 2, y, 1, 4, 'K9'); rect(ctx, x + 1, y + 1, 3, 1, 'K9');
-  rect(ctx, x, y + 3, 1, 1, 'K9'); rect(ctx, x + 4, y + 3, 1, 1, 'K9'); rect(ctx, x + 1, y + 4, 3, 1, 'K9');
+  rect(ctx, x + 2, y, 1, 4, 'K10'); rect(ctx, x + 1, y + 1, 3, 1, 'K10');
+  rect(ctx, x, y + 3, 1, 1, 'K10'); rect(ctx, x + 4, y + 3, 1, 1, 'K10'); rect(ctx, x + 1, y + 4, 3, 1, 'K10');
+}
+/** 10×3 striped swatch (the HP bar's cyan promise) for its HUD plate */
+function stripeIcon(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  rect(ctx, x - 1, y - 1, 12, 7, 'K0');
+  rect(ctx, x, y, 10, 5, 'C1');
+  ctx.fillStyle = col('C3');
+  for (let j = 0; j < 5; j++) for (let i = 0; i < 10; i++) if (((i + j) & 3) < 2) ctx.fillRect(x + i, y + j, 1, 1);
 }
 
-// ───────────────────────── the Shadow (world) ─────────────────────────
-/** per-hand: which room the term labels were counted in */
+// ───────────────────────── first sight (GDD2 §9.8) ─────────────────────────
+/** per world: which terms were counted (Terms.seen) or captioned in this room */
 const termRoom = new WeakMap<object, Set<string>>();
-function seenThisRoom(world: object, id: string) {
+function onceThisRoom(world: object, key: string): boolean {
   let s = termRoom.get(world);
   if (!s) termRoom.set(world, (s = new Set()));
-  if (s.has(id)) return;
-  s.add(id);
-  Terms.seen(id);
+  if (s.has(key)) return false;
+  s.add(key);
+  return true;
 }
+function seenThisRoom(world: object, id: string) { if (onceThisRoom(world, 'seen:' + id)) Terms.seen(id); }
 /** first sight: plain-language lines show for this long at the start of each room (while Terms says so) */
 const TERM_SECONDS = 12;
 const termOn = (p: Player, id: string) => p.world.time < TERM_SECONDS && Terms.showPlain(id);
+/** "3" / "1.4": seconds of tape, as the Shadow's line says them */
+const secs = (s: number) => String(Math.round(s * 10) / 10);
+function fill(l: L10n, k: string, v: string): L10n { return { zh: l.zh.replace(k, v), en: l.en.replace(k, v) }; }
+/** "+N" first-scrub help: shown for the first few scrubs of a session */
+let scrubHowCount = 0;
+const countedScrubs = new WeakSet<object>();
 
-// ───────────────────────── term callouts (GDD2 §9.8) ─────────────────────────
-/**
- * World term callouts ("旧影 – 3 秒前的你 · 回溯会回到这里" under the Shadow, "就绪 ◆ – …" under an
- * echo, "悖论 – …" by a paradox preview …) are requested during the world render and placed together
- * when the UI layer is flushed: highest priority first, each moved below or above a callout it would
- * cover, dropped if it still collides. One callout per term per frame; each counts as seen once a room.
- */
-interface CalloutReq { w: object; id: string; x: number; y: number; prio: number; color: string; above: boolean; supersedes?: string[] }
-const callouts: CalloutReq[] = [];
-const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
-let calloutFrame = -1;
-export function termCallout(r: Renderer, w: object, id: string, x: number, y: number, o: { prio?: number; color?: string; above?: boolean; supersedes?: string[] } = {}): void {
-  if (!Terms.showPlain(id)) return;
-  if (calloutFrame !== G.frame) { calloutFrame = G.frame; callouts.length = 0; r.worldUi(drawCallouts); }
-  if (callouts.some((c) => c.id === id)) return;
-  callouts.push({ w, id, x, y, prio: o.prio ?? 0, color: o.color ?? 'C3', above: !!o.above, supersedes: o.supersedes });
-}
-function drawCallouts(ctx: CanvasRenderingContext2D, toUi: (x: number, y: number) => { x: number; y: number }) {
-  callouts.sort((a, b) => b.prio - a.prio);
-  placed.length = 0;
-  const lh = Text.lineH('small');
-  // a callout that says the same thing as a higher one (the paradox preview's line covers "armed") is dropped
-  const gone = new Set<string>();
-  for (const c of callouts) if (c.supersedes) for (const id of c.supersedes) gone.add(id);
-  for (const c of callouts) {
-    if (gone.has(c.id)) continue;
-    const t = term(c.id);
-    if (!t) continue;
-    const q = toUi(c.x, c.y);
-    const tw = Math.ceil(Math.max(Text.measure(t.name, 'small').w, Text.measure(t.plain, 'small').w));
-    const bw = tw + 6, bh = Math.ceil(lh * 2) + 2;
-    // kept on screen (4 px in from the edges, below the top pods)
-    const cxq = Math.max(bw / 2 + 4, Math.min(VIEW_W - bw / 2 - 4, q.x));
-    const x0 = Math.round(cxq - tw / 2) - 3;
-    const clampY = (ty: number) => Math.max(48, Math.min(VIEW_H - bh - 4, ty));
-    const y0 = clampY(c.above ? Math.round(q.y) - bh : Math.round(q.y));
-    let y = NaN;
-    for (const ty of [y0, clampY(y0 + bh + 2), clampY(y0 - bh - 2)]) {
-      if (!placed.some((b) => x0 < b.x1 && x0 + bw > b.x0 && ty < b.y1 && ty + bh > b.y0)) { y = ty; break; }
-    }
-    if (Number.isNaN(y)) continue;
-    placed.push({ x0, y0: y, x1: x0 + bw, y1: y + bh });
-    seenThisRoom(c.w, c.id);
-    const a = ctx.globalAlpha;
-    ctx.globalAlpha = a * 0.8;
-    rect(ctx, x0, y, bw, bh, 'K0');
-    ctx.globalAlpha = a;
-    drawTermLabel(ctx, c.id, Math.round(cxq), y + 1, { size: 'small', color: c.color, align: 'center', layout: 'below', forcePlain: true });
-  }
-}
-
+// ───────────────────────── the Shadow (world) ─────────────────────────
 export function renderShadow(r: Renderer, p: Player) {
   const w = p.world;
   const rec = p.rec;
@@ -154,22 +125,26 @@ export function renderShadow(r: Renderer, p: Player) {
   const R = p.rw;
   if (R && R.phase === 'travel') return;
   const scrub = !!R && R.scrub;
-  const pv = p.state === 'stopped' && !solo ? { ...p.rewindPreview(), frame: 0, ok: true } : p.rewindPreview();
+  const pulledCoop = p.state === 'stopped' && !solo;
+  const pv = pulledCoop ? { ...p.rewindPreview(), frame: 0, ok: true } : p.rewindPreview();
   const f = rec.at(pv.frame);
-  const near = Math.hypot(f.x - p.x, f.y - p.y) < 6;
-  const alpha = solo ? 1 : 0.85;
+  const dist = Math.hypot(f.x - p.x, f.y - p.y);
+  const near = dist < 6;
+  // co-op: four Shadows share one screen, so each is quieter and in its hand's colour (D7)
+  const alpha = solo ? 1 : 0.6;
   const u = r.u;
-  // hairspring: the taped path from the hand back to the Shadow (2 px, cyan 40%)
+  // hairspring: the taped path from the hand back to the Shadow (2 px, cyan 40%; co-op: slot colour
+  // 30%, and only its last second when the Shadow is far away)
   const n = rec.length;
   if (!near || scrub) {
-    // older than the target: faint; target → now: the hairspring proper
-    u.fillStyle = col(pv.ok ? 'C2' : 'K5');
+    u.fillStyle = col(pv.ok ? (solo ? 'C2' : SLOT_COLOR[p.slot % 4]) : 'K5');
     if (scrub) {
       u.globalAlpha = 0.25;
       for (let i = 0; i < pv.frame; i += 3) { const q = rec.at(i); u.fillRect(Math.round(q.x), Math.round(q.y) - 1, 1, 1); }
     }
-    u.globalAlpha = (pv.ok ? 0.5 : 0.35) * alpha;
-    for (let i = pv.frame; i < n; i++) { const q = rec.at(i); u.fillRect(Math.round(q.x) - 1, Math.round(q.y) - 1, 2, 2); }
+    const from = !solo && !scrub && dist > 120 ? Math.max(pv.frame, n - 60) : pv.frame;
+    u.globalAlpha = pv.ok ? (solo ? 0.5 : 0.3) : 0.35;
+    for (let i = from; i < n; i++) { const q = rec.at(i); u.fillRect(Math.round(q.x) - 1, Math.round(q.y) - 1, 2, 2); }
     if (scrub) {
       // the part that will become the echo, bright, with its action beads
       u.fillStyle = col('C3');
@@ -192,7 +167,16 @@ export function renderShadow(r: Renderer, p: Player) {
     drawSprite(u, spr, f.x, f.y, { flip: f.flip, tint: 'C3', alpha: 0.35 });
     drawSprite(u, outlineOf(spr, 'C4', 'solid'), f.x, f.y, { flip: f.flip, alpha: pulse });
   } else if (!pv.ok) {
-    drawSprite(u, outlineOf(spr, 'K6', 'dot'), f.x, f.y, { flip: f.flip, alpha: 0.55 * alpha });
+    // no rewind possible: a grey silhouette with a dashed rim and a dark under-edge, so it still
+    // reads on dark floors (the dotted rim alone vanished; D3) — and the reason is written on it
+    u.globalAlpha = 0.45 * alpha;
+    u.strokeStyle = col('K7');
+    u.lineWidth = 1;
+    u.beginPath(); u.ellipse(Math.round(f.x) + 0.5, Math.round(f.y) + 0.5, 6, 2.5, 0, 0, TAU); u.stroke();
+    u.globalAlpha = 1;
+    drawSprite(u, spr, f.x, f.y, { flip: f.flip, tint: 'K6', alpha: 0.3 * alpha });
+    drawSprite(u, outlineOf(spr, 'K0', 'solid'), f.x + 1, f.y + 1, { flip: f.flip, alpha: 0.7 * alpha });
+    drawSprite(u, outlineOf(spr, 'K9', 'dash'), f.x, f.y, { flip: f.flip, alpha: 0.9 * alpha });
   } else {
     // a soft landing mark on the floor under it, then the hollow, dashed outline (cyan; co-op: the
     // hand's own colour so four Shadows stay apart)
@@ -203,47 +187,118 @@ export function renderShadow(r: Renderer, p: Player) {
     u.beginPath(); u.ellipse(Math.round(f.x) + 0.5, Math.round(f.y) + 0.5, 6, 2.5, 0, 0, TAU); u.stroke();
     u.globalAlpha = 1;
     r.glowAt(f.x, f.y - 8, 14, 'C2', 0.18 * alpha);
-    drawSprite(u, spr, f.x, f.y, { flip: f.flip, tint: 'C1', alpha: 0.22 });
+    drawSprite(u, spr, f.x, f.y, { flip: f.flip, tint: 'C1', alpha: 0.22 * alpha });
     drawSprite(u, outlineOf(spr, c, 'dash'), f.x, f.y, { flip: f.flip, alpha: (p.state === 'stopped' ? 1 : 0.85) * alpha });
   }
-  // labels over its head: +HP / −N🔒 / (scrub) −Sand
-  const hpGain = p.state === 'stopped' && !solo ? Math.max(0, Math.round(Math.max(p.maxHp * 0.3, f.hp - Math.max(0, p.fixedTaken - f.fixed)))) : pv.hpGain;
-  const locked = pv.locked, cost = pv.cost;
+  // a grey Shadow says why (the reason the press would give)
+  if (!pv.ok && !near && p.state === 'alive') {
+    const why = blockText(p);
+    if (why) {
+      const lx = f.x, ly = f.y - 30;
+      r.worldUi((ctx, toUi) => { const q = toUi(lx, ly); Text.draw(ctx, why, q.x, q.y, { size: 'small', color: 'K8', align: 'center', outline: 'K0' }); });
+    }
+  }
+  // labels over its head: +HP and 🔒N on one row, the Sand it costs under them
+  const hpGain = pulledCoop ? Math.max(0, Math.round(Math.max(p.maxHp * 0.3, f.hp - Math.max(0, p.fixedTaken - f.fixed)))) : pv.hpGain;
+  const locked = solo || scrub ? pv.locked : 0, cost = pv.cost;
   const show = scrub || hpGain > 0 || locked > 0;
+  // the price of a tap is on the Shadow while the player is still learning what Sand is (clarity S1.5)
+  const showCost = scrub || (solo && !pulledCoop && hpGain > 0 && Terms.showPlain('sand'));
+  const pulse = hudOf(p)?.promiseT ?? 0;
   if (show && pv.ok) {
-    const lx = f.x, ly = f.y - 30, slot = solo ? -1 : p.slot;
+    // a preview right next to the hand: the labels go above both, never across the hand's sprite
+    const crowd = Math.abs(f.x - p.x) < 22 && Math.abs(f.y - p.y) < 30;
+    const lx = f.x, ly = (crowd ? Math.min(f.y, p.y) : f.y) - 30, slot = solo ? -1 : p.slot;
+    // the labels are part of the Shadow: no term plate may sit on them
+    { const lhw = Math.ceil(Text.lineH('body')), rows = showCost ? 2 : 1; Callouts.avoid(lx - 24, ly - (rows - 1) * lhw - 2, 48, rows * lhw + 4); }
     r.worldUi((ctx, toUi) => {
       const q = toUi(lx, ly);
       let y = Math.round(q.y);
       const lh = Math.ceil(Text.lineH('body'));
+      // a dark backing while scrubbing: the ripple's colour fringing runs right behind these numbers
       if (scrub) {
+        const a0 = ctx.globalAlpha;
+        ctx.globalAlpha = a0 * 0.7;
+        rect(ctx, Math.round(q.x) - 22, y - lh + 1, 44, lh * 2, 'K0');
+        ctx.globalAlpha = a0;
+      }
+      if (showCost) {
         const t = `-${cost}`;
         const tw = Math.ceil(Text.measure(t, 'body').w);
         const x0 = Math.round(q.x - (tw + 10) / 2);
+        const a0 = ctx.globalAlpha;
+        if (!scrub) ctx.globalAlpha = a0 * 0.8;
         Text.draw(ctx, t, x0, y, { color: cost === 0 ? 'G4' : 'C4', outline: 'K0' });
         miniGlass(ctx, x0 + tw + 3, y + Math.round(lh / 2) - 3, 1, false, false);
+        ctx.globalAlpha = a0;
         y -= lh;
       }
-      if (locked > 0) {
-        const t = `-${locked}`;
-        const tw = Math.ceil(Text.measure(t, 'body').w);
-        const x0 = Math.round(q.x - (tw + 9) / 2);
-        Text.draw(ctx, t, x0, y, { color: 'V3', outline: 'K0' });
-        lockIcon(ctx, x0 + tw + 2, y + Math.round(lh / 2) - 3);
-        y -= lh;
-      }
-      if (hpGain > 0) Text.draw(ctx, `+${hpGain}`, q.x, y, { color: 'C3', outline: 'K0', align: 'center' });
+      // what comes back (+0 in grey while a scrub gives nothing), and beside it, without a minus so
+      // it never reads as a cost, the padlocked violet part that will not
+      const gs = `+${hpGain}`;
+      const gw = hpGain > 0 || scrub ? Math.ceil(Text.measure(gs, 'body').w) : 0;
+      const ls = String(locked), lw = locked > 0 ? 9 + Math.ceil(Text.measure(ls, 'body').w) : 0;
+      const total = gw + (gw && lw ? 5 : 0) + lw;
+      let x = Math.round(q.x - total / 2);
+      const big = pulse > 0 && Math.floor(pulse * 10) % 2 === 0;
+      if (gw) { Text.draw(ctx, gs, x, y, { color: hpGain > 0 ? (big ? 'K10' : 'C3') : 'K6', outline: 'K0' }); x += gw + 5; }
+      if (lw) { lockIcon(ctx, x, y + Math.round(lh / 2) - 3); Text.draw(ctx, ls, x + 9, y, { color: 'V3', outline: 'K0' }); }
       if (slot >= 0) rect(ctx, Math.round(q.x) - 1, Math.round(q.y) + lh + 1, 3, 1, SLOT_COLOR[slot]);
     });
   }
-  shadowTerm(r, p, f, scrub);
+  if (scrub) scrubHelp(r, p, f, pv.hpGain);
+  shadowTerm(r, p, f, pv.ok, pv.hpGain, pv.seconds, scrub);
 }
 
-/** the first few rooms: "旧影 – 3 秒前的你 · 回溯会回到这里" under the Shadow (one hand's at a time) */
-function shadowTerm(r: Renderer, p: Player, f: Frame, scrub: boolean) {
-  if (scrub || p.state !== 'alive' || !termOn(p, 'shadow')) return;
+/** why the press would be refused, short (on the grey Shadow) */
+function blockText(p: Player): string | null {
+  const why: RewindRefusal | null = p.rewindBlock();
+  if (why === 'sand') return tr(S('f3', 'shadowNoSand'));
+  if (why === 'anchor') return tr(S('f3', 'shadowAnchor'));
+  if (why === 'burnt') return `${tr(S('f3', 'shadowBurnt'))} ${Math.ceil(p.rec.burnT)}s`;
+  return null;
+}
+
+/**
+ * Under the scrub preview's feet: "Further back → +9" while the cursor has not reached a hit the
+ * Shadow would undo (a short scrub silently gave nothing back; clarity S1.3), and for the first
+ * scrubs of a session "Release = land here · Dash cancels".
+ */
+function scrubHelp(r: Renderer, p: Player, f: Frame, gain: number) {
+  const R = p.rw!;
+  if (!countedScrubs.has(R)) { countedScrubs.add(R); scrubHowCount++; }
+  const more = p.tapGain();
+  const lines: string[] = [];
+  if (more > gain) lines.push(tr(fill(S('f3', 'further'), '{n}', String(more))));
+  if (scrubHowCount <= 3) lines.push(tr(S('f3', 'scrubHow')));
+  if (!lines.length) return;
+  const lx = f.x, ly = f.y + 5;
+  r.worldUi((ctx, toUi) => {
+    const q = toUi(lx, ly);
+    let y = Math.round(q.y);
+    const lh = Math.ceil(Text.lineH('small'));
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i];
+      const tw = Math.ceil(Text.measure(t, 'small').w);
+      const a0 = ctx.globalAlpha;
+      ctx.globalAlpha = a0 * 0.85;
+      rect(ctx, Math.round(q.x - tw / 2) - 3, y, tw + 6, lh + 1, 'K0');
+      ctx.globalAlpha = a0;
+      Text.draw(ctx, t, q.x, y + 1, { size: 'small', color: i === 0 && more > gain ? 'C3' : 'K8', align: 'center' });
+      y += lh + 2;
+    }
+  });
+}
+
+/**
+ * The Shadow's callout ("旧影 – 1.4 秒前的你 · 回溯会回到这里", the real distance back): at the start
+ * of the first rooms, and when it starts to promise something (+N after a hit).
+ */
+function shadowTerm(r: Renderer, p: Player, f: Frame, ok: boolean, gain: number, seconds: number, scrub: boolean) {
+  if (scrub || !ok || p.state !== 'alive' || !Terms.showPlain('shadow')) return;
   if (Math.hypot(f.x - p.x, f.y - p.y) < 20) return;
-  termCallout(r, p.world, 'shadow', f.x, f.y + 5, { prio: 1 });
+  if (!(p.world.time < TERM_SECONDS || gain > 0)) return;
+  termCallout(r, p.world, 'shadow', f.x, f.y - 11, { prio: 1, hw: 7, hh: 13, plain: fill(S('f3', 'shadowLive'), '{s}', secs(seconds)) });
 }
 
 /** an action bead on the future echo's path: a blade for attacks, » for dashes, a star for specials */
@@ -278,10 +333,10 @@ export function renderRewindMarks(r: Renderer, p: Player) {
     // the word follows the mark once the landing's '+N' has faded (they would sit on each other)
     const age = p.mods.culpritT - t;
     if (age > 0.6 && (termOn(p, 'culprit') || age < 3)) {
-      const lx = x, ly = y - 18;
-      if (Terms.showPlain('culprit')) termCallout(r, w, 'culprit', lx, ly + 4, { prio: 3, color: 'R4', above: true });
+      if (Terms.showPlain('culprit')) termCallout(r, w, 'culprit', e.x, (e.y - e.height - 12 + e.y) / 2, { prio: 3, color: 'R4', hw: e.r + 4, hh: (e.height + 16) / 2 });
       else {
         seenThisRoom(w, 'culprit');
+        const lx = x, ly = y - 14;
         r.worldUi((ctx, toUi) => { const q = toUi(lx, ly); Text.draw(ctx, S('f3', 'culprit'), q.x, q.y, { size: 'small', color: 'R4', align: 'center', outline: 'K0' }); });
       }
     }
@@ -305,29 +360,7 @@ export function renderRewindMarks(r: Renderer, p: Player) {
     const x = p.x, y = p.y - 30 - since * 18, str = `+${p.landGain}`, pop = since < 0.08 ? 2 : 1;
     r.worldUi((ctx, toUi) => { const q = toUi(x, y); G.digits.draw(ctx, str, q.x, q.y - 4.5 * pop * Text.k, { fill: 'C3', align: 'center', alpha: a, pop }); });
   }
-  // Perfect Rewind (GDD2 §3.9): a cyan-and-gold stamp that slams down over the hand
-  if (p.perfectStampT > 0) {
-    const k = 1 - p.perfectStampT / 1.1;
-    const a = k > 0.75 ? 1 - (k - 0.75) / 0.25 : 1;
-    const x = p.x, y = p.y - 48 - k * 6;
-    const big = k < 0.08;
-    r.worldUi((ctx, toUi) => {
-      const q = toUi(x, y);
-      const text = S('f3', 'perfect');
-      const size = big ? 'title' : 'body';
-      const tw = Math.ceil(Text.measure(text, size).w), lh = Math.ceil(Text.lineH(size));
-      const a0 = ctx.globalAlpha;
-      ctx.globalAlpha = a0 * a * 0.85;
-      rect(ctx, Math.round(q.x - tw / 2) - 6, Math.round(q.y) - 2, tw + 12, lh + 3, 'K0');
-      ctx.globalAlpha = a0 * a;
-      rect(ctx, Math.round(q.x - tw / 2) - 6, Math.round(q.y) - 2, tw + 12, 1, 'C3');
-      rect(ctx, Math.round(q.x - tw / 2) - 6, Math.round(q.y) + lh, tw + 12, 1, 'C3');
-      rect(ctx, Math.round(q.x - tw / 2) - 6, Math.round(q.y) - 1, 1, lh + 1, 'B5');
-      rect(ctx, Math.round(q.x + tw / 2) + 5, Math.round(q.y) - 1, 1, lh + 1, 'B5');
-      Text.draw(ctx, text, q.x, q.y, { size, align: 'center', color: Math.floor(k * 20) % 2 ? 'B6' : 'B5', outline: 'K0', alpha: a });
-      ctx.globalAlpha = a0;
-    });
-  }
+  // (Perfect Rewind's stamp is an FX.stamp with its plain line: Player.perfectFx)
   // Pull Back: "hold [Rewind] pull back II" over a teammate who just stopped, in this hand's glyphs
   const tgt = p.pullTarget();
   if (tgt) {
@@ -350,28 +383,40 @@ export function renderRewindMarks(r: Renderer, p: Player) {
   }
 }
 
-/** a red clock hand pointing down at the culprit, on a little dial */
+/** a dark tag with a red clock hand pointing down at the culprit (GDD2 §3.8; not a white first-aid card) */
 function culpritMark(u: CanvasRenderingContext2D, x: number, y: number, slotC: string | null) {
   u.fillStyle = col('K0');
   u.fillRect(x - 3, y - 4, 7, 7); u.fillRect(x - 1, y + 3, 3, 4);
-  u.fillStyle = col('K10');
+  u.fillStyle = col('R1');
   u.fillRect(x - 2, y - 3, 5, 5);
-  u.fillStyle = col('R3');
+  u.fillStyle = col('R4');
   u.fillRect(x, y - 3, 1, 3); u.fillRect(x, y + 1, 1, 5); u.fillRect(x - 1, y + 3, 3, 1);
-  u.fillStyle = col('R2');
+  u.fillStyle = col('R3');
   u.fillRect(x - 1, y - 1, 3, 1);
+  u.fillStyle = col('K10');
+  u.fillRect(x, y - 1, 1, 1);
   if (slotC) { u.fillStyle = col(slotC); u.fillRect(x + 3, y - 4, 2, 2); }
 }
 
 // ───────────────────────── HUD widgets ─────────────────────────
-interface HandHud { hpShown: number; gainShown: number; lockShown: number; lastHp: number; hitFlash: number; overflow: number; fullT: number; fullArmed: boolean; lastSand: number; sandFlash: number }
-const hud = new Map<Player, HandHud>();
+interface HandHud {
+  hpShown: number; gainShown: number; potShown: number; lockShown: number; ok: boolean; lastHp: number; hitFlash: number;
+  /** 0.6 s pulse that ties the stripes to the Shadow's +N the first times they appear */
+  promiseT: number; lastGain: number;
+  overflow: number; fullT: number; fullArmed: boolean; lastSand: number; sandFlash: number;
+  /** a Perfect Rewind's refund flying from the hand to the Sand number */
+  flyT: number; flyN: number; flyX: number; flyY: number;
+}
+// a WeakMap: a room's hands are forgotten with the room (a Map kept every old World alive; review F3 #1)
+const hud = new WeakMap<Player, HandHud>();
 function H(p: Player): HandHud {
   let a = hud.get(p);
-  if (!a) hud.set(p, (a = { hpShown: p.hp, gainShown: 0, lockShown: 0, lastHp: p.hp, hitFlash: 0, overflow: p.lo.sandOverflow, fullT: 0, fullArmed: true, lastSand: p.lo.sand, sandFlash: 0 }));
+  if (!a) hud.set(p, (a = { hpShown: p.hp, gainShown: 0, potShown: 0, lockShown: 0, ok: true, lastHp: p.hp, hitFlash: 0, promiseT: 0, lastGain: 0, overflow: p.lo.sandOverflow, fullT: 0, fullArmed: true, lastSand: p.lo.sand, sandFlash: 0, flyT: 0, flyN: 0, flyX: 0, flyY: 0 }));
   return a;
 }
+const hudOf = (p: Player): HandHud | undefined => hud.get(p);
 const lowHp = (p: Player) => p.hp / p.maxHp < 0.3 && Math.floor(G.time * 4) % 2 === 1;
+const scrubbing = (p: Player) => !!p.rw && p.rw.phase === 'hold' && p.rw.scrub;
 
 /** hp (order 10): the three-colour bar */
 Hud.register({
@@ -382,12 +427,16 @@ Hud.register({
     const pv = p.rewindPreview();
     a.hpShown = damp(a.hpShown, Math.max(0, p.hp), 25, dt);
     a.gainShown = damp(a.gainShown, pv.hpGain, 18, dt);
+    a.potShown = damp(a.potShown, scrubbing(p) ? Math.max(0, p.tapGain() - pv.hpGain) : 0, 18, dt);
     a.lockShown = damp(a.lockShown, pv.locked, 18, dt);
+    // the promise is only cyan when a rewind can actually happen (D2): otherwise a grey outline
+    a.ok = pv.ok || p.state === 'stopped' && !p.down.final && p.world.playerCount > 1;
     if (p.hp < a.lastHp - 0.5) a.hitFlash = 0.18;
     a.lastHp = p.hp;
     if (a.hitFlash > 0) a.hitFlash -= dt;
-    // forget hands that left
-    if (hud.size > 8) for (const k of hud.keys()) if (k.dead) hud.delete(k);
+    if (pv.hpGain > 0 && a.lastGain <= 0 && Terms.showPlain('hpPromise')) a.promiseT = 0.6;
+    a.lastGain = pv.hpGain;
+    if (a.promiseT > 0) a.promiseT -= dt;
   },
   draw(ctx, p, r) {
     if (!p) return;
@@ -402,12 +451,14 @@ Hud.register({
       const dw = G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, dx, r.y + 3.5 - 4.5 * Text.k, { fill: 'K10' });
       // first runs: name the violet part (GDD2 §3.1)
       if (a.lockShown >= 0.5 && Terms.showPlain('fixed')) Text.draw(ctx, S('f3', 'locked'), dx + dw + 4, r.y + 3.5, { size: 'small', color: 'V4', valign: 'middle' });
+      termPlates(ctx, p, a);
       return;
     }
     const dw = Math.ceil(G.digits.measure(`${p.maxHp}/${p.maxHp}`));
     const bw = Math.max(24, r.w - dw - 6);
     bar3(ctx, r.x, r.y, bw, r.h, p, a);
     G.digits.draw(ctx, `${Math.ceil(Math.max(0, p.hp))}/${p.maxHp}`, r.x + r.w, r.y + r.h / 2 - 4.5 * Text.k, { fill: lowHp(p) ? 'R4' : 'K10', align: 'right' });
+    coopCaptions(p, a);
   },
 });
 
@@ -418,18 +469,26 @@ function bar3(ctx: CanvasRenderingContext2D, bx: number, by: number, bw: number,
   rect(ctx, bx, by, bw, bh, 'K2');
   const fw = Math.round((bw * Math.max(0, a.hpShown)) / max);
   const gw = Math.max(0, Math.min(bw - fw, Math.round((bw * (a.hpShown + a.gainShown)) / max) - fw));
-  const lw = Math.max(0, Math.min(bw - fw - gw, Math.round((bw * (a.hpShown + a.gainShown + a.lockShown)) / max) - fw - gw));
-  // recoverable: cyan diagonal stripes drifting backwards (time running back)
-  if (gw > 0) {
-    rect(ctx, bx + fw, by, gw, bh, 'C1');
+  const pw = Math.max(0, Math.min(bw - fw - gw, Math.round((bw * (a.hpShown + a.gainShown + a.potShown)) / max) - fw - gw));
+  const lw = Math.max(0, Math.min(bw - fw - gw - pw, Math.round((bw * (a.hpShown + a.gainShown + a.potShown + a.lockShown)) / max) - fw - gw - pw));
+  if (gw > 0 && a.ok) {
+    // recoverable: cyan diagonal stripes drifting backwards (time running back); brighter while
+    // they pulse with the Shadow's +N the first times they appear
+    const bright = a.promiseT > 0 && Math.floor(a.promiseT * 10) % 2 === 0;
+    rect(ctx, bx + fw, by, gw, bh, bright ? 'C2' : 'C1');
     const ph = Math.floor(G.time * 10);
-    ctx.fillStyle = col('C3');
+    ctx.fillStyle = col(bright ? 'C4' : 'C3');
     for (let j = 0; j < bh; j++) for (let i = 0; i < gw; i++) if (((i + j + ph) & 3) < 2) ctx.fillRect(Math.round(bx + fw + i), Math.round(by + j), 1, 1);
     rect(ctx, bx + fw, by, gw, 1, 'C4');
+  } else if (gw > 0) {
+    // it would come back, but no rewind is possible right now: an empty grey frame, not a promise
+    outlineBox(ctx, bx + fw, by, gw, bh, 'K6', false);
   }
+  // what a longer scrub would still reach (the cursor has not got to that hit yet)
+  if (pw > 0) outlineBox(ctx, bx + fw + gw, by, pw, bh, 'C3', true);
   // locked: violet glass with a crack, and a padlock when there is room
   if (lw > 0) {
-    const x0 = bx + fw + gw;
+    const x0 = bx + fw + gw + pw;
     rect(ctx, x0, by, lw, bh, 'V1');
     rect(ctx, x0, by, lw, 1, 'V3');
     ctx.fillStyle = col('V3');
@@ -452,6 +511,20 @@ function bar3(ctx: CanvasRenderingContext2D, bx: number, by: number, bw: number,
   rect(ctx, bx - 2, by - 2, 2, bh + 4, 'B3');
   rect(ctx, bx + bw, by - 2, 2, bh + 4, 'B3');
 }
+/** a 1 px frame inside (x, y, w, h); dotted = every other pixel */
+function outlineBox(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c: string, dotted: boolean) {
+  ctx.fillStyle = col(c);
+  for (let i = 0; i < w; i++) {
+    if (dotted && (i & 1)) continue;
+    ctx.fillRect(Math.round(x + i), Math.round(y), 1, 1);
+    ctx.fillRect(Math.round(x + i), Math.round(y + h - 1), 1, 1);
+  }
+  for (let j = 0; j < h; j++) {
+    if (dotted && (j & 1)) continue;
+    ctx.fillRect(Math.round(x), Math.round(y + j), 1, 1);
+    ctx.fillRect(Math.round(x + w - 1), Math.round(y + j), 1, 1);
+  }
+}
 
 /** tape (order 20): the last seconds; solo 90×5 in row 1, co-op a 2 px strip under the HP bar */
 const TAPE_W = 90;
@@ -468,7 +541,6 @@ Hud.register({
       return;
     }
     drawTape(ctx, p, r.x, r.y + Math.round((r.h - 5) / 2), TAPE_W, 5, false);
-    tapeTerm(ctx, p, r.x, r.y);
   },
 });
 
@@ -488,9 +560,9 @@ function drawTape(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number
   if (!anchored && !burnt && len > 0) rect(ctx, right - len, y, len, 1, 'C2');
   // while scrubbing: the part after the cursor (it will become the echo) bright, the cursor a tall line
   const R = p.rw;
-  const scrubbing = !!R && R.phase === 'hold' && R.scrub;
-  const cut = scrubbing ? R!.cursor : -1;
-  if (scrubbing) {
+  const scrub = !!R && R.phase === 'hold' && R.scrub;
+  const cut = scrub ? R!.cursor : -1;
+  if (scrub) {
     const cx = Math.round(xAt(cut));
     rect(ctx, cx, y, right - cx, h, 'C3');
     rect(ctx, cx, y, right - cx, 1, 'C4');
@@ -506,6 +578,8 @@ function drawTape(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number
   // notches: red = a hit a rewind would undo, violet = fixed damage; white diamond = Culprit
   const culpritIds = new Set<number>();
   if (!compact) for (const e of p.world.enemies) if (e.culpritOf.has(p.slot)) culpritIds.add(e.id);
+  // a hit the scrub cursor has not reached blinks: that is the damage a longer scrub would undo
+  const blinkOn = Math.floor(G.time * 6) % 2 === 0;
   for (let i = 0; i < n; i++) {
     const f = rec.at(i);
     if (!f.hit && !f.fixedHit) continue;
@@ -519,38 +593,50 @@ function drawTape(ctx: CanvasRenderingContext2D, p: Player, x: number, y: number
     if (f.hit) {
       const hh = compact ? h : h + Math.min(3, 1 + Math.floor(f.hit / 6));
       rect(ctx, nx - 1, y + h - hh - 1, 3, hh + 1, 'K0');
-      rect(ctx, nx, y + h - hh, 1, hh, 'R4');
+      rect(ctx, nx, y + h - hh, 1, hh, scrub && i < cut && blinkOn ? 'K10' : 'R4');
       // a hit whose dealer is marked, or will be marked by the scrub in progress
-      const willMark = scrubbing && i >= cut && !!f.culprits;
+      const willMark = scrub && i >= cut && !!f.culprits;
       const marked = !!f.culprits && f.culprits.some((id) => culpritIds.has(id));
-      if (!compact && (willMark || marked)) diamond(ctx, nx, y - 5);
+      if (!compact && (willMark || marked)) diamond(ctx, nx, y - 6);
     }
   }
-  if (scrubbing) {
+  if (scrub) {
     const cx = Math.round(xAt(cut));
     rect(ctx, cx - 1, y - (compact ? 2 : 4), 3, h + (compact ? 4 : 7), 'K0');
     rect(ctx, cx, y - (compact ? 1 : 3), 1, h + (compact ? 2 : 5), 'W');
   }
-  if (anchored && !compact) anchorIcon(ctx, right + 3, y - 1);
+  // a time anchor: the anchor sits on the greyed strip itself (it used to hide under the hourglasses; D4)
+  if (anchored) {
+    if (!compact) anchorIcon(ctx, x + 3, y + Math.round(h / 2) - 2);
+    else anchorIcon(ctx, right + 3, y - 2);
+  }
   if (burnt && !compact) G.digits.draw(ctx, `${Math.ceil(rec.burnT)}s`, right - 2, y + h / 2 - 4.5 * Text.k, { fill: 'O3', align: 'right' });
+  else if (burnt && Math.floor(G.time * 3) % 2 === 0) rect(ctx, right - len, y, len, h, 'O2');
 }
 
-/** 3×3 white diamond (Culprit hit) */
+/** 5×5 white diamond on a dark edge (Culprit hit) */
 function diamond(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  rect(ctx, x - 2, y - 1, 5, 3, 'K0'); rect(ctx, x - 1, y - 2, 3, 5, 'K0');
-  rect(ctx, x, y - 1, 1, 3, 'W'); rect(ctx, x - 1, y, 3, 1, 'W');
+  for (let k = -3; k <= 3; k++) { const hw = 3 - Math.abs(k); rect(ctx, x - hw, y + k, hw * 2 + 1, 1, 'K0'); }
+  for (let k = -2; k <= 2; k++) { const hw = 2 - Math.abs(k); rect(ctx, x - hw, y + k, hw * 2 + 1, 1, 'K10'); }
 }
 
-/** sand (order 30): ⌛⌛ 142/200 — one hourglass per 100, the number; the cost while scrubbing */
+/** sand (order 30): ⌛⌛ 142/200 — one hourglass per 100, the number; what a tap / the scrub costs */
 const GLASS_W = 9;
-function sandText(p: Player, compact: boolean, room: number): { cur: string; rest: string } {
+/** a tap's price is shown while the Shadow promises something (clarity S1.5) */
+function tapPrice(p: Player): number {
+  if (p.rw || p.state !== 'alive') return 0;
+  const pv = p.rewindPreview();
+  return pv.ok && pv.hpGain > 0 ? pv.cost : 0;
+}
+function sandText(p: Player, compact: boolean, room: number): { cur: string; rest: string; kind: 'max' | 'scrub' | 'tap' } {
   const lo = p.lo;
   const cur = String(Math.floor(lo.sand));
-  const R = p.rw;
-  if (R && R.phase === 'hold' && R.scrub) return { cur, rest: ` -${p.rewindPreview().cost}` };
+  if (scrubbing(p)) return { cur, rest: ` -${p.rewindPreview().cost}`, kind: 'scrub' };
+  const price = tapPrice(p);
+  if (price > 0) return { cur, rest: ` -${price}`, kind: 'tap' };
   const rest = `/${lo.sandMax}`;
-  if (compact && Math.ceil(G.digits.measure(cur + rest)) > room) return { cur, rest: '' };
-  return { cur, rest };
+  if (compact && Math.ceil(G.digits.measure(cur + rest)) > room) return { cur, rest: '', kind: 'max' };
+  return { cur, rest, kind: 'max' };
 }
 Hud.register({
   id: 'sand', area: 'pod', order: 30,
@@ -559,7 +645,7 @@ Hud.register({
     const glasses = Math.max(1, Math.round(p.lo.sandMax / SAND_PER_GLASS));
     const shown = Math.min(glasses, compact ? 2 : 4);
     const t = sandText(p, compact, compact ? 46 : 999);
-    return shown * GLASS_W + 2 + Math.ceil(G.digits.measure(t.cur + t.rest));
+    return shown * GLASS_W + 2 + Math.ceil(G.digits.measure(t.cur + (t.kind === 'max' ? t.rest : `/${p.lo.sandMax}`)));
   },
   update(dt, p) {
     if (!p) return;
@@ -571,6 +657,14 @@ Hud.register({
     if (lo.sand > a.lastSand + 0.5 && Math.floor(lo.sand / SAND_PER_GLASS) > Math.floor(a.lastSand / SAND_PER_GLASS)) a.sandFlash = 0.5;
     a.lastSand = lo.sand;
     if (a.sandFlash > 0) a.sandFlash -= dt;
+    // a Perfect Rewind's refund flies from the hand to the number (clarity S2.10)
+    if (p.perfectRefund > 0) {
+      const [vx, vy] = p.viewPos();
+      // from beside the hand (the PERFECT stamp sits over it), after the stamp has landed
+      a.flyT = 0.95; a.flyN = p.perfectRefund; a.flyX = vx + 18; a.flyY = vy - 16;
+      p.perfectRefund = 0;
+    }
+    if (a.flyT > 0) a.flyT -= dt;
   },
   draw(ctx, p, r) {
     if (!p) return;
@@ -580,47 +674,61 @@ Hud.register({
     const per = lo.sandMax / glasses;
     const cy = r.y + Math.round(r.h / 2);
     const can = p.canRewind().ok || !!p.rw || p.state !== 'alive';
+    const t = sandText(p, r.compact, Math.max(0, r.w - shown * GLASS_W - 2));
+    // the glass a tap or the scrub would empty blinks down to what would be left
+    const cost = t.kind === 'max' ? 0 : t.kind === 'tap' ? tapPrice(p) : p.rewindPreview().cost;
+    const after = lo.sand - cost;
+    const blink = cost > 0 && Math.floor(G.time * 4) % 2 === 0;
     let x = r.x;
     for (let i = 0; i < shown; i++) {
       // with more glasses than shown, the last icon stands for the rest
       const lo0 = i * per, span = i < shown - 1 ? per : (glasses - i) * per;
-      const f = Math.max(0, Math.min(1, (lo.sand - lo0) / span));
+      const f = Math.max(0, Math.min(1, ((blink ? after : lo.sand) - lo0) / span));
       miniGlass(ctx, x, cy - 3, f, f >= 1 && a.sandFlash > 0, false);
       x += GLASS_W;
     }
-    const t = sandText(p, r.compact, Math.max(0, r.w - shown * GLASS_W - 2));
-    const scrub = t.rest.startsWith(' -');
     const fullFlash = a.fullT > 0 && Math.floor(a.fullT * 10) % 2 === 0;
     const cw = G.digits.draw(ctx, t.cur, x + 2, cy - 4.5 * Text.k, { fill: fullFlash ? 'K10' : can ? 'C3' : 'K7' });
-    if (t.rest) G.digits.draw(ctx, t.rest, x + 2 + cw, cy - 4.5 * Text.k, { fill: scrub ? (Math.floor(G.time * 8) % 2 ? 'C4' : 'K10') : 'K7' });
+    if (t.rest) G.digits.draw(ctx, t.rest, x + 2 + cw, cy - 4.5 * Text.k, { fill: t.kind === 'scrub' ? (Math.floor(G.time * 8) % 2 ? 'C4' : 'K10') : t.kind === 'tap' ? 'C2' : 'K7' });
     if (a.fullT > 0 && !r.compact) Text.draw(ctx, S('f3', 'full'), x + 4 + cw + Math.ceil(G.digits.measure(t.rest)), cy, { size: 'small', color: 'C4', valign: 'middle' });
-    if (!r.compact) sandTerm(ctx, p, r.x, r.y);
+    if (a.flyT > 0 && a.flyT < 0.7) {
+      const k = 1 - a.flyT / 0.7, e = k * k * (3 - 2 * k);
+      const fx = a.flyX + (x + 2 + cw / 2 - a.flyX) * e, fy = a.flyY + (cy - a.flyY) * e - Math.sin(k * Math.PI) * 18;
+      G.digits.draw(ctx, `+${a.flyN}`, fx, fy - 4.5 * Text.k, { fill: k > 0.85 && Math.floor(G.time * 20) % 2 ? 'K10' : 'C4', align: 'center', outline: 'K0' });
+    }
   },
 });
 
 /**
  * Term plates under the solo pod (first sight, GDD2 §9.8): one line each, stacked at the pod's left
  * edge, led by the element's own little icon so it is clear what each line names:
- *   [tape] 磁带 – 能倒回的最近几秒
- *   [⌛]   时砂 – 回溯/分岔要消耗的能量
+ *   [stripes] 青色斜纹 – 回溯能拿回的生命      (while the bar shows them, first runs)
+ *   [lock]    定格伤害 – 回溯也拿不回的伤害    (while there is a locked part, first runs)
+ *   [tape]    磁带 – 能倒回的最近几秒          (first seconds of the first rooms)
+ *   [⌛]      时砂 – 回溯/分岔要消耗的能量
  */
 const TERM_X = 22, TERM_Y = 52;
-function tapeTerm(ctx: CanvasRenderingContext2D, p: Player, _x: number, _rowY: number) {
-  if (!termOn(p, 'tape')) return;
-  seenThisRoom(p.world, 'tape');
-  termPlate(ctx, 'tape', TERM_X, TERM_Y, (x, y) => {
-    rect(ctx, x - 1, y - 1, 12, 5, 'K0'); rect(ctx, x, y, 10, 3, 'C1'); rect(ctx, x, y, 10, 1, 'C2'); rect(ctx, x + 6, y - 1, 1, 5, 'R3');
-  }, 3);
+function termPlates(ctx: CanvasRenderingContext2D, p: Player, a: HandHud) {
+  const w = p.world;
+  const rows: { id: string; icon: (x: number, y: number) => void; ih: number }[] = [];
+  if (a.gainShown >= 0.5 && a.ok && Terms.showPlain('hpPromise')) rows.push({ id: 'hpPromise', icon: (x, y) => stripeIcon(ctx, x, y), ih: 5 });
+  if (a.lockShown >= 0.5 && Terms.showPlain('fixed')) rows.push({ id: 'fixed', icon: (x, y) => lockIcon(ctx, x + 2, y + 1), ih: 7 });
+  if (termOn(p, 'tape')) rows.push({ id: 'tape', icon: (x, y) => { rect(ctx, x - 1, y - 1, 12, 5, 'K0'); rect(ctx, x, y, 10, 3, 'C1'); rect(ctx, x, y, 10, 1, 'C2'); rect(ctx, x + 6, y - 1, 1, 5, 'R3'); }, ih: 3 });
+  if (termOn(p, 'sand')) rows.push({ id: 'sand', icon: (x, y) => miniGlass(ctx, x + 1, y, 1, false, false), ih: 7 });
+  const lh = Math.ceil(Text.lineH('small'));
+  let y = TERM_Y;
+  for (const row of rows) {
+    seenThisRoom(w, row.id);
+    const pw = termPlate(ctx, row.id, TERM_X, y, row.icon, row.ih);
+    // nothing in the world is placed under a plate, and the caption rail steps right of them
+    Callouts.avoidUi(TERM_X - 3, y, pw + 6, lh + 2);
+    Caption.notePlates(TERM_X + pw + 3);
+    y += lh + 4;
+  }
 }
-function sandTerm(ctx: CanvasRenderingContext2D, p: Player, _x: number, _rowY: number) {
-  if (!termOn(p, 'sand')) return;
-  seenThisRoom(p.world, 'sand');
-  const y = TERM_Y + (termOn(p, 'tape') ? Math.ceil(Text.lineH('small')) + 4 : 0);
-  termPlate(ctx, 'sand', TERM_X, y, (x, yy) => miniGlass(ctx, x + 1, yy, 1, false, false), 7);
-}
-function termPlate(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, icon: (x: number, y: number) => void, iconH: number) {
+function termPlate(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, icon: (x: number, y: number) => void, iconH: number): number {
   const t = term(id);
-  if (!t) return;
+  if (!t) return 0;
   const lh = Math.ceil(Text.lineH('small'));
   const w = Math.ceil(Text.measure(t.name, 'small').w + 14 + Text.measure(t.plain, 'small').w) + 14;
   const a = ctx.globalAlpha;
@@ -629,10 +737,24 @@ function termPlate(ctx: CanvasRenderingContext2D, id: string, x: number, y: numb
   ctx.globalAlpha = a;
   icon(x, y + 1 + Math.round((lh - iconH) / 2));
   drawTermLabel(ctx, id, x + 14, y + 1, { size: 'small', color: 'C3', layout: 'inline', forcePlain: true });
+  return w;
+}
+
+/**
+ * Co-op: the compact pods have no room for plates, so the same first-sight lines go to the caption
+ * rail at the top centre, once a room each (clarity S2.9).
+ */
+function coopCaptions(p: Player, a: HandHud) {
+  const w = p.world;
+  const say = (id: string) => { if (onceThisRoom(w, 'cap:' + id)) { Terms.seen(id); Caption.say(null, { term: id, key: 'term:' + id, dur: 3.2 }); } };
+  if (termOn(p, 'tape')) say('tape');
+  if (termOn(p, 'sand')) say('sand');
+  if (a.gainShown >= 0.5 && a.ok && Terms.showPlain('hpPromise')) say('hpPromise');
+  if (a.lockShown >= 0.5 && Terms.showPlain('fixed')) say('fixed');
 }
 
 // ───────────────────────── chain (top centre) ─────────────────────────
-/** the top-centre "CHAIN ×N" slot (F3b's paradox chains call show) */
+/** the top-centre "CHAIN ×N" slot (paradox chains call show) */
 export const HudChain = {
   n: 0, t: 0, color: 'C3' as string,
   /** first chains: "连锁 – 爆炸引爆其他残响" under the counter (GDD2 §9.8) */

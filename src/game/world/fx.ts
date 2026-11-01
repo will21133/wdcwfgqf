@@ -7,7 +7,7 @@ import { col, rgba } from '../../art/palette';
 import { TAU } from '../../engine/math';
 import { Text } from '../ui/text';
 import { rect } from '../ui/draw';
-import type { L10n } from '../i18n';
+import { tr, type L10n } from '../i18n';
 import { Terms } from '../meta/registry';
 import { term as termDef } from '../strings';
 
@@ -15,7 +15,13 @@ interface Num { x: number; y: number; vy: number; vx: number; t: number; str: st
 interface Ring { x: number; y: number; r0: number; r1: number; t: number; dur: number; color: string; width: number; layer: 'glow' | 'unlit' }
 interface Banner { text: string; t: number; dur: number; color: string; x: number; y: number }
 /** a slammed-down word over the action (TICK!, COUNTER, INTERRUPT, SYNC …; GDD2 §4.1, §4.5) */
-interface Stamp { text: string | L10n; t: number; dur: number; color: string; rule: string; x: number; y: number; small: boolean; plain: L10n | null }
+interface Stamp { text: string | L10n; t: number; dur: number; color: string; rule: string; x: number; y: number; small: boolean; plain: L10n | null;
+  /** merge key: stamps of one group landing together become one "WORD ×n" */
+  group: string | null; n: number;
+  /** UI px it was pushed up so it never covers an earlier stamp (only grows, so nothing jumps) */
+  lift: number }
+
+const NONE: { x0: number; y0: number; x1: number; y1: number }[] = [];
 
 export class FX {
   nums: Num[] = [];
@@ -89,6 +95,9 @@ export class FX {
       const q = toUi(b.x, b.y - yo - k * 8);
       Text.draw(ctx, b.text, q.x, q.y, { color: b.color, align: 'center', outline: 'K0', alpha: a });
     }
+    // stamps are laid out oldest first: a later one that would cover an earlier one (COUNTER! on
+    // TICK!, SYNC on a stamp next to it) is lifted above it, and stays lifted (acceptance D8)
+    this.placed.length = 0;
     for (const st of this.stamps) {
       // slams in at double size for a few frames, settles, rises a little and fades
       const k = st.t / st.dur;
@@ -96,27 +105,62 @@ export class FX {
       const a = k > 0.7 ? 1 - (k - 0.7) / 0.3 : 1;
       if (a <= 0) continue;
       const size = slam ? (st.small ? 'body' : 'title') : st.small ? 'small' : 'body';
+      const text = st.n > 1 ? `${tr(st.text)} ×${st.n}` : st.text;
       const q = toUi(st.x, st.y - k * 6);
-      const tw = Math.ceil(Text.measure(st.text, size).w), lh = Math.ceil(Text.lineH(size));
-      const x0 = Math.round(q.x - tw / 2) - 5, y0 = Math.round(q.y - lh / 2) - 1;
+      const tw = Math.ceil(Text.measure(text, size).w), lh = Math.ceil(Text.lineH(size));
+      const plainH = st.plain && !slam ? Math.ceil(Text.lineH('small')) + 2 : 0;
+      const pw = st.plain && !slam ? Math.ceil(Text.measure(st.plain, 'small').w) + 6 : 0;
+      const bw = Math.max(tw + 10, pw), bh = lh + 3 + plainH;
+      let y0 = Math.round(q.y - lh / 2) - 1 - st.lift;
+      const x0 = Math.round(q.x - bw / 2);
+      for (let guard = 0; guard < 6; guard++) {
+        const hit = this.placed.find((b) => x0 < b.x1 && x0 + bw > b.x0 && y0 < b.y1 && y0 + bh > b.y0);
+        if (!hit) break;
+        const up = y0 + bh - hit.y0 + 2;
+        st.lift += up; y0 -= up;
+      }
+      this.placed.push({ x0, y0, x1: x0 + bw, y1: y0 + bh });
+      const cy = y0 + 1 + lh / 2;
+      const bx0 = Math.round(q.x - tw / 2) - 5;
       const a0 = ctx.globalAlpha;
-      ctx.globalAlpha = a0 * a * 0.85;
-      rect(ctx, x0, y0, tw + 10, lh + 3, 'K0');
+      ctx.globalAlpha = a0 * a * 0.95;
+      rect(ctx, bx0, y0, tw + 10, lh + 3, 'K0');
       ctx.globalAlpha = a0 * a;
-      rect(ctx, x0, y0, tw + 10, 1, st.rule);
-      rect(ctx, x0, y0 + lh + 2, tw + 10, 1, st.rule);
-      Text.draw(ctx, st.text, q.x, q.y + 1, { size, align: 'center', valign: 'middle', color: st.color, alpha: a });
+      rect(ctx, bx0, y0, tw + 10, 1, st.rule);
+      rect(ctx, bx0, y0 + lh + 2, tw + 10, 1, st.rule);
+      Text.draw(ctx, text, q.x, cy + 1, { size, align: 'center', valign: 'middle', color: st.color, alpha: a });
       // first sight of the word (GDD2 §9.8): its plain line under the stamp
-      if (st.plain && !slam) Text.draw(ctx, st.plain, q.x, y0 + lh + 4, { size: 'small', align: 'center', color: 'K9', alpha: a, plate: true });
+      if (st.plain && !slam) {
+        ctx.globalAlpha = a0 * a * 0.95;
+        rect(ctx, Math.round(q.x - pw / 2), y0 + lh + 3, pw, plainH, 'K0');
+        ctx.globalAlpha = a0;
+        Text.draw(ctx, st.plain, q.x, y0 + lh + 4, { size: 'small', align: 'center', color: 'K9', alpha: a });
+      }
       ctx.globalAlpha = a0;
     }
   };
+  private placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  /** the UI-px boxes the stamps took this frame (term callouts keep off them) */
+  stampBoxes(): readonly { x0: number; y0: number; x1: number; y1: number }[] { return this.stamps.length ? this.placed : NONE; }
+
+  /**
+   * Quiet a group's stamps (a chain is running: "CHAIN ×N" up top speaks for it). A stamp still
+   * teaching its word (plain line under it) is kept.
+   */
+  quietGroup(group: string) {
+    for (const st of this.stamps) if (st.group === group && !st.plain) st.dur = Math.min(st.dur, st.t + 0.25);
+  }
 
   /**
    * A stamp: a short word slammed down over the action (UI layer, crisp). One at a time per spot —
    * a new stamp close to a live one replaces it, so a flurry of syncs never piles up.
    */
-  stamp(x: number, y: number, text: string | L10n, color = 'K10', dur = 0.9, o: { rule?: string; small?: boolean; term?: string } = {}) {
+  stamp(x: number, y: number, text: string | L10n, color = 'K10', dur = 0.9, o: { rule?: string; small?: boolean; term?: string; group?: string } = {}) {
+    // a group's stamps landing within 0.4 s of each other merge: "PARADOX! ×3", not three stamps
+    if (o.group) {
+      const g = this.stamps.find((s0) => s0.group === o.group && s0.t < 0.4 && Math.abs(s0.x - x) < 160 && Math.abs(s0.y - y) < 90);
+      if (g) { g.n++; g.t = Math.min(g.t, 0.07); g.dur = Math.max(g.dur, dur); return; }
+    }
     // the same word lands on itself → replaced; a different word (TICK! then COUNTER!) stacks above
     const key = typeof text === 'string' ? text : text.en;
     for (let k = 0; k < 4; k++) {
@@ -142,7 +186,7 @@ export class FX {
       Terms.seen(o.term);
       if (plain) dur = Math.max(dur, 1.8);
     }
-    this.stamps.push({ text, x, y, t: 0, dur, color, rule: o.rule ?? color, small: !!o.small, plain });
+    this.stamps.push({ text, x, y, t: 0, dur, color, rule: o.rule ?? color, small: !!o.small, plain, group: o.group ?? null, n: 1, lift: 0 });
   }
 
   /** a damage number; `outline` = the owner's colour round an echo's number (co-op) */

@@ -2,6 +2,8 @@
 // Phase 1 "Grief": sweeping clock hands, frozen tears.
 // Phase 2 "Stop": she STOPS TIME — you are frozen, only your echoes still move. Prepare echoes before it hits.
 // Phase 3 "Let Go": all of her damage becomes fixed (it cannot be undone).
+import { S } from '../../strings';
+import '../../strings/f3';
 import { Boss } from '../boss';
 import type { Renderer } from '../../../engine/gfx/renderer';
 import { PixelBuf } from '../../../engine/gfx/canvas';
@@ -262,7 +264,7 @@ export class Stillness extends Boss {
         if (this.stateT < dt * 1.5) {
           sfx('rewind');
           this.world.fx.banner(this.x, this.y - 100, tr(L('时间……要停了', 'Time... is about to stop')), 'K10', 1.3);
-          if (!this.told) { this.told = true; this.world.fx.banner(t.x, t.y - 40, tr(L('只有{c:残响}能在时停中行动——先回溯！', 'Only {c:echoes} move in stopped time — rewind now!')), 'C3', 2.4); }
+          if (!this.told) { this.told = true; this.world.fx.banner(t.x, t.y - 40, tr(S('f3', 'stillHint')), 'C3', 2.4); }
         }
         if (this.stateT >= 1.3 && this.stopT < 0) {
           this.stopT = 0;

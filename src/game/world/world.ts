@@ -16,6 +16,7 @@ import type { Run } from '../run';
 import type { Player } from '../entities/player';
 import { ownerPlayer } from '../players';
 import { TimeBubbles } from '../systems/timeBubble';
+import { Callouts } from '../ui/callouts';
 
 /** a sim-time timer (world.after / world.every) */
 interface Timer { t: number; fn: () => void; owner: unknown; every: number; dead: boolean }
@@ -287,7 +288,12 @@ export class World {
 
   /** the dt an entity gets this tick: its own local time (time bubbles), real time while it rewinds */
   private dtFor(e: Entity, dt: number, sdt: number): number {
-    if (e instanceof Actor && e.kind === 'player') return (e as unknown as Player).rewinding ? dt : sdt;
+    if (e instanceof Actor && e.kind === 'player') {
+      if ((e as unknown as Player).rewinding) return dt;
+      // a solo Tick-Dodge slows the world, not the hand that dodged (it has a Counter to land)
+      if (this.bubbles.globalOwner === (e as unknown as Player) && !this.frozen) return dt * this.timeScale;
+      return sdt;
+    }
     if (!this.bubbles.list.length) return sdt;
     return sdt * this.bubbles.localAt(e.x, e.y);
   }
@@ -401,14 +407,17 @@ export class World {
     }
     // time bubbles: a rewinding hand slows the room (solo) or a circle around it (co-op)
     this.bubbles.collect(this.players, this.players.length <= 1, dt);
-    const sdt = dt * this.timeScale * this.bubbles.global;
+    // stopped time (the Stillness) is already as slow as it gets: a rewind held into it must not
+    // also stretch the stop itself (3.2 s became 21 s; acceptance D1)
+    const sdt = dt * this.timeScale * (this.frozen ? 1 : this.bubbles.global);
     this.time += sdt;
     this.tickTimers(sdt);
     this.flowT -= dt;
     if (this.flowT <= 0) { this.flowT = 0.25; this.updateFlow(); }
     for (const e of this.entities) {
       if (e.dead) continue;
-      if (this.frozen && !(e as any).ignoreFreeze) continue;
+      // a hand already rewinding is out of time: it finishes its rewind inside a time stop (D1)
+      if (this.frozen && !(e as any).ignoreFreeze && !(e instanceof Actor && e.kind === 'player' && (e as unknown as Player).rewinding)) continue;
       const edt = this.dtFor(e, dt, sdt);
       e.age += edt;
       if (e instanceof Actor) {
@@ -569,15 +578,23 @@ export class World {
   private rippleLast = { x: VIEW_W / 2, y: 180, r: 0 };
   private rewindPost(r: Renderer, v: { x: number; y: number }) {
     const pp = r.params;
-    let best: Player | null = null, fx = 0;
-    for (const p of this.players) if (p.rewindFx > fx) { fx = p.rewindFx; best = p; }
+    // the two hands rewinding hardest each get their own circle (co-op: a second scrubber is
+    // rippled too instead of greyed out with the rest of the room; review F3 #11)
+    let best: Player | null = null, second: Player | null = null, fx = 0, fx2 = 0;
+    for (const p of this.players) {
+      if (p.rewindFx > fx) { second = best; fx2 = fx; fx = p.rewindFx; best = p; }
+      else if (p.rewindFx > fx2) { fx2 = p.rewindFx; second = p; }
+    }
     const L = this.rippleLast;
-    if (best) { L.x = best.x - v.x; L.y = best.y - 10 - v.y; L.r = best.rippleR(this.players.length <= 1); }
+    const solo = this.players.length <= 1;
+    if (best) { L.x = best.x - v.x; L.y = best.y - 10 - v.y; L.r = best.rippleR(solo); }
     let desat = 0;
     for (const p of this.players) desat = Math.max(desat, p.scrubDesat);
     pp.rewindX = L.x; pp.rewindY = L.y;
     pp.rewindR = Math.max(1, L.r);
     pp.rewindDesat = desat;
+    if (second && fx2 > 0.05) { pp.rewindX2 = second.x - v.x; pp.rewindY2 = second.y - 10 - v.y; pp.rewindR2 = second.rippleR(solo); }
+    else pp.rewindR2 = 0;
   }
 
   enemiesNear(x: number, y: number, r: number): Actor[] {
@@ -626,5 +643,7 @@ export class World {
     this.particles.render(r);
     for (const e of this.entities) e.renderUnlit?.(r);
     this.fx.render(r);
+    // term callouts last, over floor signs, numbers and stamps, placed around what they name (GDD2 §9.8)
+    Callouts.flush(r, this);
   }
 }
