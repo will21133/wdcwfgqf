@@ -439,6 +439,26 @@ Bullet.reversible: boolean;         // 白芯；P1 实现翻转
   - 调试路由 `?drill=perfect`（本包注册）：脚本在敌人攻击前 0.1s 按回溯 → `perfectRewind` 事件触发，时砂未减少。
   - `?drill=tickdodge`：齿轮仔冲锋时冲刺 → 出现"TICK!"，下一击暴击。
 
+### F4 · 回溯教学与新手引导 (Rewind Teaching & Onboarding)
+
+- **阶段**：foundation · **顺序** 4 · **依赖**：F1、F2、F3（从 tag `v2-F3` 开始，F3 修复轮合并前不开工；完成后打 `v2-F4`，生产包 worktree 改从 `v2-F4` 派生）
+- **设计**：`docs/ONBOARD2.md`（唯一权威；取代 GDD2 §9.1 / §9.5 / §9.6 中冲突的部分，GDD2 改动见其 §10.2）。回应用户反馈"玩不明白，需要多点教程，整个回溯机制不知道怎么用"。
+- **方式**：两名实现者并行（`../wdc-F4a` 分支 `v2/F4a-core`、`../wdc-F4b` 分支 `v2/F4b-coach`，均从 `v2-F3` 派生），文件归属互不相交；F4a 第 1 天把全部默认放行的钩子推到 `v2/F4-iface`，F4b 第 2 天 rebase。合并顺序 F4a → F4b → 修复轮（两人，3 天，含盲测循环）。
+- **拥有（本阶段，F4a）**：`src/game/entities/player.ts`（闸门钩子、`renderTint`、拒绝事件） `src/game/ui/rewindHud.ts`（`RewindHudHooks`、元凶显示闸门、旧影标注计时、导出 `drawShadowOutline`） `src/game/ui/callouts.ts`（`Caption` 转给 Stage、`Callouts.mute/obstacles`） `src/game/ui/hud.ts`（`Gates.hud`） `src/engine/input.ts` + `src/game/ui/widgets.ts`（纯键盘图标 `lastCodeFor`） `src/game/scenes/game.ts`（楼层卡 1.8 s、死亡卡文字让位） `src/game/world/roomgen.ts`（`prologue` / `rehearsal` 平地房） `src/game/settings.ts`（`onboarding coach coachSlowmo deathReplay`） `src/game/flow.ts`（首启卡 → 序章；首间一律 combat；`Flow.hub('rehearsal')`） `src/game/rooms/tutorial.ts`（退役） `src/game/boot.ts`（import 与音效注册） `src/game/strings/f2.ts`（最后一秒文案）
+- **拥有（本阶段，F4b）**：`src/game/ui/pause.ts`（"回溯怎么用""我会玩了"、序章三项、设置五行） `src/game/entities/echo.ts`（导出 `drawEchoFrame`） `src/game/qa/bot.ts`（`BotOpts.noRewind/noFork`） `tools/shot.cjs`（pad / axes / waitFor 步骤）
+- **新建（F4a）**：`src/game/onboard/{index,gates,stage,rich,modelStrip,beat,demo,lesson,host,props,calm,firstLaunch,debug}.ts` `src/game/onboard/lessons/{core,inrun}.ts` `src/game/scenes/prologue.ts` `src/game/strings/onboard.ts` `src/audio/sfx_onboard.ts` `src/art/sprites/onboard.ts` `tools/stageaudit.cjs` `tools/scripts/onboard/{prologue_ref,prologue_ref_en,prologue_pad,prologue_fail,prologue_kbonly,prologue_skip,run1_lessons,gates,stage_dock}.json`
+- **新建（F4b）**：`src/game/onboard/coach/{coach,detectors,mastery,deathTape,deathCard,debug}.ts` `src/game/onboard/{ladder,loopPlayer,loops}.ts` `src/game/onboard/lessons/{advanced,hall}.ts` `src/game/ui/rewindGuide.ts` `src/game/ui/rehearsalBoard.ts` `src/game/rooms/rehearsal.ts` `src/art/sprites/hall.ts` `src/game/strings/coach.ts` `tools/scripts/onboard/{coach_hit,coach_fade,coach_miss,coach_echo,coach_coop2,death_cases,guide,hall,hall_coop,ladder,seat_novice,blind_template}.json`
+- **共享触点**：`Gates`（`tapOnly forkAllow shows hud`，默认放行，F4 后冻结）；`Stage.say/clear/busy/obstacles/audit`（全屏唯一的教学文字调度者，`Caption.say` 转给它）；`Onboard`（`mode isNovice taught mark skipAll reset covers coach deathCard`）、`Tut.register` → `window.__tut`；`Lessons` / `LessonRunner` / `DemoDirector` / `Calm`；`Panels.register('rewindGuide'|'rehearsal')`；`RoomTypes.register('prologue'|'rehearsal')`；HUD 组件 `caption`（同 id 替换 F3 的）、`deathCard`；`custom` 事件 `rewindRefused` `forkRefused` `onboard.success` `demoEnd`；存档结构不改（`Teach` / `Flags` / `Stats`）。调试路由见 ONBOARD2 §11.6。
+- **任务书**：
+  - **F4a 核心**：一句话心智模型、用语规范与新术语 `rewind` `scrub` `hall`（§1）；按键令牌 `{@action}`、`bigPrompt`、纯键盘列图标（§1.7）；首启卡与序章《最后一分钟》6 课（走 / 打+冲 / 撤销 / 残响 / 悖论 / 小考，每课先看再做，冻结引导，帮助等级，成绩单与尾声，§2）；演示木偶 = 自动驾驶玩家本人 + 课程运行器 + 两种舞台宿主（§3）；Stage 字幕轨与标注避让、注意力预算、聚光、审计（§4）；擦带/分岔闸门、HUD 显隐、安静时刻调度、第一局分岔课与擦带课（§5.1–§5.6）；楼层卡、目标行最小版（§10）。
+  - **F4b**：四级自适应即时教练（D1–D12、慢动作红线、多人座位，§6）；掌握提示与局末复盘（§6.10）；暂停页「回溯怎么用」6 个真实精灵循环（§7）；排练厅（拱门不改 `hub.ts`、布局、课程板 ✓/★、全部课程与 GDD2 §9.5 的 8 个训练、多人课，§8）；死亡卡与磁带回放（§9）；阶梯后段与进阶/事件课、认出就不教（§5.7–§5.8）；暂停/设置菜单项。
+  - 交接：生产阶段 `src/game/onboard/**` 与上列新建文件归 P7（`gates.ts` 冻结）；F4 改过的他人文件归属不变（ONBOARD2 §11.8）。
+- **验收**（全文见 ONBOARD2 §12）：
+  - typecheck；`build:single` ≤ 1.6 MB；`node tools/qarun.cjs "seed=21&bot=1&speed=8&god=1" 600 tools/out/F4/solo` 通关 0 错误；`node tools/qarun.cjs "seed=3&floor=0&god=1&bot=1&players=4&speed=8" 180 tools/out/F4/coop4` 0 错误；`node tools/padtest4.cjs "scene=hub"`；`node tools/jointest.cjs`。
+  - `node tools/qarun.cjs "onboard=fresh&scene=prologue&autoplay=onboard&speed=4" 300 tools/out/F4/prologue_auto` 结束于工坊且 `prologueDone`；`"onboard=prologueDone&autoplay=onboard&seed=2&speed=4" 360` 后 `taught ⊇ {fork, scrub}`。
+  - `tools/scripts/onboard/*.json` 21 个脚本全部通过其 eval；`node tools/stageaudit.cjs` 所有脚本教学文字与硬障碍相交帧 = 0；`[text] CJK in tiny` = 0；`demo-desync` = 0；序章参考跑模拟时长 ≤ 360 s。
+  - **盲测**：每轮新代理、全新档案、只凭自己用 `tools/shot.cjs` 边玩边截的图走完首启 → 序章 → 第一局第一层，答 10 题：Q1–Q8（回溯/旧影/磁带/时砂/残响/悖论/分岔/擦带）全对且留出题 ≥ 1；中文、英文、手柄图标三轮都通过。
+
 ### P1 · 战斗深度 (Combat Depth)
 
 - **阶段**：production · **依赖**：F1、F2、F3
@@ -535,18 +555,17 @@ Bullet.reversible: boolean;         // 白芯；P1 实现翻转
 
 ### P7 · 引导、秘密与故事内容 (Onboarding, Secrets & Story)
 
-- **阶段**：production · **依赖**：F1、F2、F3
-- **拥有**：`src/game/rooms/tutorial.ts` `src/game/progression/events.ts` `src/game/ui/eventOverlay.ts` `src/game/ui/dialogue.ts` `src/game/ui/controls.ts` `src/game/ui/menu.ts` `src/game/settings.ts` `src/game/scenes/title.ts` `src/game/scenes/cutscene.ts` `src/audio/songs.ts` `src/audio/instruments.ts` `src/audio/score/*` `src/audio/sfx_story.ts`
-- **新建**：`src/game/scenes/prologue.ts` `src/game/rooms/rehearsal.ts` `src/game/progression/hintsData.ts` `src/game/progression/secrets.ts` `src/game/progression/achievements.ts` `src/game/ui/almanac.ts` `src/art/sprites/events2.ts` `src/game/strings/story.ts` `tools/scripts/prologue.json`
-- **共享触点**：`Hints.define`（GDD2 §9.2 全部 id）与基于 bus / `GameHooks` 的触发；`defineAchievement`（47 个，id 供其他包调用）；`Secrets/Chimes/Flags/Stats`；`devices.onSequence`（科乐美、TICKTOCK 由 P6、1159）；`RealClock`；`Panels.register('almanac'|'controls'|'rehearsal')`；`RoomTypes.register('prologue'|'rehearsal')`；`pickEvent(run)` 导出（替换 F2 默认实现）；`Cutscenes.register('belfry'|'true'|'forever'|'credits'|'intro'|'ending')`；标题通过 `Panels.open('join')` 进入加入面板。
-- **任务书**：GDD2 §9（序章 8 步门控、便条 30 条、钟典 30+ 条带小循环演示、HUD 标注、楼层卡技巧轮换、排练厅 + 8 个训练、多人引导卡）；§8.4 新事件 17 个与 `EventDef/EventCtx` 扩展（权重、条件、每存档一次、多段、伏击、标记、解锁、标门）；§8.6 结局（真结局、永远差一秒、字幕倒放）与过场；§12.3 标题 2.0（钟面菜单、11 铃位、加入表针、`v2.0 · 十二响`）；成就表 47 个；彩蛋 #1、#6、#12、#13、#15、#22、#25、#32、#45、#46、#48 与"假人"两个可选彩蛋；钟响 #5、#11 的注册与表现；设置/菜单/操作页（每设备重绑、回溯模式、文字大小、HUD 标注、闪光限制）；配乐：钟楼/真结局变奏、威斯敏斯特四音动机。
+- **阶段**：production · **依赖**：F1、F2、F3、F4
+- **拥有**：`src/game/rooms/tutorial.ts` `src/game/progression/events.ts` `src/game/ui/eventOverlay.ts` `src/game/ui/dialogue.ts` `src/game/ui/controls.ts` `src/game/ui/menu.ts` `src/game/settings.ts` `src/game/scenes/title.ts` `src/game/scenes/cutscene.ts` `src/audio/songs.ts` `src/audio/instruments.ts` `src/audio/score/*` `src/audio/sfx_story.ts`；以及 F4 新建后移交的 `src/game/onboard/**`（`gates.ts` 冻结）`src/game/scenes/prologue.ts` `src/game/rooms/rehearsal.ts` `src/game/ui/{rewindGuide,rehearsalBoard}.ts` `src/game/strings/{onboard,coach}.ts` `src/art/sprites/{onboard,hall}.ts` `src/audio/sfx_onboard.ts` `tools/scripts/onboard/*`
+- **新建**：`src/game/progression/hintsData.ts` `src/game/progression/secrets.ts` `src/game/progression/achievements.ts` `src/game/ui/almanac.ts` `src/art/sprites/events2.ts` `src/game/strings/story.ts`
+- **共享触点**：`Hints.define`（GDD2 §9.2 全部 id）与基于 bus / `GameHooks` 的触发；`defineAchievement`（47 个，id 供其他包调用）；`Secrets/Chimes/Flags/Stats`；`devices.onSequence`（科乐美、TICKTOCK 由 P6、1159）；`RealClock`；`Panels.register('almanac'|'controls')`（`'rehearsal'` `'rewindGuide'` 与 `RoomTypes 'prologue'|'rehearsal'` 已由 F4 注册）；便条用 `Onboard.covers(id)` 去重（ONBOARD2 §5.11）；`pickEvent(run)` 导出（替换 F2 默认实现）；`Cutscenes.register('belfry'|'true'|'forever'|'credits'|'intro'|'ending')`；标题通过 `Panels.open('join')` 进入加入面板。
+- **任务书**：GDD2 §9 中留给 P7 的部分：便条 30 条（按 ONBOARD2 §5.11 去重）、钟典 30+ 条（小循环复用 F4 的 `LoopPlayer`）、HUD 标注、楼层卡技巧轮换（第 1 条为心智模型句）、多人"两根针"卡、排练厅装备已发现物品——序章、排练厅与训练、暂停页「回溯怎么用」、即时教练、死亡卡已移到 **F4**（见 `docs/ONBOARD2.md` §11.8）；§8.4 新事件 17 个与 `EventDef/EventCtx` 扩展（权重、条件、每存档一次、多段、伏击、标记、解锁、标门）；§8.6 结局（真结局、永远差一秒、字幕倒放）与过场；§12.3 标题 2.0（钟面菜单、11 铃位、加入表针、`v2.0 · 十二响`）；成就表 47 个；彩蛋 #1、#6、#12、#13、#15、#22、#25、#32、#45、#46、#48 与"假人"两个可选彩蛋；钟响 #5、#11 的注册与表现；设置/菜单/操作页（每设备重绑、回溯模式、文字大小、HUD 标注、闪光限制）；配乐：钟楼/真结局变奏、威斯敏斯特四音动机。
 - **验收**：
   - typecheck；bot 回归 0 错误。
-  - `?scene=prologue`：脚本 `tools/scripts/prologue.json`（本包新建）完整走完 8 步（截图每步）；未完成当前步时门不开（eval）。
+  - 序章、排练厅、教练与死亡卡的验收在 F4（ONBOARD2 §12）；P7 合并后重跑 `tools/scripts/onboard/prologue_ref.json` 与 `hall.json`，结果不回退。
   - `?scene=title&fakeTime=2026-10-31T23:59:58`：秒针走到 12、敲钟、钟响 #11 记录；`?scene=title` 标题截图为钟面菜单 + 11 铃位。
   - `?seed=3&floor=0&god=1&hint=fixed_hit`：便条卡 12px 显示并暂停（单人）；同一档案第二次不再出现。
   - 怀表第 2 页钟典可滚动，每条有数字与演示。
-  - `?scene=rehearsal`：8 个训练均可完成并发放碎片。
   - `?room=event&event=<id>&god=1` 新增 17 个事件各一张截图。
   - `?scene=credits&drill=rewind`：字幕倒放出现隐藏留言。
   - 万圣节：`?scene=hub&fakeTime=2026-10-31T20:00:00` 截图中有南瓜灯与伊妮丝台词。
